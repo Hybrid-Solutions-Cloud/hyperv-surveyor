@@ -1,4 +1,4 @@
-# HAAS Hyper-V Surveyor — Sizing Engine Specification
+# Hyper-V Surveyor — Sizing Engine Specification
 
 **Version 0.1 · 17 August 2026 · For review before build starts**
 
@@ -170,7 +170,7 @@ boot it. Microsoft publishes no general N+1 guidance for Failover Clustering, bu
 `Set-SCVMHostCluster -ClusterReserve` implements exactly this arithmetic and its documentation
 confirms the semantics.
 
-**N+2 should be the default for HAAS [TOOL]**, not N+1 — because patching a node and losing a node
+**N+2 should be the service-provider default [TOOL]**, not N+1 — because patching a node and losing a node
 must be survivable concurrently, and Microsoft's own Azure Local guidance notes that cluster
 resiliency is temporarily reduced while nodes are drained and restarted one by one. The tool defaults
 to N+2 with a visible explanation and allows N+1.
@@ -497,7 +497,7 @@ Every Forward result renders as a table across all viable architectures, so the 
 | Hybrid | 8 | Compute (RAM) | both | 28 | $ | 25.0% |
 
 Licensing cost links to the model already built in
-`HAAS_HyperV_Management_Plane_Comparison.xlsx`, so the two tools agree on price.
+`HyperV_Management_Plane_Comparison.xlsx`, so the two tools agree on price.
 
 ---
 
@@ -555,10 +555,10 @@ a test case with the Microsoft citation in the test name.
 | 3 | Pure sector size (512e vs 4K) and NTFS vs ReFS recommendation | Hybrid mode forces NTFS on SAN CSVs anyway, but pure-SAN designs have a choice | Same portal |
 | 4 | Pure **usable** capacity per model | Datasheets publish raw and effective, not usable. We need usable as the sizing input | Pure SE sizing tool output, or a quote |
 | 5 | Real RVTools 4.8.x export | `vDisk`, `vCluster`, `vDatastore` headers unverified | One export from any customer engagement |
-| 6 | Per-workload DRR evidence | Pure publishes only a blended 5:1 | Pure assessment data from real HAAS arrays — you have the best possible source in your own fleet |
+| 6 | Per-workload DRR evidence | Pure publishes only a blended 5:1 | Pure assessment data from real production arrays — you have the best possible source in your own fleet |
 | 7 | Confirm the Surveyor's stack and styling | Consistency with the existing tool | Repo access |
 
 Items 1–4 and 6 are all Pure-side and mostly answerable from your own environment and your Pure SE.
-Item 6 in particular: HAAS runs Pure in production today, so you can derive real DRR by workload type
+Item 6 in particular: if you run Pure in production today, you can derive real DRR by workload type
 from your own arrays rather than using a vendor average. That would make this tool measurably better
 than anything Broadcom or Microsoft ships.

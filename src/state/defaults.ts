@@ -3,7 +3,7 @@ import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
 
 export const DEFAULT_CONFIG: ClusterConfig = {
   architecture: 'san',
-  // N+2 is the HAAS default, not N+1: patching a node and losing a node must be survivable
+  // N+2 is the service-provider default, not N+1: patching a node and losing a node must be survivable
   // concurrently. Microsoft's Azure Local guidance notes resiliency is temporarily reduced
   // while nodes are drained and restarted one by one.
   spareNodes: 2,

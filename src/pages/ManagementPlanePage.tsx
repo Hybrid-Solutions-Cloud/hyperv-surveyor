@@ -182,8 +182,9 @@ function RecommendationPanel() {
         <section className="panel">
           <h2>Important framing</h2>
           <p className="small">
-            Arc is additive to SCVMM, and WAC Administration Mode is commonly complementary to it.
-            This advisor deliberately recommends a stack rather than forcing one winner.
+            Prefer WAC vMode where its readiness and capability coverage fit. Keep aMode as the
+            production fallback for current gaps, and treat Arc as an additive layer over SCVMM.
+            This advisor recommends a stack rather than forcing one winner.
           </p>
         </section>
       </aside>

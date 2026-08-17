@@ -29,7 +29,7 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
     <div className="stack">
       <div className="panel">
         <h2>Resiliency</h2>
-        <Field label="Spare nodes (N+n)" hint="HAAS default is N+2 — you must survive losing a node while another is draining for patches.">
+        <Field label="Spare nodes (N+n)" hint="The service-provider default is N+2 — you must survive losing a node while another is draining for patches.">
           <select value={cfg.spareNodes} onChange={e => set({ spareNodes: parseInt(e.target.value) })}>
             <option value={0}>N+0 — no spare (not recommended)</option>
             <option value={1}>N+1 — survive one failure</option>

@@ -52,7 +52,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="masthead">
-        <h1>HAAS Hyper-V Surveyor</h1>
+        <h1>Hyper-V Surveyor</h1>
         <p>
           Plan your Hyper-V cluster before you rack it. Bidirectional sizing for Windows Server 2025 —
           SAN, Storage Spaces Direct, or both in one cluster. Everything runs in this browser;
@@ -89,7 +89,7 @@ export default function App() {
       {tab === 'about' && <About />}
 
       <footer className="foot">
-        HAAS Hyper-V Surveyor · rules verified against Microsoft Learn, August 2026 ·
+        Hyper-V Surveyor · rules verified against Microsoft Learn, August 2026 ·
         every figure is tagged MS (hard rule), MS-REC (recommendation) or TOOL (our assumption)
       </footer>
     </div>

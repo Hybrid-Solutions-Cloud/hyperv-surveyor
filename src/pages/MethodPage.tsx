@@ -67,7 +67,7 @@ export default function MethodPage() {
       <section className="panel source-note">
         <div>
           <h2>Source maintenance</h2>
-          <p>Rules and management-plane content were assembled from Microsoft product documentation and the supplied HAAS research workbook. Commercial values must be reverified before quotation.</p>
+          <p>Rules and management-plane content were assembled from Microsoft product documentation and the supplied management-plane research workbook. Commercial values must be reverified before quotation.</p>
         </div>
         <a href="https://learn.microsoft.com/windows-server/virtualization/hyper-v/" target="_blank" rel="noreferrer" className="btn ghost link-btn">
           Microsoft Hyper-V documentation <ExternalLink size={14} />

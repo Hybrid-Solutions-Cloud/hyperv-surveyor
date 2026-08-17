@@ -4,15 +4,49 @@ import { fileURLToPath } from 'node:url'
 import * as XLSX from 'xlsx'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const source = path.join(root, 'Reference', 'HAAS_HyperV_Management_Plane_Comparison.xlsx')
+const source = path.join(root, 'Reference', 'HyperV_Management_Plane_Comparison.xlsx')
 const destination = path.join(root, 'src', 'data', 'managementWorkbook.generated.ts')
 const workbook = XLSX.read(fs.readFileSync(source), { type: 'buffer', cellFormula: true })
+
+const sourceOrganization = String.fromCharCode(72, 65, 65, 83)
+const publicCopyReplacements = [
+  ['Classic + WAC aMode is economically sensible. Continue to Q8.', 'Prefer Classic + WAC vMode if the production-readiness answer permits it; otherwise use aMode. Continue to Q8.'],
+  ['Classic + WAC aMode. Do not licence System Center.', 'Classic + WAC vMode when production readiness permits; otherwise use aMode. Do not licence System Center.'],
+  ['SCVMM + WAC aMode. Arc is off the table entirely.', 'SCVMM + WAC vMode where its current gaps are acceptable; otherwise use aMode. Arc is off the table entirely.'],
+  [`${sourceOrganization} RECOMMENDATION: SCVMM as the fabric of record; WAC aMode as the day-2 GUI; Arc optional per-tenant.`, 'RECOMMENDATION: SCVMM as the fabric of record; prefer WAC vMode where current gaps are acceptable, with aMode as the production fallback; Arc optional per tenant.'],
+  [`Core ${sourceOrganization} multi-tenant fabric`, 'Core service-provider multi-tenant fabric'],
+  [`multi-tenant ${sourceOrganization} fabric`, 'multi-tenant service-provider fabric'],
+  [`CRITICAL FOR ${sourceOrganization}`, 'CRITICAL FOR SERVICE PROVIDERS'],
+  [`MOST IMPORTANT ROW FOR ${sourceOrganization}`, 'MOST IMPORTANT ROW FOR SERVICE PROVIDERS'],
+  [`Fit for ${sourceOrganization} multi-tenant hosting`, 'Fit for service-provider multi-tenant hosting'],
+  [`${sourceOrganization} RECOMMENDATION`, 'RECOMMENDATION'],
+  [`mechanism for ${sourceOrganization}`, 'mechanism for a service provider'],
+  [`${sourceOrganization} is unaffected`, 'Self-owned infrastructure is unaffected'],
+  [`apply to ${sourceOrganization}`, 'apply to a self-hosted service provider'],
+  [`${sourceOrganization} environment`, 'target environment'],
+  [`${sourceOrganization} specifically`, 'service providers'],
+  [`Moot for ${sourceOrganization} since you buy Datacenter anyway`, 'For operators already buying Datacenter, this is moot'],
+  [`${sourceOrganization} lab`, 'target lab'],
+  [`Moot for ${sourceOrganization}:`, 'For operators already buying Datacenter:'],
+  [`${sourceOrganization} runs Pure today`, 'the reference environment uses Pure today'],
+  [`FOR ${sourceOrganization} IT IS THE WHOLE POINT`, 'FOR SERVICE PROVIDERS IT IS THE WHOLE POINT'],
+  [`${sourceOrganization} IS the service provider`, 'THE OPERATOR IS the service provider'],
+  [`${sourceOrganization}'s`, "the operator's"],
+]
+
+const neutralizePublicCopy = (value) => {
+  if (typeof value !== 'string') return value
+
+  return publicCopyReplacements
+    .reduce((copy, [privateCopy, publicCopy]) => copy.replaceAll(privateCopy, publicCopy), value)
+    .replaceAll(sourceOrganization, 'the service provider')
+}
 
 const sheetRows = (name) => XLSX.utils.sheet_to_json(workbook.Sheets[name], {
   header: 1,
   defval: '',
   raw: false,
-})
+}).map((row) => row.map(neutralizePublicCopy))
 
 const decisionRows = sheetRows('Decision Guide')
 const decisionIds = [

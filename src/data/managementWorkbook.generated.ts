@@ -1,8 +1,8 @@
-// This file is generated from HAAS_HyperV_Management_Plane_Comparison.xlsx.
+// This file is generated from HyperV_Management_Plane_Comparison.xlsx.
 // Run npm run generate:management after changing the workbook.
 
 export const MANAGEMENT_WORKBOOK = {
-  "generatedFrom": "HAAS_HyperV_Management_Plane_Comparison.xlsx",
+  "generatedFrom": "HyperV_Management_Plane_Comparison.xlsx",
   "decisionQuestions": [
     {
       "id": "airGap",
@@ -50,7 +50,7 @@ export const MANAGEMENT_WORKBOOK = {
       "id": "largeFabric",
       "question": "Is this fabric larger than roughly 50 hosts?",
       "ifYes": "SCVMM today. Track WAC vMode for when it reaches GA.",
-      "ifNo": "Classic + WAC aMode is economically sensible. Continue to Q8.",
+      "ifNo": "Prefer Classic + WAC vMode if the production-readiness answer permits it; otherwise use aMode. Continue to Q8.",
       "why": "Microsoft's own guidance puts WAC Administration Mode at 1-50 hosts. vMode targets 1,000 hosts / 25,000 VMs — the same ceiling as SCVMM — but is Public Preview."
     },
     {
@@ -77,7 +77,7 @@ export const MANAGEMENT_WORKBOOK = {
   ],
   "decisionPatterns": [
     {
-      "situation": "Core HAAS multi-tenant fabric",
+      "situation": "Core service-provider multi-tenant fabric",
       "answer": "SCVMM 2025 as the fabric of record, with WAC aMode alongside as the day-2 GUI and Pure visibility layer.",
       "because": "SCVMM is the only plane that does bare-metal provisioning, tenant clouds with quotas, Pure array integration and V2V. Those four are table stakes for the business."
     },
@@ -88,12 +88,12 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "situation": "Air-gapped or sovereign tenant",
-      "answer": "SCVMM + WAC aMode. Arc is off the table entirely.",
+      "answer": "SCVMM + WAC vMode where its current gaps are acceptable; otherwise use aMode. Arc is off the table entirely.",
       "because": "Arc requires persistent outbound 443 with no disconnected mode. This is architectural, not negotiable."
     },
     {
       "situation": "2-4 node edge or small dedicated stack",
-      "answer": "Classic + WAC aMode. Do not licence System Center.",
+      "answer": "Classic + WAC vMode when production readiness permits; otherwise use aMode. Do not licence System Center.",
       "because": "System Center adds ~59% to Microsoft host licensing plus a SQL Server. Indefensible at that size."
     },
     {
@@ -119,7 +119,7 @@ export const MANAGEMENT_WORKBOOK = {
       "plane": "2. SCVMM 2025",
       "pros": "+  The only plane with bare-metal host provisioning\n+  The only plane with a true DRS equivalent (Dynamic Optimization) and Power Optimization\n+  Clouds give a real on-prem tenant abstraction with quotas and self-service roles\n+  Pure Storage SMI-S/SMP: array-aware placement and SAN-copy rapid provisioning\n+  Native V2V from VMware, ~4x faster in the 2025 release\n+  Templates, hardware/guest profiles, service templates, library server\n+  Logical networks, MAC/IP pools, VIP templates, load balancer integration\n+  1,000 hosts / 25,000 VMs, supported to Jan 2035\n+  The easiest conceptual bridge for VMware-native staff — maps to vCenter almost 1:1\n+  Fully air-gap capable",
       "cons": "–  ~59% uplift on your Microsoft host licensing, per managed host core\n–  Requires SQL Server — Express is not supported for the VMM database\n–  You must make VMM itself highly available, plus the SQL behind it\n–  Its own upgrade cadence and Update Rollup discipline to maintain\n–  Dated console UX compared to WAC\n–  Microsoft is narrowing its Azure surface: SPF discontinued, Azure VM mgmt removed\n–  Only supports upgrade from VMM 2022 — no direct jump from 2016/2019",
-      "pickWhen": "Any multi-tenant HAAS fabric. Anywhere you need bare-metal provisioning, tenant clouds, Pure array integration, or V2V. This is the default answer for the core business.",
+      "pickWhen": "Any multi-tenant service-provider fabric. Anywhere you need bare-metal provisioning, tenant clouds, Pure array integration, or V2V. This is the default answer for the core business.",
       "walkAwayWhen": "2-4 node edge deployments where the licensing and SQL overhead cannot be justified."
     },
     {
@@ -645,7 +645,7 @@ export const MANAGEMENT_WORKBOOK = {
       },
       "vmwareVsphere8": "Pure vSphere Plugin / VASA",
       "vmwareVcf9": "FC VMFS safe; next-gen vVols still maturing",
-      "note": "CRITICAL FOR HAAS: Pure integrates via SCVMM SMI-S OR the WAC aMode extension. Neither works in vMode preview yet."
+      "note": "CRITICAL FOR SERVICE PROVIDERS: Pure integrates via SCVMM SMI-S OR the WAC aMode extension. Neither works in vMode preview yet."
     },
     {
       "category": "Networking",
@@ -841,7 +841,7 @@ export const MANAGEMENT_WORKBOOK = {
       },
       "vmwareVsphere8": "(n/a)",
       "vmwareVcf9": "(n/a)",
-      "note": "MOST IMPORTANT ROW FOR HAAS: Classic has ZERO native V2V. SCVMM V2V is 4x faster in 2025."
+      "note": "MOST IMPORTANT ROW FOR SERVICE PROVIDERS: Classic has ZERO native V2V. SCVMM V2V is 4x faster in 2025."
     },
     {
       "category": "Security & Multi-tenancy",
@@ -1307,7 +1307,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "category": "Skills & GTM",
-      "capability": "Fit for HAAS multi-tenant hosting",
+      "capability": "Fit for service-provider multi-tenant hosting",
       "values": {
         "classic": "Poor",
         "scvmm": "Strong",
@@ -1317,7 +1317,7 @@ export const MANAGEMENT_WORKBOOK = {
       },
       "vmwareVsphere8": "-",
       "vmwareVcf9": "VCSP program now invite-only",
-      "note": "HAAS RECOMMENDATION: SCVMM as the fabric of record; WAC aMode as the day-2 GUI; Arc optional per-tenant."
+      "note": "RECOMMENDATION: SCVMM as the fabric of record; prefer WAC vMode where current gaps are acceptable, with aMode as the production fallback; Arc optional per tenant."
     },
     {
       "category": "Skills & GTM",
@@ -1757,7 +1757,7 @@ export const MANAGEMENT_WORKBOOK = {
       "confidence": "HIGH - Microsoft docs",
       "priceDate": "Aug 2026",
       "source": "https://learn.microsoft.com/azure/lighthouse/concepts/cross-tenant-management-experience",
-      "note": "Free. The mechanism for HAAS to manage customer-owned Azure tenants."
+      "note": "Free. The mechanism for a service provider to manage customer-owned Azure tenants."
     },
     {
       "ref": "AZL-HOST",
@@ -2166,7 +2166,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "topic": "SPLA Listed Provider rule",
-      "finding": "From 1 Oct 2025 you may not run your own SPLA licences on Listed Provider infrastructure (Azure, AWS, Google Cloud, Alibaba). This does NOT affect a hoster running its own bare-metal — SPLA remains fully valid on infrastructure you own and operate. HAAS is unaffected.",
+      "finding": "From 1 Oct 2025 you may not run your own SPLA licences on Listed Provider infrastructure (Azure, AWS, Google Cloud, Alibaba). This does NOT affect a hoster running its own bare-metal — SPLA remains fully valid on infrastructure you own and operate. Self-owned infrastructure is unaffected.",
       "source": "https://www.microsoft.com/en-us/licensing/news/updated-licensing-rights-for-dedicated-cloud"
     },
     {
@@ -2227,7 +2227,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "topic": "CAL prices are reseller retail",
-      "detail": "Microsoft's own CAL page explicitly directs buyers to a reseller rather than showing a price. The CAL figures here are live reseller listings, not Microsoft list. In a SPLA hosting model you use SALs, not perpetual CALs, so this mostly does not apply to HAAS."
+      "detail": "Microsoft's own CAL page explicitly directs buyers to a reseller rather than showing a price. The CAL figures here are live reseller listings, not Microsoft list. In a SPLA hosting model you use SALs, not perpetual CALs, so this mostly does not apply to a self-hosted service provider."
     },
     {
       "topic": "Software Assurance rate is an analyst benchmark",
@@ -2255,7 +2255,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "topic": "Feature verdicts are documentation-based",
-      "detail": "The Full/Partial/None verdicts come from Microsoft's published documentation, not from lab validation in the HAAS environment. Where a capability is business-critical to a specific deal, prove it in the lab before it goes in a statement of work."
+      "detail": "The Full/Partial/None verdicts come from Microsoft's published documentation, not from lab validation in the target environment. Where a capability is business-critical to a specific deal, prove it in the lab before it goes in a statement of work."
     }
   ],
   "advantages": [
@@ -2285,7 +2285,7 @@ export const MANAGEMENT_WORKBOOK = {
       "claim": "SPLA remains open and stable for hosters. The VCSP program has contracted sharply.",
       "strength": "STRONG",
       "evidence": "SPLA is a standard, broadly available monthly-reporting model. Broadcom terminated the VCSP White Label / rental resale model (31 Oct 2025) and closed the VCSP Advantage program to an invite-only model (26 Jan 2026) — press reports as few as ~19 VCSP providers left in the entire US.",
-      "guidance": "THE most relevant argument for HAAS specifically. This is not a price argument, it is a business-continuity argument: your ability to keep selling VMware capacity at all is now gated by Broadcom's partner-tier decisions."
+      "guidance": "THE most relevant argument for service providers. This is not a price argument, it is a business-continuity argument: your ability to keep selling VMware capacity at all is now gated by Broadcom's partner-tier decisions."
     },
     {
       "area": "Licensing",
@@ -2400,7 +2400,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "claim": "Free Hyper-V Server is still available",
-      "whyWrong": "FALSE. Hyper-V Server 2019 was the last standalone free edition. The Hyper-V ROLE is free to enable, but a Windows Server licence is required. Moot for HAAS since you buy Datacenter anyway — but do not pretend otherwise."
+      "whyWrong": "FALSE. Hyper-V Server 2019 was the last standalone free edition. The Hyper-V ROLE is free to enable, but a Windows Server licence is required. For operators already buying Datacenter, this is moot — but do not pretend otherwise."
     }
   ],
   "honestLosses": [
@@ -2458,7 +2458,7 @@ export const MANAGEMENT_WORKBOOK = {
       "objection": "\"Linux doesn't run well on Hyper-V.\"",
       "verdict": "OUTDATED — CIRCA 2012 OBJECTION",
       "answer": "Linux Integration Services is upstream in the mainline kernel, not a bolt-on. Microsoft maintains current support matrices for RHEL, CentOS, Ubuntu, Debian, Oracle Linux, Rocky and SUSE. Enlightened I/O gives near-native disk and network performance.",
-      "concede": "Offer to run their actual distro in the HAAS lab. This objection dies fastest with a demo."
+      "concede": "Offer to run their actual distro in the target lab. This objection dies fastest with a demo."
     },
     {
       "objection": "\"Nobody uses Hyper-V for hosting.\"",
@@ -2476,13 +2476,13 @@ export const MANAGEMENT_WORKBOOK = {
       "objection": "\"The free hypervisor was discontinued.\"",
       "verdict": "TRUE — CONFIRM IT, DON'T DEFLECT",
       "answer": "Hyper-V Server 2019 was the last standalone free edition. The Hyper-V role is free to enable but requires a Windows Server licence underneath.",
-      "concede": "Moot for HAAS: you are buying Windows Server Datacenter regardless, for the unlimited-guest-OSE benefit. Say that plainly."
+      "concede": "For operators already buying Datacenter: you are buying Windows Server Datacenter regardless, for the unlimited-guest-OSE benefit. Say that plainly."
     },
     {
       "objection": "\"S2D isn't as good as vSAN.\"",
       "verdict": "DON'T FIGHT ON TECHNICAL MERITS",
       "answer": "No credible independent benchmark supports or refutes this cleanly in either direction.",
-      "concede": "Redirect to licensing: S2D is included in a Datacenter licence you already need. But be careful — vSAN is now BUNDLED into VCF 9's subscription, so the old 'vSAN is an expensive add-on' line is stale. And offer SAN: HAAS runs Pure today, and the sizing tool supports SAN, S2D or hybrid."
+      "concede": "Redirect to licensing: S2D is included in a Datacenter licence you already need. But be careful — vSAN is now BUNDLED into VCF 9's subscription, so the old 'vSAN is an expensive add-on' line is stale. And offer SAN: the reference environment uses Pure today, and the sizing tool supports SAN, S2D or hybrid."
     },
     {
       "objection": "\"We'll lose our automation investment.\"",
@@ -2498,8 +2498,8 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "objection": "\"Broadcom's partner changes don't affect us — we're the customer.\"",
-      "verdict": "FOR HAAS IT IS THE WHOLE POINT",
-      "answer": "HAAS IS the service provider. The White Label / rental resale model ended 31 Oct 2025; the VCSP Advantage program closed to invite-only 26 Jan 2026; new or renewed VCSP contracts must be coterminous with an existing commitment.",
+      "verdict": "FOR SERVICE PROVIDERS IT IS THE WHOLE POINT",
+      "answer": "THE OPERATOR IS the service provider. The White Label / rental resale model ended 31 Oct 2025; the VCSP Advantage program closed to invite-only 26 Jan 2026; new or renewed VCSP contracts must be coterminous with an existing commitment.",
       "concede": "Reframe from price to access. The question is not 'what will VMware cost in 2028' but 'will we be permitted to sell it in 2028'."
     }
   ]

@@ -2,7 +2,7 @@
   "name": "hyperv-surveyor",
   "version": "1.0.0",
   "private": true,
-  "description": "HAAS Hyper-V Surveyor - bidirectional sizing tool for Windows Server 2025 Hyper-V clusters (SAN / S2D / Hybrid)",
+  "description": "Hyper-V Surveyor - bidirectional sizing tool for Windows Server 2025 Hyper-V clusters (SAN / S2D / Hybrid)",
   "type": "module",
   "scripts": {
     "dev": "vite",

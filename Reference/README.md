@@ -1,4 +1,4 @@
-# HAAS Hyper-V Surveyor
+# Hyper-V Surveyor
 
 Bidirectional sizing tool for Windows Server 2025 Hyper-V clusters — SAN, Storage Spaces Direct,
 or both in one cluster. The Hyper-V counterpart to the Azure Local Surveyor.
@@ -230,7 +230,7 @@ Editable in the UI, and every one is tagged `TOOL`:
 3. Pure sector size (512e vs 4K) and NTFS vs ReFS recommendation
 4. Pure **usable** capacity per model — datasheets publish raw and effective, not usable
 5. A real RVTools 4.8.x export, to verify `vDisk` / `vCluster` / `vDatastore` headers
-6. **Per-workload DRR from HAAS's own arrays** — Pure publishes only a blended 5:1. You run Pure in
+6. **Per-workload DRR from your own arrays** — Pure publishes only a blended 5:1. You run Pure in
    production, so you can derive real ratios by workload type from your own fleet. That single item
    would make this tool measurably better than anything Microsoft or Broadcom ships.
 

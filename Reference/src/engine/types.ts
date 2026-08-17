@@ -1,5 +1,5 @@
 /**
- * HAAS Hyper-V Surveyor — core types
+ * Hyper-V Surveyor — core types
  *
  * UNITS CONVENTION (enforced throughout the engine):
  *   RAM      -> GiB  (base-2)

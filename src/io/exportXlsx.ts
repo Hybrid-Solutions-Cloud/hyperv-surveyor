@@ -14,13 +14,13 @@ export function exportDesign(
   cfg: ClusterConfig,
   tiers: Record<TierId, TierPolicy>,
   vms: Vm[],
-  filename = 'HAAS_HyperV_Sizing.xlsx',
+  filename = 'HyperV_Surveyor_Sizing.xlsx',
 ) {
   const wb = XLSX.utils.book_new()
 
   // ---- Summary -------------------------------------------------------------
   const summary: any[][] = [
-    ['HAAS Hyper-V Surveyor — Sizing Result'],
+    ['Hyper-V Surveyor — Sizing Result'],
     ['Generated', new Date().toISOString().slice(0, 16).replace('T', ' ')],
     [],
     ['ARCHITECTURE COMPARISON'],
