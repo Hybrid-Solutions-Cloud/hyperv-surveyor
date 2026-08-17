@@ -411,6 +411,11 @@ tr.infeasible td { opacity: 0.48; }
 .csp-reference-rates span { padding: 8px; color: var(--muted); background: #f4f7f9; border-radius: 5px; font-size: 9px; }
 .csp-reference-rates strong { display: block; margin-top: 2px; color: var(--navy-800); }
 .public-pricing-note { margin-top: 18px; }
+.capacity-input-section { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); }
+.capacity-input-section h3 { margin: 0 0 11px; }
+.capacity-input-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; align-items: start; }
+.capacity-policy-table { min-width: 520px; }
+.capacity-policy-table td:nth-child(2), .capacity-policy-table td:nth-child(3) { width: 190px; }
 .price-basis { margin-top: 22px; padding-top: 17px; border-top: 1px solid var(--line); }
 .price-basis h3 { margin: 0 0 10px; }
 .price-basis-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
@@ -458,6 +463,7 @@ tr.infeasible td { opacity: 0.48; }
   .detail-columns { grid-template-columns: 1fr 1fr; }
   .recommendation-column, .cost-inputs { position: static; }
   .grid.two { grid-template-columns: 1fr; }
+  .capacity-input-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 640px) {
@@ -487,4 +493,5 @@ tr.infeasible td { opacity: 0.48; }
   .source-row a { width: fit-content; }
   .finding { grid-template-columns: 62px 58px minmax(180px, 1fr); }
   .commercial-toggle, .commercial-kpis { grid-template-columns: 1fr; }
+  .capacity-input-grid { grid-template-columns: 1fr; }
 }

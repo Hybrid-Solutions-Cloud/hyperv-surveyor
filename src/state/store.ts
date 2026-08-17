@@ -9,11 +9,18 @@ interface SurveyorState {
   cfg: ClusterConfig
   tiers: Record<TierId, TierPolicy>
   chosenKey: string
+  existingCapacityCfg: ClusterConfig
+  existingCapacityTiers: Record<TierId, TierPolicy>
+  existingCapacityNodes: number
   setCustomerName: (name: string) => void
   setVms: (vms: Vm[]) => void
   setCfg: (cfg: ClusterConfig) => void
   setTiers: (tiers: Record<TierId, TierPolicy>) => void
   setChosenKey: (key: string) => void
+  setExistingCapacityCfg: (cfg: ClusterConfig) => void
+  setExistingCapacityTiers: (tiers: Record<TierId, TierPolicy>) => void
+  setExistingCapacityNodes: (nodes: number) => void
+  resetExistingCapacity: () => void
   loadScenario: (scenario: {
     customerName?: string
     vms?: Vm[]
@@ -30,6 +37,9 @@ const defaults = () => ({
   cfg: structuredClone(DEFAULT_CONFIG),
   tiers: defaultTiers(),
   chosenKey: 'san',
+  existingCapacityCfg: structuredClone(DEFAULT_CONFIG),
+  existingCapacityTiers: defaultTiers(),
+  existingCapacityNodes: 8,
 })
 
 export const useSurveyorStore = create<SurveyorState>()(
@@ -41,6 +51,14 @@ export const useSurveyorStore = create<SurveyorState>()(
       setCfg: (cfg) => set({ cfg }),
       setTiers: (tiers) => set({ tiers }),
       setChosenKey: (chosenKey) => set({ chosenKey }),
+      setExistingCapacityCfg: (existingCapacityCfg) => set({ existingCapacityCfg }),
+      setExistingCapacityTiers: (existingCapacityTiers) => set({ existingCapacityTiers }),
+      setExistingCapacityNodes: (existingCapacityNodes) => set({ existingCapacityNodes }),
+      resetExistingCapacity: () => set({
+        existingCapacityCfg: structuredClone(DEFAULT_CONFIG),
+        existingCapacityTiers: defaultTiers(),
+        existingCapacityNodes: 8,
+      }),
       loadScenario: (scenario) => set({
         customerName: scenario.customerName ?? '',
         vms: scenario.vms ?? [],
@@ -58,6 +76,9 @@ export const useSurveyorStore = create<SurveyorState>()(
         cfg: state.cfg,
         tiers: state.tiers,
         chosenKey: state.chosenKey,
+        existingCapacityCfg: state.existingCapacityCfg,
+        existingCapacityTiers: state.existingCapacityTiers,
+        existingCapacityNodes: state.existingCapacityNodes,
         // Large customer inventories belong in an exported scenario file. Keeping the
         // common case makes refreshes friendly without exhausting localStorage.
         vms: state.vms.length <= 2_000 ? state.vms : [],
