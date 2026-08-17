@@ -9,7 +9,12 @@ const base: ManagementCostInputs = {
   spareHosts: 1,
   termYears: 3,
   sqlCores: 4,
-  azurePerVmMonth: 19.2,
+  waiveUpdateAndGuest: true,
+  includeUpdateManager: true,
+  includeDefenderP2: true,
+  includeGuestConfig: true,
+  includeLogAnalytics: true,
+  logAnalyticsGbPerVm: 2,
   model: 'perpetual',
 }
 
@@ -18,6 +23,8 @@ describe('management-plane cost parity', () => {
     expect(calculatePlaneCost('classic', base).total).toBeCloseTo(325_009.92, 2)
     expect(calculatePlaneCost('scvmm', base).total).toBeCloseTo(526_627.92, 2)
     expect(calculatePlaneCost('arc-scvmm', base).total).toBeCloseTo(747_811.92, 2)
+    expect(calculatePlaneCost('classic', base).perVmMonth).toBeCloseTo(32.24, 2)
+    expect(calculatePlaneCost('arc-scvmm', base).azurePerVmMonth).toBeCloseTo(19.2, 2)
   })
 
   it('matches the reference SPLA scenario', () => {

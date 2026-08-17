@@ -32,7 +32,7 @@ that can be opened directly for offline and disconnected use.
 - Forward comparison across SAN, S2D, MAP, and hybrid designs
 - Existing-hardware headroom and reverse sizing
 - CSV/LUN layout and validation findings
-- Management Plane Advisor with qualifying questions, capability comparison, and cost model
+- Management Plane Advisor with 10 qualifying questions, the complete 85-row capability matrix, VMware translation, field guidance, sourced caveats, 36-SKU reference, and cost model
 - XLSX design export, local scenario persistence, and shareable scenarios
 
 The original source material and research workbook remain unchanged under `Reference/`.

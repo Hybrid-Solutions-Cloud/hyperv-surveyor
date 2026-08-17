@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "generate:management": "node scripts/generate-management-data.mjs",
+    "prebuild": "npm run generate:management",
     "build": "tsc --noEmit && vite build && node scripts/bundle-single.mjs",
     "preview": "vite preview",
     "test": "vitest run",

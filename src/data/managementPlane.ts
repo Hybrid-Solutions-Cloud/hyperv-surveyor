@@ -1,3 +1,5 @@
+import { MANAGEMENT_WORKBOOK } from './managementWorkbook.generated'
+
 export type PlaneId = 'classic' | 'scvmm' | 'wac-admin' | 'wac-virtual' | 'arc-scvmm'
 
 export interface ManagementPlane {
@@ -61,61 +63,12 @@ export const MANAGEMENT_PLANES: ManagementPlane[] = [
 export interface DecisionQuestion {
   id: string
   question: string
+  ifYes: string
+  ifNo: string
   why: string
 }
 
-export const DECISION_QUESTIONS: DecisionQuestion[] = [
-  {
-    id: 'airGap',
-    question: 'Does the tenant require an air-gapped or sovereign environment?',
-    why: 'A persistent Azure connection becomes an architectural stop, not merely a preference.',
-  },
-  {
-    id: 'bareMetal',
-    question: 'Do you need repeatable bare-metal host provisioning through BMC and PXE?',
-    why: 'This immediately raises the requirement from a cluster tool to a fabric-management workflow.',
-  },
-  {
-    id: 'tenantSelfService',
-    question: 'Do tenants need self-service, quotas, delegation, or a portal?',
-    why: 'Local administrator access and connection-level roles are not a tenant operating model.',
-  },
-  {
-    id: 'pureIntegration',
-    question: 'Do you need array-aware Pure Storage placement or SAN-copy provisioning?',
-    why: 'Visibility and array-aware placement are different integration levels.',
-  },
-  {
-    id: 'drs',
-    question: 'Do you require automatic workload balancing comparable to DRS?',
-    why: 'Native node fairness is useful but is not the same operational capability as fabric optimization.',
-  },
-  {
-    id: 'migration',
-    question: 'Is VMware-to-Hyper-V conversion part of this engagement?',
-    why: 'Migration tooling is a separate purchasing and delivery decision even when it is temporary.',
-  },
-  {
-    id: 'largeFabric',
-    question: 'Will the managed fabric exceed roughly 50 hosts?',
-    why: 'The size of the operating surface changes the value of inventory, templates, and parallel operations.',
-  },
-  {
-    id: 'smallEdge',
-    question: 'Is this only a two-to-four-node edge or dedicated stack?',
-    why: 'Management licensing and SQL overhead can be disproportionate at this size.',
-  },
-  {
-    id: 'azureReady',
-    question: 'Does the tenant already operate in Azure and accept an Azure dependency?',
-    why: 'Arc is most useful as an optional service layer for an Azure-aligned tenant.',
-  },
-  {
-    id: 'productionSoon',
-    question: 'Must the design enter production before mid-2027?',
-    why: 'Preview products must be revalidated against production readiness before they enter a signed design.',
-  },
-]
+export const DECISION_QUESTIONS: DecisionQuestion[] = MANAGEMENT_WORKBOOK.decisionQuestions.map((question) => ({ ...question }))
 
 export type AdvisorAnswers = Record<string, boolean | undefined>
 
@@ -176,18 +129,15 @@ export interface CapabilityRow {
   category: string
   capability: string
   values: Record<PlaneId, string>
+  vmwareVsphere8: string
+  vmwareVcf9: string
+  note: string
 }
 
-export const CAPABILITIES: CapabilityRow[] = [
-  { category: 'Fabric', capability: 'Central inventory', values: { classic: 'None', scvmm: 'Full', 'wac-admin': 'Partial', 'wac-virtual': 'Full', 'arc-scvmm': 'Full' } },
-  { category: 'Fabric', capability: 'Bare-metal host provisioning', values: { classic: 'None', scvmm: 'Full', 'wac-admin': 'None', 'wac-virtual': 'None', 'arc-scvmm': 'None' } },
-  { category: 'Tenant', capability: 'Self-service and quotas', values: { classic: 'None', scvmm: 'Full', 'wac-admin': 'None', 'wac-virtual': 'None', 'arc-scvmm': 'Full' } },
-  { category: 'Operations', capability: 'Automatic load balancing', values: { classic: 'Basic', scvmm: 'Full', 'wac-admin': 'None', 'wac-virtual': 'Partial', 'arc-scvmm': 'Via SCVMM' } },
-  { category: 'Migration', capability: 'Native VMware conversion path', values: { classic: 'None', scvmm: 'Full', 'wac-admin': 'Preview extension', 'wac-virtual': 'None', 'arc-scvmm': 'Azure path' } },
-  { category: 'Storage', capability: 'Pure Storage integration', values: { classic: 'SDK only', scvmm: 'Array-aware', 'wac-admin': 'Visibility', 'wac-virtual': 'Not yet', 'arc-scvmm': 'Via SCVMM' } },
-  { category: 'Security', capability: 'Air-gap capable', values: { classic: 'Yes', scvmm: 'Yes', 'wac-admin': 'Yes', 'wac-virtual': 'Yes', 'arc-scvmm': 'No' } },
-  { category: 'Platform', capability: 'Production-ready posture', values: { classic: 'Yes', scvmm: 'Yes', 'wac-admin': 'Yes', 'wac-virtual': 'Reverify', 'arc-scvmm': 'Yes' } },
-]
+export const CAPABILITIES: CapabilityRow[] = MANAGEMENT_WORKBOOK.featureMatrix.map((row) => ({
+  ...row,
+  values: { ...row.values },
+}))
 
 export const PRICE_BOOK = {
   windowsPerTwoCorePack: 846.38,
@@ -196,5 +146,10 @@ export const PRICE_BOOK = {
   systemCenterSplaPerTwoCorePackMonth: 21,
   sqlStandardPerCore: 1_859,
   softwareAssuranceAnnualRate: 0.25,
-  azureServicesPerVmMonth: 19.2,
+  windowsPaygPerCoreMonth: 33.58,
+  azureLocalPerCoreMonth: 10,
+  updateManagerPerVmMonth: 5,
+  defenderP2PerVmMonth: 14.6,
+  guestConfigPerVmMonth: 6,
+  logAnalyticsPerGb: 2.3,
 }

@@ -10,7 +10,12 @@ export interface ManagementCostInputs {
   spareHosts: number
   termYears: number
   sqlCores: number
-  azurePerVmMonth: number
+  waiveUpdateAndGuest: boolean
+  includeUpdateManager: boolean
+  includeDefenderP2: boolean
+  includeGuestConfig: boolean
+  includeLogAnalytics: boolean
+  logAnalyticsGbPerVm: number
   model: LicenseModel
 }
 
@@ -18,6 +23,12 @@ export interface ManagementPlaneCost {
   total: number
   managementOnly: number
   perVmMonth: number
+  effectiveVms: number
+  windows: number
+  systemCenter: number
+  sql: number
+  azure: number
+  azurePerVmMonth: number
 }
 
 export function calculatePlaneCost(plane: PlaneId, inputs: ManagementCostInputs): ManagementPlaneCost {
@@ -47,10 +58,27 @@ export function calculatePlaneCost(plane: PlaneId, inputs: ManagementCostInputs)
   const sql = inputs.model === 'perpetual'
     ? sqlBase * (1 + PRICE_BOOK.softwareAssuranceAnnualRate * Math.max(inputs.termYears - 1, 0))
     : sqlBase
-  const azure = plane === 'arc-scvmm' ? inputs.vms * inputs.azurePerVmMonth * months : 0
+  const azurePerVmMonth = (
+    (inputs.includeUpdateManager && !inputs.waiveUpdateAndGuest ? PRICE_BOOK.updateManagerPerVmMonth : 0)
+    + (inputs.includeDefenderP2 ? PRICE_BOOK.defenderP2PerVmMonth : 0)
+    + (inputs.includeGuestConfig && !inputs.waiveUpdateAndGuest ? PRICE_BOOK.guestConfigPerVmMonth : 0)
+    + (inputs.includeLogAnalytics ? inputs.logAnalyticsGbPerVm * PRICE_BOOK.logAnalyticsPerGb : 0)
+  )
+  const azure = plane === 'arc-scvmm' ? inputs.vms * azurePerVmMonth * months : 0
   const managementOnly = systemCenter + sql + azure
   const total = windows + managementOnly
-  const effectiveVms = Math.max(1, inputs.vms)
+  const effectiveHosts = Math.max(1, inputs.hosts - Math.min(inputs.spareHosts, Math.max(0, inputs.hosts - 1)))
+  const effectiveVms = Math.max(1, inputs.vms * effectiveHosts / Math.max(1, inputs.hosts))
 
-  return { total, managementOnly, perVmMonth: total / effectiveVms / months }
+  return {
+    total,
+    managementOnly,
+    perVmMonth: total / effectiveVms / months,
+    effectiveVms,
+    windows,
+    systemCenter,
+    sql,
+    azure,
+    azurePerVmMonth,
+  }
 }
