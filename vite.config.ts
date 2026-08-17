@@ -14,8 +14,10 @@ export default defineConfig({
       output: {
         format: 'iife',
         inlineDynamicImports: true,
-        entryFileNames: 'app.js',
-        assetFileNames: 'app.[ext]',
+        // GitHub Pages caches JavaScript much longer than HTML. A content hash forces
+        // every deployment to use a new URL instead of leaving visitors on stale app.js.
+        entryFileNames: 'app.[hash].js',
+        assetFileNames: 'app.[hash].[ext]',
       },
     },
   },
