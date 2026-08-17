@@ -16,7 +16,11 @@ import {
 import { compareArchitectures } from '../engine/solve'
 import {
   calculatePlaneCost,
+  calculateProviderEconomics,
+  DEFAULT_MANAGEMENT_RATE_CARD,
+  type CommercialInputs,
   type ManagementCostInputs,
+  type ManagementRateCard,
 } from '../engine/managementCost'
 import { PageHeader } from '../components/Shared'
 import { useSurveyorStore } from '../state/store'
@@ -27,6 +31,7 @@ import {
   PRICE_BOOK,
   recommendManagementPlane,
   type AdvisorAnswers,
+  type PlaneId,
 } from '../data/managementPlane'
 import { MANAGEMENT_WORKBOOK } from '../data/managementWorkbook.generated'
 
@@ -523,28 +528,74 @@ function CostPanel({
     includeGuestConfig: true,
     includeLogAnalytics: true,
     logAnalyticsGbPerVm: 2,
-    model: 'perpetual',
+    model: 'spla',
+  })
+  const [selectedPlane, setSelectedPlane] = useState<PlaneId>('scvmm')
+  const [rateCard, setRateCard] = useState<ManagementRateCard>({ ...DEFAULT_MANAGEMENT_RATE_CARD })
+  const [commercial, setCommercial] = useState<CommercialInputs>({
+    motion: 'msp',
+    tenantCount: 8,
+    rdsUsers: 0,
+    microsoftDiscountPct: 0,
+    licenseMarkupPct: 8,
+    azureMarkupPct: 8,
+    onboardingDeliveryCostPerTenant: 1_500,
+    onboardingFeePerTenant: 3_000,
+    monthlyPlatformFeePerTenant: 1_000,
+    monthlyManagedFeePerVm: 55,
+    monthlyOpsCostPerVm: 18,
+    monthlySharedOpsCost: 2_500,
+    targetGrossMarginPct: 35,
+    useLighthouse: true,
   })
 
-  const costs = MANAGEMENT_PLANES.map((plane) => ({ plane, ...calculatePlaneCost(plane.id, inputs) }))
+  const costs = MANAGEMENT_PLANES.map((plane) => ({ plane, ...calculatePlaneCost(plane.id, inputs, rateCard) }))
   const licensableCoresPerHost = Math.max(inputs.sockets * inputs.coresPerSocket, inputs.sockets * 8, 16)
   const months = Math.max(1, inputs.termYears * 12)
   const effectiveVms = costs[0].effectiveVms
   const arcCost = costs.find((item) => item.plane.id === 'arc-scvmm')!
+  const selectedCost = costs.find((item) => item.plane.id === selectedPlane) ?? costs[1]
+  const economics = calculateProviderEconomics(selectedPlane, selectedCost, inputs, commercial, rateCard)
   const windowsPaygReference = inputs.hosts * licensableCoresPerHost * PRICE_BOOK.windowsPaygPerCoreMonth * months
   const azureLocalReference = inputs.hosts * licensableCoresPerHost * PRICE_BOOK.azureLocalPerCoreMonth * months
 
   const setNumber = (key: keyof ManagementCostInputs, value: number) => setInputs({ ...inputs, [key]: Math.max(0, value) })
+  const setCommercialNumber = (key: keyof CommercialInputs, value: number) => {
+    const nonNegative = Math.max(0, value)
+    const normalized = key === 'tenantCount'
+      ? Math.max(1, nonNegative)
+      : key === 'microsoftDiscountPct'
+        ? Math.min(100, nonNegative)
+        : key === 'targetGrossMarginPct'
+          ? Math.min(95, nonNegative)
+          : nonNegative
+    setCommercial({ ...commercial, [key]: normalized })
+  }
+  const setRate = (key: keyof ManagementRateCard, value: number) => setRateCard({ ...rateCard, [key]: Math.max(0, value) })
+  const isCommercial = commercial.motion !== 'internal'
 
   return (
     <div className="cost-layout">
       <section className="panel cost-inputs">
-        <h2>Fabric and commercial assumptions</h2>
+        <h2>Commercial route</h2>
+        <div className="license-toggle commercial-toggle">
+          <button className={commercial.motion === 'internal' ? 'active' : ''} onClick={() => setCommercial({ ...commercial, motion: 'internal' })}>Internal TCO</button>
+          <button className={commercial.motion === 'csp' ? 'active' : ''} onClick={() => setCommercial({ ...commercial, motion: 'csp' })}>CSP managed customer</button>
+          <button className={commercial.motion === 'msp' ? 'active' : ''} onClick={() => setCommercial({ ...commercial, motion: 'msp' })}>MSP hosted platform</button>
+        </div>
+        <p className="small muted commercial-explainer">
+          {commercial.motion === 'internal' && 'Customer revenue is excluded. Use this view for internal platform TCO and allocation.'}
+          {commercial.motion === 'csp' && 'Customer owns the subscriptions or Azure consumption; model resale margin plus managed services.'}
+          {commercial.motion === 'msp' && 'The provider owns the hosted-platform COGS; customer revenue comes from service and platform fees.'}
+        </p>
+
+        <h3>Licensing basis</h3>
         <div className="license-toggle">
           <button className={inputs.model === 'perpetual' ? 'active' : ''} onClick={() => setInputs({ ...inputs, model: 'perpetual' })}>Perpetual + SA</button>
           <button className={inputs.model === 'spla' ? 'active' : ''} onClick={() => setInputs({ ...inputs, model: 'spla' })}>SPLA monthly</button>
         </div>
 
+        <h3>Fabric demand</h3>
         <div className="form-grid two-column">
           <CostInput label="Physical hosts" value={inputs.hosts} onChange={(value) => setNumber('hosts', value)} />
           <CostInput label="Spare hosts" value={inputs.spareHosts} onChange={(value) => setNumber('spareHosts', value)} />
@@ -556,14 +607,61 @@ function CostPanel({
           <CostInput label="Log Analytics GB / VM / month" value={inputs.logAnalyticsGbPerVm} step={0.1} onChange={(value) => setNumber('logAnalyticsGbPerVm', value)} />
         </div>
 
+        <h3>Customer and delivery economics</h3>
+        <div className="form-grid two-column">
+          <CostInput label="Customer tenants" value={commercial.tenantCount} onChange={(value) => setCommercialNumber('tenantCount', value)} />
+          <CostInput label="RDS users / subscribers" value={commercial.rdsUsers} onChange={(value) => setCommercialNumber('rdsUsers', value)} />
+          <CostInput label="Microsoft discount %" value={commercial.microsoftDiscountPct} step={0.1} onChange={(value) => setCommercialNumber('microsoftDiscountPct', value)} />
+          <CostInput label="Target gross margin %" value={commercial.targetGrossMarginPct} step={0.1} onChange={(value) => setCommercialNumber('targetGrossMarginPct', value)} />
+          <CostInput label="Onboarding cost / tenant" value={commercial.onboardingDeliveryCostPerTenant} onChange={(value) => setCommercialNumber('onboardingDeliveryCostPerTenant', value)} />
+          <CostInput label="Onboarding fee / tenant" value={commercial.onboardingFeePerTenant} onChange={(value) => setCommercialNumber('onboardingFeePerTenant', value)} />
+          <CostInput label="Platform fee / tenant / mo" value={commercial.monthlyPlatformFeePerTenant} onChange={(value) => setCommercialNumber('monthlyPlatformFeePerTenant', value)} />
+          <CostInput label="Managed service / VM / mo" value={commercial.monthlyManagedFeePerVm} onChange={(value) => setCommercialNumber('monthlyManagedFeePerVm', value)} />
+          <CostInput label="Operations cost / VM / mo" value={commercial.monthlyOpsCostPerVm} onChange={(value) => setCommercialNumber('monthlyOpsCostPerVm', value)} />
+          <CostInput label="Shared operations cost / mo" value={commercial.monthlySharedOpsCost} onChange={(value) => setCommercialNumber('monthlySharedOpsCost', value)} />
+          {commercial.motion === 'csp' && <CostInput label="License resale markup %" value={commercial.licenseMarkupPct} step={0.1} onChange={(value) => setCommercialNumber('licenseMarkupPct', value)} />}
+          {commercial.motion === 'csp' && <CostInput label="Azure resale markup %" value={commercial.azureMarkupPct} step={0.1} onChange={(value) => setCommercialNumber('azureMarkupPct', value)} />}
+        </div>
+        {commercial.motion === 'csp' && (
+          <div className="meter-toggles commercial-controls">
+            <CostToggle label="Use Azure Lighthouse delegated administration" checked={commercial.useLighthouse} onChange={(checked) => setCommercial({ ...commercial, useLighthouse: checked })} />
+          </div>
+        )}
+
         <h3>Arc metered services</h3>
         <div className="meter-toggles">
-          <CostToggle label={`Update Manager · ${money(PRICE_BOOK.updateManagerPerVmMonth)}/VM/mo`} checked={inputs.includeUpdateManager} onChange={(checked) => setInputs({ ...inputs, includeUpdateManager: checked })} />
-          <CostToggle label={`Defender for Servers P2 · ${money(PRICE_BOOK.defenderP2PerVmMonth)}/VM/mo`} checked={inputs.includeDefenderP2} onChange={(checked) => setInputs({ ...inputs, includeDefenderP2: checked })} />
-          <CostToggle label={`Guest Config + Change Tracking · ${money(PRICE_BOOK.guestConfigPerVmMonth)}/VM/mo`} checked={inputs.includeGuestConfig} onChange={(checked) => setInputs({ ...inputs, includeGuestConfig: checked })} />
-          <CostToggle label={`Log Analytics · ${money(PRICE_BOOK.logAnalyticsPerGb)}/GB`} checked={inputs.includeLogAnalytics} onChange={(checked) => setInputs({ ...inputs, includeLogAnalytics: checked })} />
+          <CostToggle label={`Update Manager · ${money(rateCard.updateManagerPerVmMonth)}/VM/mo`} checked={inputs.includeUpdateManager} onChange={(checked) => setInputs({ ...inputs, includeUpdateManager: checked })} />
+          <CostToggle label={`Defender for Servers P2 · ${money(rateCard.defenderP2PerVmMonth)}/VM/mo`} checked={inputs.includeDefenderP2} onChange={(checked) => setInputs({ ...inputs, includeDefenderP2: checked })} />
+          <CostToggle label={`Guest Config + Change Tracking · ${money(rateCard.guestConfigPerVmMonth)}/VM/mo`} checked={inputs.includeGuestConfig} onChange={(checked) => setInputs({ ...inputs, includeGuestConfig: checked })} />
+          <CostToggle label={`Log Analytics · ${money(rateCard.logAnalyticsPerGb)}/GB`} checked={inputs.includeLogAnalytics} onChange={(checked) => setInputs({ ...inputs, includeLogAnalytics: checked })} />
           <CostToggle label="Waive Update Manager + Guest Config with qualifying entitlement" checked={inputs.waiveUpdateAndGuest} onChange={(checked) => setInputs({ ...inputs, waiveUpdateAndGuest: checked })} />
         </div>
+
+        <details className="rate-card-details">
+          <summary>Editable rate card <b>Workbook assumptions</b></summary>
+          <div className="rate-card-body">
+            <p>Replace every value with the written quote for the applicable customer, provider agreement, date, and region.</p>
+            <div className="form-grid two-column">
+              <CostInput label="Windows DC / 2 cores" value={rateCard.windowsPerTwoCorePack} step={0.01} onChange={(value) => setRate('windowsPerTwoCorePack', value)} />
+              <CostInput label="Windows DC SPLA / 2 cores / mo" value={rateCard.windowsSplaPerTwoCorePackMonth} step={0.01} onChange={(value) => setRate('windowsSplaPerTwoCorePackMonth', value)} />
+              <CostInput label="System Center DC / 2 cores" value={rateCard.systemCenterPerTwoCorePack} step={0.01} onChange={(value) => setRate('systemCenterPerTwoCorePack', value)} />
+              <CostInput label="System Center DC SPLA / 2 cores / mo" value={rateCard.systemCenterSplaPerTwoCorePackMonth} step={0.01} onChange={(value) => setRate('systemCenterSplaPerTwoCorePackMonth', value)} />
+              <CostInput label="SQL Standard / core" value={rateCard.sqlStandardPerCore} step={0.01} onChange={(value) => setRate('sqlStandardPerCore', value)} />
+              <CostInput label="Annual SA rate" value={rateCard.softwareAssuranceAnnualRate * 100} step={0.1} onChange={(value) => setRate('softwareAssuranceAnnualRate', value / 100)} />
+              <CostInput label="RDS SAL / user / mo" value={rateCard.rdsSalPerUserMonth} step={0.01} onChange={(value) => setRate('rdsSalPerUserMonth', value)} />
+              <CostInput label="RDS User CAL" value={rateCard.rdsCalPerUser} step={0.01} onChange={(value) => setRate('rdsCalPerUser', value)} />
+              <CostInput label="Update Manager / VM / mo" value={rateCard.updateManagerPerVmMonth} step={0.01} onChange={(value) => setRate('updateManagerPerVmMonth', value)} />
+              <CostInput label="Defender P2 / VM / mo" value={rateCard.defenderP2PerVmMonth} step={0.01} onChange={(value) => setRate('defenderP2PerVmMonth', value)} />
+              <CostInput label="Guest services / VM / mo" value={rateCard.guestConfigPerVmMonth} step={0.01} onChange={(value) => setRate('guestConfigPerVmMonth', value)} />
+              <CostInput label="Log Analytics / GB" value={rateCard.logAnalyticsPerGb} step={0.01} onChange={(value) => setRate('logAnalyticsPerGb', value)} />
+            </div>
+            <div className="csp-reference-rates">
+              <span>SC Standard CSP NCE 1-year reference<strong>{money(rateCard.systemCenterStandardCspOneYearPerTwoCorePack)} / 2-core pack</strong></span>
+              <span>SC Standard CSP NCE 3-year reference<strong>{money(rateCard.systemCenterStandardCspThreeYearPerTwoCorePack)} / 2-core pack</strong></span>
+            </div>
+            <p className="small"><strong>Reference only:</strong> these CSP figures are Standard edition, not a Datacenter substitute for dense virtualization, and are excluded from calculations.</p>
+          </div>
+        </details>
 
         <div className="note">
           <strong>{licensableCoresPerHost} licensable cores per host</strong>
@@ -582,16 +680,59 @@ function CostPanel({
       <section className="panel cost-results">
         <div className="panel-heading-row">
           <div>
-            <h2>{inputs.model === 'perpetual' ? 'Perpetual + Software Assurance' : 'SPLA'} comparison</h2>
-            <p className="small muted">Windows Server is included in every total so the effective VM cost stays comparable.</p>
+            <h2>{commercial.motion === 'internal' ? 'Internal platform economics' : commercial.motion === 'csp' ? 'CSP customer pricing' : 'MSP hosted-service economics'}</h2>
+            <p className="small muted">Commercial model uses {selectedCost.plane.shortName} over {inputs.termYears} year{inputs.termYears === 1 ? '' : 's'} with {inputs.model === 'spla' ? 'SPLA monthly' : 'perpetual + SA'} licensing.</p>
           </div>
           <Calculator size={22} />
         </div>
 
+        <div className="commercial-kpis">
+          <article><span>{isCommercial ? 'Customer contract value' : 'Term platform TCO'}</span><strong>{money(isCommercial ? economics.totalRevenue : economics.totalProviderCost)}</strong><small>{inputs.termYears}-year model</small></article>
+          <article><span>Provider COGS</span><strong>{money(economics.totalProviderCost)}</strong><small>software + Azure + access + delivery</small></article>
+          <article className={isCommercial && economics.grossProfit < 0 ? 'negative' : ''}><span>Gross profit</span><strong>{isCommercial ? money(economics.grossProfit) : '—'}</strong><small>before tax and financing</small></article>
+          <article className={isCommercial && economics.grossMarginPct < commercial.targetGrossMarginPct / 100 ? 'negative' : 'positive'}><span>Gross margin</span><strong>{isCommercial ? `${(economics.grossMarginPct * 100).toFixed(1)}%` : '—'}</strong><small>{commercial.targetGrossMarginPct}% target</small></article>
+          <article><span>Customer / tenant / month</span><strong>{isCommercial ? money(economics.customerPerTenantMonth) : '—'}</strong><small>{commercial.tenantCount} tenant{commercial.tenantCount === 1 ? '' : 's'}</small></article>
+          <article><span>Customer / managed VM / month</span><strong>{isCommercial ? money(economics.customerPerVmMonth) : '—'}</strong><small>{inputs.vms.toLocaleString()} managed VMs</small></article>
+        </div>
+
+        <div className="economics-grid">
+          <div className="economics-bridge">
+            <h3>Provider cost and revenue bridge</h3>
+            <div><span>Microsoft software COGS</span><strong>{money(economics.softwareCost)}</strong></div>
+            <div><span>Azure consumption COGS</span><strong>{money(economics.azureCost)}</strong></div>
+            <div><span>{inputs.model === 'spla' ? 'RDS SAL COGS' : 'RDS CAL COGS'}</span><strong>{money(economics.accessLicensingCost)}</strong></div>
+            <div><span>Delivery + operations COGS</span><strong>{money(economics.deliveryCost)}</strong></div>
+            <div className="bridge-total"><span>Total provider COGS</span><strong>{money(economics.totalProviderCost)}</strong></div>
+            {isCommercial && <div><span>License resale revenue</span><strong>{money(economics.licenseRevenue)}</strong></div>}
+            {isCommercial && <div><span>Azure resale revenue</span><strong>{money(economics.azureRevenue)}</strong></div>}
+            {isCommercial && <div><span>Managed service revenue</span><strong>{money(economics.serviceRevenue)}</strong></div>}
+            {isCommercial && <div className="bridge-total"><span>Total customer revenue</span><strong>{money(economics.totalRevenue)}</strong></div>}
+            {isCommercial && economics.revenueGap > 0 && <div className="bridge-gap"><span>Revenue needed for target margin</span><strong>+{money(economics.revenueGap)}</strong></div>}
+          </div>
+          <div className="commercial-recommendations">
+            <h3>Commercial recommendations</h3>
+            <div className="recommendation-stack">
+              {economics.recommendations.map((recommendation) => (
+                <article className={`commercial-recommendation ${recommendation.tone}`} key={`${recommendation.title}-${recommendation.detail}`}>
+                  <strong>{recommendation.title}</strong>
+                  <p>{recommendation.detail}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="comparison-heading">
+          <div>
+            <h2>{inputs.model === 'perpetual' ? 'Perpetual + Software Assurance' : 'SPLA'} management-plane comparison</h2>
+            <p className="small muted">Select a plane to use it in the commercial model. Windows Server is included in every total.</p>
+          </div>
+        </div>
+
         <div className="cost-card-grid">
           {costs.map(({ plane, total, managementOnly, perVmMonth, azure }) => (
-            <article className={`cost-card ${plane.id === 'scvmm' ? 'recommended' : ''}`} key={plane.id}>
-              {plane.id === 'scvmm' && <span className="recommended-tag">Core fabric baseline</span>}
+            <article className={`cost-card ${plane.id === selectedPlane ? 'selected' : ''} ${plane.id === 'scvmm' ? 'recommended' : ''}`} key={plane.id}>
+              {plane.id === selectedPlane && <span className="recommended-tag">Commercial selection</span>}
               <h3>{plane.shortName}</h3>
               <strong className="cost-total">{money(total)}</strong>
               <span>over {inputs.termYears} year{inputs.termYears === 1 ? '' : 's'}</span>
@@ -600,6 +741,7 @@ function CostPanel({
                 {plane.id === 'arc-scvmm' && <div><span>Azure services</span><strong>{money(azure)}</strong></div>}
                 <div><span>Per VM / month</span><strong>{money(perVmMonth)}</strong></div>
               </div>
+              <button className="cost-card-select" onClick={() => setSelectedPlane(plane.id)}>{plane.id === selectedPlane ? 'Selected for pricing' : 'Use for pricing'}</button>
             </article>
           ))}
         </div>
@@ -607,10 +749,10 @@ function CostPanel({
         <div className="price-basis">
           <h3>Current model basis</h3>
           <div className="price-basis-grid">
-            <span>Windows DC / 2 cores<strong>{inputs.model === 'perpetual' ? money(PRICE_BOOK.windowsPerTwoCorePack) : `${money(PRICE_BOOK.windowsSplaPerTwoCorePackMonth)}/mo`}</strong></span>
-            <span>System Center DC / 2 cores<strong>{inputs.model === 'perpetual' ? money(PRICE_BOOK.systemCenterPerTwoCorePack) : `${money(PRICE_BOOK.systemCenterSplaPerTwoCorePackMonth)}/mo`}</strong></span>
-            <span>SQL Standard / core<strong>{money(PRICE_BOOK.sqlStandardPerCore)}</strong></span>
-            <span>Annual SA assumption<strong>{(PRICE_BOOK.softwareAssuranceAnnualRate * 100).toFixed(0)}%</strong></span>
+            <span>Windows DC / 2 cores<strong>{inputs.model === 'perpetual' ? money(rateCard.windowsPerTwoCorePack) : `${money(rateCard.windowsSplaPerTwoCorePackMonth)}/mo`}</strong></span>
+            <span>System Center DC / 2 cores<strong>{inputs.model === 'perpetual' ? money(rateCard.systemCenterPerTwoCorePack) : `${money(rateCard.systemCenterSplaPerTwoCorePackMonth)}/mo`}</strong></span>
+            <span>SQL Standard / core<strong>{money(rateCard.sqlStandardPerCore)}</strong></span>
+            <span>Annual SA assumption<strong>{(rateCard.softwareAssuranceAnnualRate * 100).toFixed(0)}%</strong></span>
             <span>Arc meters / VM / month<strong>{money(arcCost.azurePerVmMonth)}</strong></span>
             <span>Log Analytics volume<strong>{inputs.logAnalyticsGbPerVm.toFixed(1)} GB / VM / month</strong></span>
           </div>
@@ -620,6 +762,10 @@ function CostPanel({
           <h3>Alternative licensing references — excluded from totals</h3>
           <div><span>Windows Server pay-as-you-go via Arc</span><strong>{money(windowsPaygReference)}</strong><small>over the selected term; no core minimum and AVMA is unavailable</small></div>
           <div><span>Azure Local host service equivalent</span><strong>{money(azureLocalReference)}</strong><small>reference only; Azure Hybrid Benefit and storage topology rules can change applicability</small></div>
+        </div>
+        <div className="note warn public-pricing-note">
+          <strong>Do not quote from this page without validation</strong>
+          CSP NCE and SPLA rights, discounts, incentives, Azure meters, taxes, and regional pricing change. Obtain a current Partner Center or distributor quote and confirm licensing responsibility in the customer agreement.
         </div>
       </section>
     </div>

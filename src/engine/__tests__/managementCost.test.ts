@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { calculatePlaneCost, type ManagementCostInputs } from '../managementCost'
+import {
+  calculatePlaneCost,
+  calculateProviderEconomics,
+  DEFAULT_MANAGEMENT_RATE_CARD,
+  type CommercialInputs,
+  type ManagementCostInputs,
+} from '../managementCost'
 
 const base: ManagementCostInputs = {
   hosts: 8,
@@ -37,5 +43,72 @@ describe('management-plane cost parity', () => {
   it('applies Microsoft core licensing floors', () => {
     const smallHost = { ...base, sockets: 1, coresPerSocket: 4, hosts: 1, vms: 10, termYears: 1 }
     expect(calculatePlaneCost('classic', smallHost).total).toBeCloseTo(8 * 846.38, 2)
+  })
+
+  it('accepts an editable rate card without changing the default workbook result', () => {
+    const custom = { ...DEFAULT_MANAGEMENT_RATE_CARD, windowsPerTwoCorePack: 1_000 }
+    expect(calculatePlaneCost('classic', base).total).toBeCloseTo(325_009.92, 2)
+    expect(calculatePlaneCost('classic', base, custom).total).toBeCloseTo(384_000, 2)
+  })
+})
+
+const commercial: CommercialInputs = {
+  motion: 'csp',
+  tenantCount: 2,
+  rdsUsers: 10,
+  microsoftDiscountPct: 10,
+  licenseMarkupPct: 10,
+  azureMarkupPct: 8,
+  onboardingDeliveryCostPerTenant: 1_000,
+  onboardingFeePerTenant: 5_000,
+  monthlyPlatformFeePerTenant: 1_000,
+  monthlyManagedFeePerVm: 20,
+  monthlyOpsCostPerVm: 5,
+  monthlySharedOpsCost: 500,
+  targetGrossMarginPct: 30,
+  useLighthouse: true,
+}
+
+describe('CSP and MSP provider economics', () => {
+  it('models CSP discounts, resale markups, service revenue, and Lighthouse guidance', () => {
+    const spla = { ...base, model: 'spla' as const }
+    const plane = calculatePlaneCost('classic', spla)
+    const result = calculateProviderEconomics('classic', plane, spla, commercial)
+
+    expect(result.softwareCost).toBeCloseTo(207_360, 2)
+    expect(result.accessLicensingCost).toBeCloseTo(2_106, 2)
+    expect(result.licenseRevenue).toBeCloseTo(230_412.6, 2)
+    expect(result.serviceRevenue).toBeCloseTo(312_400, 2)
+    expect(result.recommendations.some((item) => item.title.includes('Lighthouse'))).toBe(true)
+    expect(result.recommendations.some((item) => item.title.includes('channel and licensing'))).toBe(true)
+  })
+
+  it('shows when MSP service pricing does not recover provider COGS at target margin', () => {
+    const spla = { ...base, model: 'spla' as const }
+    const plane = calculatePlaneCost('scvmm', spla)
+    const result = calculateProviderEconomics('scvmm', plane, spla, { ...commercial, motion: 'msp' })
+
+    expect(result.licenseRevenue).toBe(0)
+    expect(result.totalProviderCost).toBeGreaterThan(result.totalRevenue)
+    expect(result.revenueGap).toBeGreaterThan(0)
+    expect(result.requiredMonthlyPerVmIncrease).toBeGreaterThan(0)
+    expect(result.recommendations.some((item) => item.title.includes('below the target'))).toBe(true)
+  })
+
+  it('switches RDS access from one-time CALs to monthly SPLA SALs', () => {
+    const perpetualPlane = calculatePlaneCost('classic', base)
+    const perpetual = calculateProviderEconomics('classic', perpetualPlane, base, { ...commercial, microsoftDiscountPct: 0 })
+    const splaInputs = { ...base, model: 'spla' as const }
+    const splaPlane = calculatePlaneCost('classic', splaInputs)
+    const spla = calculateProviderEconomics('classic', splaPlane, splaInputs, { ...commercial, microsoftDiscountPct: 0 })
+
+    expect(perpetual.accessLicensingCost).toBeCloseTo(10 * 129.99, 2)
+    expect(spla.accessLicensingCost).toBeCloseTo(10 * 6.5 * 36, 2)
+  })
+
+  it('flags perpetual licensing for a provider-hosted MSP service', () => {
+    const plane = calculatePlaneCost('scvmm', base)
+    const result = calculateProviderEconomics('scvmm', plane, base, { ...commercial, motion: 'msp' })
+    expect(result.recommendations.some((item) => item.title.includes('hosted licensing'))).toBe(true)
   })
 })

@@ -356,12 +356,17 @@ tr.infeasible td { opacity: 0.48; }
 .license-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin: 14px 0 18px; padding: 3px; background: #e9eef3; border-radius: 7px; }
 .license-toggle button { padding: 7px; color: var(--muted); background: transparent; border: 0; border-radius: 5px; cursor: pointer; font-size: 10px; font-weight: 800; }
 .license-toggle button.active { color: var(--navy-900); background: #fff; box-shadow: 0 1px 5px rgba(15, 38, 58, 0.09); }
+.commercial-toggle { grid-template-columns: repeat(3, 1fr); }
+.commercial-toggle button { min-height: 44px; line-height: 1.25; }
+.commercial-explainer { min-height: 44px; margin: -8px 0 18px; line-height: 1.5; }
+.commercial-controls { margin-top: 9px; }
 .meter-toggles { display: grid; gap: 6px; margin: 0 0 15px; }
 .cost-toggle { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 7px; align-items: start; padding: 7px 9px; color: #506375; background: #f6f9fb; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-size: 10px; line-height: 1.4; }
 .cost-toggle input { margin-top: 1px; }
 .cost-card-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; }
 .cost-card { position: relative; padding: 16px; background: #fbfdfe; border: 1px solid var(--line); border-radius: 9px; }
 .cost-card.recommended { border-color: #63b8c8; box-shadow: inset 0 3px var(--cyan); }
+.cost-card.selected { border-color: var(--blue); box-shadow: inset 0 3px var(--blue), 0 3px 13px rgba(24, 96, 145, 0.12); }
 .recommended-tag { position: absolute; top: -9px; left: 10px; padding: 2px 6px; color: #fff; background: var(--cyan); border-radius: 99px; font-size: 8px; font-weight: 800; text-transform: uppercase; }
 .cost-card h3 { margin: 2px 0 13px; font-size: 12px; }
 .cost-total { display: block; color: var(--navy-900); font-size: 20px; font-variant-numeric: tabular-nums; letter-spacing: -0.025em; }
@@ -369,6 +374,43 @@ tr.infeasible td { opacity: 0.48; }
 .cost-breakdown { display: grid; gap: 6px; margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--line); }
 .cost-breakdown div { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 9px; }
 .cost-breakdown strong { color: #43566a; }
+.cost-card-select { width: 100%; margin-top: 13px; padding: 7px 8px; color: var(--blue); background: var(--info-bg); border: 1px solid #c5dceb; border-radius: 5px; cursor: pointer; font-size: 9px; font-weight: 800; }
+.cost-card.selected .cost-card-select { color: #fff; background: var(--blue); border-color: var(--blue); }
+.commercial-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin: 18px 0; }
+.commercial-kpis article { padding: 13px 14px; background: #f5f8fa; border: 1px solid var(--line); border-radius: 8px; }
+.commercial-kpis span, .commercial-kpis small { display: block; color: var(--muted); font-size: 9px; }
+.commercial-kpis strong { display: block; margin: 5px 0 2px; color: var(--navy-900); font-size: 20px; font-variant-numeric: tabular-nums; }
+.commercial-kpis article.negative { background: var(--err-bg); border-color: #efc5c9; }
+.commercial-kpis article.negative strong { color: var(--err); }
+.commercial-kpis article.positive { background: var(--ok-bg); border-color: #b9ddcf; }
+.commercial-kpis article.positive strong { color: var(--ok); }
+.economics-grid { display: grid; grid-template-columns: minmax(290px, 0.75fr) minmax(340px, 1.25fr); gap: 13px; margin-bottom: 24px; }
+.economics-bridge, .commercial-recommendations { padding: 15px; background: #fbfdfe; border: 1px solid var(--line); border-radius: 9px; }
+.economics-bridge h3, .commercial-recommendations h3 { margin-top: 0; }
+.economics-bridge > div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; color: #536577; border-bottom: 1px solid var(--line); font-size: 10px; }
+.economics-bridge > div:last-child { border-bottom: 0; }
+.economics-bridge strong { color: var(--navy-800); font-variant-numeric: tabular-nums; }
+.economics-bridge .bridge-total { color: var(--navy-900); border-bottom-color: #9fb5c5; font-weight: 800; }
+.economics-bridge .bridge-gap strong { color: var(--err); }
+.recommendation-stack { display: grid; gap: 7px; max-height: 430px; overflow: auto; padding-right: 3px; }
+.commercial-recommendation { padding: 10px 11px; background: #f5f8fa; border-left: 3px solid #8aa0b3; border-radius: 5px; }
+.commercial-recommendation.good { background: var(--ok-bg); border-left-color: var(--ok); }
+.commercial-recommendation.warn { background: var(--warn-bg); border-left-color: var(--warn); }
+.commercial-recommendation.action { background: var(--info-bg); border-left-color: var(--blue); }
+.commercial-recommendation strong { color: var(--navy-800); font-size: 10px; }
+.commercial-recommendation p { margin: 4px 0 0; color: #536577; font-size: 9px; line-height: 1.5; }
+.comparison-heading { margin: 23px 0 14px; padding-top: 20px; border-top: 1px solid var(--line); }
+.comparison-heading h2 { margin-bottom: 4px; }
+.rate-card-details { margin: 15px 0; background: #fbfdfe; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.rate-card-details summary { display: flex; justify-content: space-between; gap: 10px; padding: 10px 11px; color: var(--navy-800); cursor: pointer; font-size: 10px; font-weight: 800; }
+.rate-card-details summary b { color: var(--warn); font-size: 8px; text-transform: uppercase; }
+.rate-card-details[open] summary { background: #f2f6f9; border-bottom: 1px solid var(--line); }
+.rate-card-body { padding: 11px; }
+.rate-card-body > p { margin: 0 0 11px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.csp-reference-rates { display: grid; gap: 6px; margin: 10px 0; }
+.csp-reference-rates span { padding: 8px; color: var(--muted); background: #f4f7f9; border-radius: 5px; font-size: 9px; }
+.csp-reference-rates strong { display: block; margin-top: 2px; color: var(--navy-800); }
+.public-pricing-note { margin-top: 18px; }
 .price-basis { margin-top: 22px; padding-top: 17px; border-top: 1px solid var(--line); }
 .price-basis h3 { margin: 0 0 10px; }
 .price-basis-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
@@ -398,6 +440,8 @@ tr.infeasible td { opacity: 0.48; }
   .cost-card-grid { grid-template-columns: repeat(2, 1fr); }
   .advisor-context { grid-template-columns: repeat(3, 1fr); }
   .advisor-context .advisor-freshness { grid-column: 1 / -1; }
+  .commercial-kpis { grid-template-columns: repeat(2, 1fr); }
+  .economics-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 920px) {
@@ -442,4 +486,5 @@ tr.infeasible td { opacity: 0.48; }
   .source-row { grid-template-columns: 1fr; gap: 8px; }
   .source-row a { width: fit-content; }
   .finding { grid-template-columns: 62px 58px minmax(180px, 1fr); }
+  .commercial-toggle, .commercial-kpis { grid-template-columns: 1fr; }
 }
