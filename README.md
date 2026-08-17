@@ -30,7 +30,7 @@ that can be opened directly for offline and disconnected use.
 - Workload inventory with RVTools import and manual entry
 - Hardware, resilience, storage, and tier assumptions
 - Forward comparison across SAN, S2D, MAP, and hybrid designs
-- Existing-hardware headroom and reverse sizing
+- Independent existing-hardware workspace with editable compute, SAN/S2D storage, reserves, workload policies, headroom, and reverse sizing
 - CSV/LUN layout and validation findings
 - Management Plane Advisor with 10 qualifying questions, the complete 85-row capability matrix, VMware translation, field guidance, sourced caveats, 36-SKU reference, and editable cost model
 - CSP customer and MSP hosted-platform economics with discounts, markups, RDS SAL/CAL access, delivery cost, tenant/VM pricing, target-margin gap, Lighthouse guidance, and dynamic recommendations

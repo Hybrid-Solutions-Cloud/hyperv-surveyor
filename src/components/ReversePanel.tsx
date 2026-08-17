@@ -1,18 +1,33 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo } from 'react'
 import { solveReverse } from '../engine/solve'
-import { TIER_IDS } from '../engine/rules'
-import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
+import { RESILIENCY, TIER_IDS } from '../engine/rules'
+import type { ClusterConfig, Resiliency, TierId, TierPolicy, Vm } from '../engine/types'
 import { Card, Field, FindingsList, Meter, NumberInput, fmt0, fmt1 } from './Shared'
 
 interface Props {
   cfg: ClusterConfig
+  setCfg: (cfg: ClusterConfig) => void
   tiers: Record<TierId, TierPolicy>
+  setTiers: (tiers: Record<TierId, TierPolicy>) => void
+  nodes: number
+  setNodes: (nodes: number) => void
+  reset: () => void
   vms: Vm[]
 }
 
-export function ReversePanel({ cfg, tiers, vms }: Props) {
-  const [nodes, setNodes] = useState(8)
+export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, reset, vms }: Props) {
   const r = useMemo(() => solveReverse(cfg, nodes, vms, tiers), [cfg, nodes, vms, tiers])
+  const set = (partial: Partial<ClusterConfig>) => setCfg({ ...cfg, ...partial })
+  const setNode = (partial: Partial<ClusterConfig['node']>) => setCfg({ ...cfg, node: { ...cfg.node, ...partial } })
+  const setSan = (partial: Partial<ClusterConfig['san']>) => setCfg({ ...cfg, san: { ...cfg.san, ...partial } })
+  const setTier = (id: TierId, partial: Partial<TierPolicy>) => setTiers({ ...tiers, [id]: { ...tiers[id], ...partial } })
+  const setExistingNodes = (value: number) => {
+    const nextNodes = Math.min(64, Math.max(1, value))
+    setNodes(nextNodes)
+    if (cfg.spareNodes >= nextNodes) set({ spareNodes: Math.max(0, nextNodes - 1) })
+  }
+  const usesS2d = cfg.architecture === 's2d' || cfg.architecture === 'hybrid'
+  const usesSan = cfg.architecture === 'san' || cfg.architecture === 'hybrid'
 
   const pctCpu = r.availablePCores > 0 ? r.usedPCores / r.availablePCores : 0
   const pctRam = r.availableRamGiB > 0 ? r.usedRamGiB / r.availableRamGiB : 0
@@ -22,15 +37,128 @@ export function ReversePanel({ cfg, tiers, vms }: Props) {
   return (
     <div className="stack">
       <div className="panel">
-        <h2>Hardware you already have</h2>
-        <p className="small muted" style={{ marginTop: -6 }}>
-          The customer is not refreshing. Fix the node count and the node spec on the Configuration tab,
-          and this answers what fits — and, more usefully, <strong>which constraint runs out first</strong>.
-        </p>
-        <div style={{ maxWidth: 240 }}>
-          <Field label="Nodes in the existing cluster">
-            <NumberInput value={nodes} min={1} max={64} onChange={setNodes} />
-          </Field>
+        <div className="panel-heading-row">
+          <div>
+            <h2>Enter the hardware you already own</h2>
+            <p className="small muted">This is an independent capacity workspace. These values do not read from or change the proposed-design assumptions.</p>
+          </div>
+          <button className="btn ghost compact" type="button" onClick={reset}>Reset existing hardware</button>
+        </div>
+
+        <div className="capacity-input-section">
+          <h3>Cluster foundation</h3>
+          <div className="capacity-input-grid">
+            <Field label="Existing hosts">
+              <NumberInput value={nodes} min={1} max={64} onChange={setExistingNodes} />
+            </Field>
+            <Field label="Storage architecture">
+              <select value={cfg.architecture} onChange={event => set({ architecture: event.target.value as ClusterConfig['architecture'] })}>
+                <option value="san">SAN-backed cluster</option>
+                <option value="s2d">Storage Spaces Direct</option>
+                <option value="hybrid">S2D + SAN hybrid</option>
+              </select>
+            </Field>
+            <Field label="Reserved / unavailable hosts" hint="Hosts kept out of normal workload placement for failure or maintenance capacity.">
+              <NumberInput value={cfg.spareNodes} min={0} max={Math.max(0, nodes - 1)} onChange={n => set({ spareNodes: Math.min(Math.max(0, nodes - 1), n) })} />
+            </Field>
+            <Field label="Demand multiplier" hint="Use 1.0 for current demand; 1.2 adds 20% forecast growth.">
+              <NumberInput value={cfg.growthFactor} min={0.1} step={0.05} onChange={n => set({ growthFactor: Math.max(0.1, n) })} />
+            </Field>
+            <Field label="Backup method">
+              <select value={cfg.backupMethod} onChange={event => set({ backupMethod: event.target.value as ClusterConfig['backupMethod'] })}>
+                <option value="rct">Hyper-V RCT / ReFS block clone / SQL native</option>
+                <option value="vss-volsnap">VSS / volsnap based</option>
+              </select>
+            </Field>
+          </div>
+        </div>
+
+        <div className="capacity-input-section">
+          <h3>Per-host compute</h3>
+          <div className="capacity-input-grid">
+            <Field label="Sockets / host"><NumberInput value={cfg.node.sockets} min={1} max={8} onChange={n => setNode({ sockets: Math.max(1, n) })} /></Field>
+            <Field label="Physical cores / socket"><NumberInput value={cfg.node.coresPerSocket} min={1} onChange={n => setNode({ coresPerSocket: Math.max(1, n) })} /></Field>
+            <Field label="Installed RAM / host (GiB)"><NumberInput value={cfg.node.ramGiB} min={16} step={16} onChange={n => setNode({ ramGiB: Math.max(16, n) })} /></Field>
+            <Field label="SMT capacity factor" hint="Leave at 1.0 unless you intentionally credit SMT capacity."><NumberInput value={cfg.smtFactor} min={1} max={2} step={0.1} onChange={n => set({ smtFactor: Math.min(2, Math.max(1, n)) })} /></Field>
+            <Field label="Host CPU reserve %"><NumberInput value={cfg.hostCoreReservePct * 100} min={0} max={100} step={1} onChange={n => set({ hostCoreReservePct: Math.min(100, Math.max(0, n)) / 100 })} /></Field>
+            <Field label="Host RAM reserve (GiB)"><NumberInput value={cfg.hostRamReserveGiB} min={0} step={4} onChange={n => set({ hostRamReserveGiB: n })} /></Field>
+            <Field label="Host RAM reserve %"><NumberInput value={cfg.hostRamReservePct * 100} min={0} max={100} step={1} onChange={n => set({ hostRamReservePct: Math.min(100, Math.max(0, n)) / 100 })} /></Field>
+          </div>
+        </div>
+
+        {usesSan && (
+          <div className="capacity-input-section">
+            <h3>Existing SAN capacity</h3>
+            <div className="capacity-input-grid">
+              <Field label="Array usable capacity (TiB)" hint="Enter usable—not effective or provisioned—capacity.">
+                <NumberInput value={cfg.san.usableTiB} min={0} step={0.1} onChange={n => setSan({ usableTiB: Math.max(0, n) })} />
+              </Field>
+              <Field label="Measured data reduction ratio" hint="Use 1.0 when reduction is unavailable or uncertain.">
+                <NumberInput value={cfg.san.drr} min={1} step={0.1} onChange={n => setSan({ drr: Math.max(1, n) })} />
+              </Field>
+            </div>
+          </div>
+        )}
+
+        {usesS2d && (
+          <div className="capacity-input-section">
+            <h3>Existing Storage Spaces Direct media</h3>
+            <div className="capacity-input-grid">
+              <Field label="Media layout">
+                <select value={cfg.node.media} onChange={event => setNode({ media: event.target.value as ClusterConfig['node']['media'] })}>
+                  <option value="all-flash">All-flash</option>
+                  <option value="hybrid">Hybrid HDD + cache</option>
+                </select>
+              </Field>
+              <Field label="Capacity drives / host"><NumberInput value={cfg.node.capacityDrivesPerNode} min={0} onChange={n => setNode({ capacityDrivesPerNode: n })} /></Field>
+              <Field label="Capacity drive size (TB)"><NumberInput value={cfg.node.capacityDriveTB} min={0} step={0.01} onChange={n => setNode({ capacityDriveTB: n })} /></Field>
+              <Field label="Cache drives / host"><NumberInput value={cfg.node.cacheDrivesPerNode} min={0} onChange={n => setNode({ cacheDrivesPerNode: n })} /></Field>
+              <Field label="Cache drive size (TB)"><NumberInput value={cfg.node.cacheDriveTB} min={0} step={0.01} onChange={n => setNode({ cacheDriveTB: n })} /></Field>
+              <Field label="Current volume resiliency">
+                <select value={cfg.resiliency} onChange={event => set({ resiliency: event.target.value as Resiliency })}>
+                  {Object.values(RESILIENCY).map(option => <option value={option.id} key={option.id}>{option.label}</option>)}
+                </select>
+              </Field>
+              {(cfg.resiliency === 'nested-map' || cfg.resiliency === 'mirror-accelerated-parity') && (
+                <Field label="Mirror share">
+                  <select value={cfg.nestedMapMirrorPct} onChange={event => set({ nestedMapMirrorPct: Number(event.target.value) as ClusterConfig['nestedMapMirrorPct'] })}>
+                    <option value={0.1}>10%</option>
+                    <option value={0.2}>20%</option>
+                    <option value={0.3}>30%</option>
+                  </select>
+                </Field>
+              )}
+              {cfg.architecture === 'hybrid' && (
+                <Field label={`Storage on S2D: ${(cfg.hybridS2dShare * 100).toFixed(0)}%`}>
+                  <input type="range" min={0.1} max={0.9} step={0.05} value={cfg.hybridS2dShare} onChange={event => set({ hybridS2dShare: Number(event.target.value) })} />
+                </Field>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="capacity-input-section">
+          <h3>Independent workload treatment</h3>
+          <p className="small muted">The VM inventory is shared intentionally; these capacity policies are not shared with forward design.</p>
+          <div className="scroll">
+            <table className="capacity-policy-table">
+              <thead><tr><th>Workload tier</th><th className="num">vCPU : physical core</th><th className="num">Demand factor</th></tr></thead>
+              <tbody>
+                {TIER_IDS.map(id => (
+                  <tr key={id}>
+                    <td><strong>{tiers[id].label}</strong></td>
+                    <td><NumberInput value={tiers[id].oversubscription} min={0.1} step={0.5} onChange={n => setTier(id, { oversubscription: Math.max(0.1, n) })} /></td>
+                    <td><NumberInput value={tiers[id].rightSizingFactor} min={0.1} max={2} step={0.05} onChange={n => setTier(id, { rightSizingFactor: Math.min(2, Math.max(0.1, n)) })} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="note ok">
+          <strong>{vms.filter(vm => vm.include).length.toLocaleString()} included VMs are being tested against this hardware</strong>
+          Change the workload inventory separately; all hardware and capacity-policy values above belong only to this calculator.
         </div>
       </div>
 
