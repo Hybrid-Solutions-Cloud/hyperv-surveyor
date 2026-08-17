@@ -416,6 +416,9 @@ tr.infeasible td { opacity: 0.48; }
 .capacity-input-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; align-items: start; }
 .capacity-policy-table { min-width: 520px; }
 .capacity-policy-table td:nth-child(2), .capacity-policy-table td:nth-child(3) { width: 190px; }
+.capacity-policy-details summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--navy-800); cursor: pointer; font-size: 13px; font-weight: 800; }
+.capacity-policy-details summary b { color: var(--muted); font-size: 9px; text-align: right; text-transform: uppercase; letter-spacing: 0.04em; }
+.capacity-policy-body { margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--line); }
 .price-basis { margin-top: 22px; padding-top: 17px; border-top: 1px solid var(--line); }
 .price-basis h3 { margin: 0 0 10px; }
 .price-basis-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }

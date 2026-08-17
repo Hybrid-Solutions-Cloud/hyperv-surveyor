@@ -137,33 +137,25 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
           </div>
         )}
 
-        <div className="capacity-input-section">
-          <h3>Independent workload treatment</h3>
-          <p className="small muted">The VM inventory is shared intentionally; these capacity policies are not shared with forward design.</p>
-          <div className="scroll">
-            <table className="capacity-policy-table">
-              <thead><tr><th>Workload tier</th><th className="num">vCPU : physical core</th><th className="num">Demand factor</th></tr></thead>
-              <tbody>
-                {TIER_IDS.map(id => (
-                  <tr key={id}>
-                    <td><strong>{tiers[id].label}</strong></td>
-                    <td><NumberInput value={tiers[id].oversubscription} min={0.1} step={0.5} onChange={n => setTier(id, { oversubscription: Math.max(0.1, n) })} /></td>
-                    <td><NumberInput value={tiers[id].rightSizingFactor} min={0.1} max={2} step={0.05} onChange={n => setTier(id, { rightSizingFactor: Math.min(2, Math.max(0.1, n)) })} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         <div className="note ok">
-          <strong>{vms.filter(vm => vm.include).length.toLocaleString()} included VMs are being tested against this hardware</strong>
-          Change the workload inventory separately; all hardware and capacity-policy values above belong only to this calculator.
+          <strong>This existing-hardware profile is saved separately</strong>
+          Nothing entered here changes the workload-driven forward design.
         </div>
       </div>
 
       <div className="panel">
-        <h2>Headroom</h2>
+        <h2>Hardware capacity</h2>
+        <p className="small muted" style={{ marginTop: -6 }}>
+          Physical capacity after unavailable hosts and host reserves, followed by the current inventory fit.
+        </p>
+        <div className="grid cards" style={{ marginBottom: 18 }}>
+          <Card k="Usable CPU" v={fmt1(r.availablePCores)} s="physical cores" />
+          <Card k="Usable memory" v={fmt1(r.availableRamGiB / 1024)} s="TiB" />
+          <Card k="Usable storage" v={fmt1(r.availableStorageTiB)} s="TiB" />
+          <Card k="Workload hosts" v={r.workloadNodes} s={`${nodes} total, ${cfg.spareNodes} unavailable`} />
+        </div>
+        <h3>Current workload fit</h3>
+        <p className="small muted">Testing {vms.filter(vm => vm.include).length.toLocaleString()} included VMs from the workload inventory.</p>
         <div className={`note ${over ? 'err' : 'ok'}`}>
           <strong>{r.binding === 'cpu' ? 'CPU' : r.binding === 'memory' ? 'Memory' : 'Storage'} binds first</strong>
           {r.bindingExplanation}
@@ -176,7 +168,7 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
           <Card k="Spare cores" v={fmt1(r.headroomPCores)} s={r.headroomPCores < 0 ? 'over-committed' : 'physical'} />
           <Card k="Spare memory" v={fmt1(r.headroomRamGiB / 1024)} s="TiB" />
           <Card k="Spare storage" v={fmt1(r.headroomStorageTiB)} s="TiB" />
-          <Card k="Workload nodes" v={r.workloadNodes} s={`${nodes} total, N+${nodes - r.workloadNodes}`} />
+          <Card k="Included workloads" v={vms.filter(vm => vm.include).length.toLocaleString()} s="VMs assessed" />
         </div>
       </div>
 
@@ -213,6 +205,35 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
         <p className="small muted" style={{ marginTop: 8 }}>
           These are mutually exclusive — filling one tier consumes the headroom the others would have used.
         </p>
+      </div>
+
+      <div className="panel">
+        <details className="capacity-policy-details">
+          <summary>
+            <span>Advanced workload-fit assumptions</span>
+            <b>Optional · affects fit calculations, not hardware inventory</b>
+          </summary>
+          <div className="capacity-policy-body">
+            <p className="small muted">
+              Use these only when the existing environment has measured consolidation or right-sizing policies.
+              They are independent from the workload-driven forward-design assumptions.
+            </p>
+            <div className="scroll">
+              <table className="capacity-policy-table">
+                <thead><tr><th>Workload tier</th><th className="num">vCPU : physical core</th><th className="num">Demand factor</th></tr></thead>
+                <tbody>
+                  {TIER_IDS.map(id => (
+                    <tr key={id}>
+                      <td><strong>{tiers[id].label}</strong></td>
+                      <td><NumberInput value={tiers[id].oversubscription} min={0.1} step={0.5} onChange={n => setTier(id, { oversubscription: Math.max(0.1, n) })} /></td>
+                      <td><NumberInput value={tiers[id].rightSizingFactor} min={0.1} max={2} step={0.05} onChange={n => setTier(id, { rightSizingFactor: Math.min(2, Math.max(0.1, n)) })} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
       </div>
 
       <div className="panel">
