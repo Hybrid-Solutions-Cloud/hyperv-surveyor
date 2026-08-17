@@ -86,7 +86,7 @@ export default function HomePage() {
 
       <a
         className="sister-banner"
-        href="https://surveyor.azurelocal.cloud"
+        href="https://azurelocal.cloud/azurelocal-surveyor"
         target="_blank"
         rel="noreferrer"
       >

@@ -69,7 +69,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="brand-caption">Plan, compare, and defend the design.</div>
         <a
           className="sister-link"
-          href="https://surveyor.azurelocal.cloud"
+          href="https://azurelocal.cloud/azurelocal-surveyor"
           target="_blank"
           rel="noreferrer"
         >

@@ -1,5 +1,7 @@
 # Hyper-V Surveyor
 
+[Open Hyper-V Surveyor](https://labs.hybridsolutions.cloud/hyperv-surveyor)
+
 Hyper-V Surveyor is a browser-based planning and decision-support application for Windows Server 2025 Hyper-V.
 It sizes SAN, Storage Spaces Direct, and hybrid cluster designs, identifies the binding constraint, plans CSV/LUN
 layout, and connects the technical design to a management-plane recommendation and licensing estimate.
