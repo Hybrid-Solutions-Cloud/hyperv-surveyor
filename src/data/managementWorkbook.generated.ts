@@ -2220,6 +2220,327 @@ export const MANAGEMENT_WORKBOOK = {
       "source": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/understand/faq"
     }
   ],
+  "platformLimits": [
+    {
+      "category": "Virtual machine",
+      "scope": "Generation 2 VM",
+      "capability": "Virtual processors",
+      "value": "2,048",
+      "appliesTo": "Windows Server 2025 Hyper-V host",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": "Generation 1 is limited to 64 virtual processors."
+    },
+    {
+      "category": "Virtual machine",
+      "scope": "Generation 2 VM",
+      "capability": "Memory",
+      "value": "240 TB",
+      "appliesTo": "Windows Server 2025 Hyper-V host",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": "The guest operating system can impose a lower limit."
+    },
+    {
+      "category": "Virtual machine",
+      "scope": "Virtual disk",
+      "capability": "VHDX capacity",
+      "value": "64 TB",
+      "appliesTo": "Windows Server 2025 Hyper-V host",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": "Legacy VHD is limited to 2,040 GB."
+    },
+    {
+      "category": "Virtual machine",
+      "scope": "Generation 2 VM",
+      "capability": "Virtual SCSI devices",
+      "value": "256",
+      "appliesTo": "Windows Server 2025 Hyper-V host",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": "Four SCSI controllers with up to 64 devices each."
+    },
+    {
+      "category": "Virtual machine",
+      "scope": "Generation 2 VM",
+      "capability": "Virtual network adapters",
+      "value": "64 standard",
+      "appliesTo": "Windows Server 2025 Hyper-V host",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": ""
+    },
+    {
+      "category": "Virtual machine",
+      "scope": "VM",
+      "capability": "Checkpoints",
+      "value": "50",
+      "appliesTo": "Windows Server 2025 Hyper-V host",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": "Practical use also depends on available storage."
+    },
+    {
+      "category": "Hyper-V host",
+      "scope": "Physical host",
+      "capability": "Running virtual machines",
+      "value": "1,024",
+      "appliesTo": "Windows Server 2025",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": "A supported maximum, not a recommended consolidation target."
+    },
+    {
+      "category": "Hyper-V host",
+      "scope": "Physical host",
+      "capability": "Logical processors",
+      "value": "2,048",
+      "appliesTo": "Windows Server 2025",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": ""
+    },
+    {
+      "category": "Hyper-V host",
+      "scope": "Physical host",
+      "capability": "Virtual processors in use",
+      "value": "2,048",
+      "appliesTo": "Windows Server 2025",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": "Hyper-V imposes no fixed virtual-processor-to-logical-processor ratio."
+    },
+    {
+      "category": "Hyper-V host",
+      "scope": "Physical host",
+      "capability": "Memory",
+      "value": "4 PB with 5-level paging; 256 TB with 4-level paging",
+      "appliesTo": "Windows Server 2025",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": "Platform firmware and hardware can impose lower limits."
+    },
+    {
+      "category": "Failover cluster",
+      "scope": "Hyper-V cluster",
+      "capability": "Nodes per cluster",
+      "value": "64",
+      "appliesTo": "Supported Windows Server versions",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": ""
+    },
+    {
+      "category": "Failover cluster",
+      "scope": "Hyper-V cluster",
+      "capability": "Running virtual machines",
+      "value": "8,000",
+      "appliesTo": "Supported Windows Server versions",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/virtualization/hyper-v/maximum-scale-limits",
+      "note": "Capacity planning and failure-domain headroom still apply."
+    },
+    {
+      "category": "Storage Spaces Direct",
+      "scope": "S2D cluster",
+      "capability": "Servers",
+      "value": "2-16",
+      "appliesTo": "Windows Server 2025",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/storage/storage-spaces/storage-spaces-direct-overview",
+      "note": "S2D sets the 16-node ceiling for hyperconverged and hybrid designs."
+    },
+    {
+      "category": "Storage Spaces Direct",
+      "scope": "S2D cluster",
+      "capability": "Drives",
+      "value": "Over 400",
+      "appliesTo": "Windows Server 2025",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/storage/storage-spaces/storage-spaces-direct-overview",
+      "note": "Microsoft describes this as a platform-scale figure, not a per-design recommendation."
+    },
+    {
+      "category": "Storage Spaces Direct",
+      "scope": "S2D cluster",
+      "capability": "Storage capacity",
+      "value": "Up to 4 PB",
+      "appliesTo": "Windows Server 2025",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/storage/storage-spaces/storage-spaces-direct-overview",
+      "note": "Raw and usable capacity differ based on resiliency and reserve."
+    },
+    {
+      "category": "Storage Spaces Direct",
+      "scope": "Each server",
+      "capability": "Minimum drive complement",
+      "value": "2 SSDs plus 4 additional drives",
+      "appliesTo": "Windows Server 2025",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/storage/storage-spaces/storage-spaces-direct-overview",
+      "note": "Eligible drives must be direct-attached to one server."
+    },
+    {
+      "category": "Storage Spaces Direct",
+      "scope": "Storage network",
+      "capability": "Recommended connectivity",
+      "value": "10+ GbE with RDMA",
+      "appliesTo": "Windows Server 2025",
+      "basis": "MS-REC",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/storage/storage-spaces/storage-spaces-direct-overview",
+      "note": "Microsoft strongly recommends SMB Direct using iWARP or RoCE."
+    },
+    {
+      "category": "SCVMM 2025",
+      "scope": "Management instance",
+      "capability": "Physical hosts",
+      "value": "1,000",
+      "appliesTo": "System Center VMM 2025",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/system-center/vmm/system-requirements?view=sc-vmm-2025",
+      "note": "Tested recommended maximum; topology and operations affect practical scale."
+    },
+    {
+      "category": "SCVMM 2025",
+      "scope": "Management instance",
+      "capability": "Virtual machines",
+      "value": "25,000",
+      "appliesTo": "System Center VMM 2025",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/system-center/vmm/system-requirements?view=sc-vmm-2025",
+      "note": "Tested recommended maximum."
+    },
+    {
+      "category": "SCVMM 2025",
+      "scope": "VMM management server",
+      "capability": "Recommended VM resources",
+      "value": "16 cores; 16 GB RAM; 10 GB application disk",
+      "appliesTo": "System Center VMM 2025",
+      "basis": "MS-REC",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/system-center/vmm/system-requirements?view=sc-vmm-2025",
+      "note": "The deployment designer adds a separate OS disk allowance and labels it as a tool assumption."
+    },
+    {
+      "category": "SCVMM 2025",
+      "scope": "VMM database",
+      "capability": "Recommended VM resources",
+      "value": "16 cores; 16 GB RAM; 200 GB disk",
+      "appliesTo": "System Center VMM 2025",
+      "basis": "MS-REC",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/system-center/vmm/system-requirements?view=sc-vmm-2025",
+      "note": "SQL Server 2019, 2022, and 2025 are supported."
+    },
+    {
+      "category": "SCVMM 2025",
+      "scope": "Highly available deployment",
+      "capability": "Required topology",
+      "value": "HA VMM + HA SQL + HA library",
+      "appliesTo": "System Center VMM 2025",
+      "basis": "MS-REC",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/system-center/vmm/plan-ha-install?view=sc-vmm-2025",
+      "note": "SQL and the library should not be installed on the VMM cluster."
+    },
+    {
+      "category": "Windows Admin Center",
+      "scope": "Administration Mode",
+      "capability": "Typical managed-host scale",
+      "value": "1-50 hosts",
+      "appliesTo": "Current WAC documentation",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/virtualization-mode-overview",
+      "note": "Guidance rather than a hard enforcement limit."
+    },
+    {
+      "category": "Windows Admin Center",
+      "scope": "Virtualization Mode instance",
+      "capability": "Scale",
+      "value": "1,000 hosts; 25,000 VMs",
+      "appliesTo": "WAC Virtualization Mode preview",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/virtualization-mode-overview",
+      "note": "Preview capability; reverify before production use."
+    },
+    {
+      "category": "Windows Admin Center",
+      "scope": "Virtualization Mode gateway",
+      "capability": "Minimum VM resources",
+      "value": "4 vCPU; 8 GB RAM; 10 GB free disk",
+      "appliesTo": "WAC Virtualization Mode preview",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/install-virtualization-mode",
+      "note": "Administration Mode and Virtualization Mode require separate systems."
+    },
+    {
+      "category": "Windows Admin Center",
+      "scope": "Administration Mode HA gateway",
+      "capability": "Cluster requirements",
+      "value": "2+ nodes; 10 GB CSV",
+      "appliesTo": "Current WAC gateway",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/deploy/high-availability",
+      "note": "Active/passive. This is not evidence of a supported Virtualization Mode HA design."
+    },
+    {
+      "category": "Arc-enabled SCVMM",
+      "scope": "SCVMM connection",
+      "capability": "Managed virtual machines",
+      "value": "15,000 per SCVMM server",
+      "appliesTo": "Arc-enabled SCVMM",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager",
+      "note": ""
+    },
+    {
+      "category": "Arc-enabled SCVMM",
+      "scope": "Arc resource bridge",
+      "capability": "Required free capacity",
+      "value": "4 vCPU; 32 GB RAM; 100 GB disk",
+      "appliesTo": "Arc-enabled SCVMM",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager",
+      "note": "Also requires static addressing, DNS resolution, and outbound connectivity."
+    },
+    {
+      "category": "Arc-enabled SCVMM",
+      "scope": "Arc resource bridge",
+      "capability": "Static IP addresses",
+      "value": "3",
+      "appliesTo": "Arc-enabled SCVMM",
+      "basis": "MS",
+      "verified": "2026-08-20",
+      "source": "https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager",
+      "note": "Two appliance VM addresses plus one control-plane address; contiguous addresses are supported by the documented custom range flow."
+    }
+  ],
   "caveats": [
     {
       "topic": "SPLA figures are estimates",

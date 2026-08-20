@@ -16,6 +16,15 @@ describe('management workbook coverage', () => {
     expect(MANAGEMENT_WORKBOOK.caveats).toHaveLength(9)
     expect(MANAGEMENT_WORKBOOK.advantages).toHaveLength(15)
     expect(MANAGEMENT_WORKBOOK.objections).toHaveLength(12)
+    expect(MANAGEMENT_WORKBOOK.platformLimits).toHaveLength(29)
+    expect(new Set(MANAGEMENT_WORKBOOK.platformLimits.map((row) => row.category)).size).toBe(7)
+  })
+
+  it('keeps a current source and verification date on every platform limit', () => {
+    for (const row of MANAGEMENT_WORKBOOK.platformLimits) {
+      expect(row.source).toMatch(/^https:\/\/learn\.microsoft\.com\//)
+      expect(row.verified).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    }
   })
 
   it('preserves evidence and VMware context on every capability', () => {
