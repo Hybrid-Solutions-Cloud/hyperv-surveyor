@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { DEFAULT_CONFIG, defaultTiers, demoFleet } from './defaults'
 import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
+import type { ManagementDeploymentInputs } from '../engine/managementDeployment'
 
 interface SurveyorState {
   customerName: string
@@ -12,6 +13,8 @@ interface SurveyorState {
   existingCapacityCfg: ClusterConfig
   existingCapacityTiers: Record<TierId, TierPolicy>
   existingCapacityNodes: number
+  managementDeploymentInputs: ManagementDeploymentInputs | null
+  includeManagementInSizing: boolean
   setCustomerName: (name: string) => void
   setVms: (vms: Vm[]) => void
   setCfg: (cfg: ClusterConfig) => void
@@ -20,6 +23,8 @@ interface SurveyorState {
   setExistingCapacityCfg: (cfg: ClusterConfig) => void
   setExistingCapacityTiers: (tiers: Record<TierId, TierPolicy>) => void
   setExistingCapacityNodes: (nodes: number) => void
+  setManagementDeploymentInputs: (inputs: ManagementDeploymentInputs) => void
+  setIncludeManagementInSizing: (include: boolean) => void
   resetExistingCapacity: () => void
   loadScenario: (scenario: {
     customerName?: string
@@ -40,6 +45,8 @@ const defaults = () => ({
   existingCapacityCfg: structuredClone(DEFAULT_CONFIG),
   existingCapacityTiers: defaultTiers(),
   existingCapacityNodes: 8,
+  managementDeploymentInputs: null as ManagementDeploymentInputs | null,
+  includeManagementInSizing: true,
 })
 
 export const useSurveyorStore = create<SurveyorState>()(
@@ -54,6 +61,8 @@ export const useSurveyorStore = create<SurveyorState>()(
       setExistingCapacityCfg: (existingCapacityCfg) => set({ existingCapacityCfg }),
       setExistingCapacityTiers: (existingCapacityTiers) => set({ existingCapacityTiers }),
       setExistingCapacityNodes: (existingCapacityNodes) => set({ existingCapacityNodes }),
+      setManagementDeploymentInputs: (managementDeploymentInputs) => set({ managementDeploymentInputs }),
+      setIncludeManagementInSizing: (includeManagementInSizing) => set({ includeManagementInSizing }),
       resetExistingCapacity: () => set({
         existingCapacityCfg: structuredClone(DEFAULT_CONFIG),
         existingCapacityTiers: defaultTiers(),
@@ -79,6 +88,8 @@ export const useSurveyorStore = create<SurveyorState>()(
         existingCapacityCfg: state.existingCapacityCfg,
         existingCapacityTiers: state.existingCapacityTiers,
         existingCapacityNodes: state.existingCapacityNodes,
+        managementDeploymentInputs: state.managementDeploymentInputs,
+        includeManagementInSizing: state.includeManagementInSizing,
         // Large customer inventories belong in an exported scenario file. Keeping the
         // common case makes refreshes friendly without exhausting localStorage.
         vms: state.vms.length <= 2_000 ? state.vms : [],

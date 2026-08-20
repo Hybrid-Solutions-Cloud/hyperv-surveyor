@@ -243,8 +243,13 @@ function DeploymentDesignerPanel({
     chosen.result.feasible ? chosen.result.nodes : 0,
     includedVms,
   )
-  const [inputs, setInputs] = useState<ManagementDeploymentInputs>(makeSuggestedInputs)
-  const [includeInSizing, setIncludeInSizing] = useState(true)
+  const storedInputs = useSurveyorStore((state) => state.managementDeploymentInputs)
+  const setInputs = useSurveyorStore((state) => state.setManagementDeploymentInputs)
+  const includeInSizing = useSurveyorStore((state) => state.includeManagementInSizing)
+  const setIncludeInSizing = useSurveyorStore((state) => state.setIncludeManagementInSizing)
+  const inputs: ManagementDeploymentInputs = storedInputs
+    ? { ...storedInputs, monitoring: storedInputs.monitoring ?? 'none' }
+    : makeSuggestedInputs()
   const plan = useMemo(() => planManagementDeployment(inputs), [inputs])
   const managementVms = useMemo(() => deploymentComponentsToVms(plan.components), [plan.components])
   const adjusted = useMemo(
@@ -291,6 +296,13 @@ function DeploymentDesignerPanel({
             <option value="none">None</option>
             <option value="wac-admin">Administration Mode</option>
             <option value="wac-virtual">Virtualization Mode (preview)</option>
+          </select>
+        </Field>
+
+        <Field label="Monitoring solution">
+          <select value={inputs.monitoring} onChange={(event) => setInputs({ ...inputs, monitoring: event.target.value as ManagementDeploymentInputs['monitoring'] })}>
+            <option value="none">None / existing monitoring</option>
+            <option value="scom">System Center Operations Manager 2025</option>
           </select>
         </Field>
 
@@ -365,7 +377,15 @@ function DeploymentDesignerPanel({
                 <tbody>
                   {plan.components.map((item) => (
                     <tr key={item.id}>
-                      <td><strong>{item.name}</strong><small>{item.role}</small></td>
+                      <td>
+                        <strong>{item.name}</strong>
+                        <small>{item.role}</small>
+                        {item.notes.length > 0 && (
+                          <ul className="deployment-component-notes">
+                            {item.notes.map((note) => <li key={note}>{note}</li>)}
+                          </ul>
+                        )}
+                      </td>
                       <td><strong>{item.count}</strong></td>
                       <td>{item.availability}</td>
                       <td>{item.resourceType === 'vm'
