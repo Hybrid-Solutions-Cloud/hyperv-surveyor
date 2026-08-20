@@ -124,6 +124,17 @@ const data = {
     finding: String(row[1]),
     source: String(row[2]),
   })),
+  platformLimits: sheetRows('Platform Limits').slice(4).filter((row) => row[0] && row[2]).map((row) => ({
+    category: String(row[0]),
+    scope: String(row[1]),
+    capability: String(row[2]),
+    value: String(row[3]),
+    appliesTo: String(row[4]),
+    basis: String(row[5]),
+    verified: String(row[6]),
+    source: String(row[7]),
+    note: String(row[8]),
+  })),
   caveats: sheetRows('Sources & Caveats').slice(42).filter((row) => row[0] && row[1]).map((row) => ({
     topic: String(row[0]),
     detail: String(row[1]),

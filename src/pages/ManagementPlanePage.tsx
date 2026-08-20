@@ -11,9 +11,16 @@ import {
   RotateCcw,
   Route,
   Search,
+  ServerCog,
   ShieldAlert,
 } from 'lucide-react'
-import { compareArchitectures } from '../engine/solve'
+import { compareArchitectures, solveForward, type ArchitectureOption } from '../engine/solve'
+import {
+  deploymentComponentsToVms,
+  deploymentInputsFromStack,
+  planManagementDeployment,
+  type ManagementDeploymentInputs,
+} from '../engine/managementDeployment'
 import {
   calculatePlaneCost,
   calculateProviderEconomics,
@@ -22,7 +29,7 @@ import {
   type ManagementCostInputs,
   type ManagementRateCard,
 } from '../engine/managementCost'
-import { PageHeader } from '../components/Shared'
+import { BasisPill, Field, NumberInput, PageHeader } from '../components/Shared'
 import { useSurveyorStore } from '../state/store'
 import {
   CAPABILITIES,
@@ -34,14 +41,17 @@ import {
   type PlaneId,
 } from '../data/managementPlane'
 import { MANAGEMENT_WORKBOOK } from '../data/managementWorkbook.generated'
+import type { TierId, TierPolicy, Vm } from '../engine/types'
 
-type AdvisorTab = 'recommend' | 'compare' | 'cost' | 'vmware' | 'field' | 'sources'
+type AdvisorTab = 'recommend' | 'deploy' | 'compare' | 'cost' | 'vmware' | 'field' | 'sources'
 export default function ManagementPlanePage() {
   const [tab, setTab] = useState<AdvisorTab>('recommend')
+  const [answers, setAnswers] = useState<AdvisorAnswers>({})
   const { cfg, vms, tiers, chosenKey } = useSurveyorStore()
   const options = useMemo(() => compareArchitectures(cfg, vms, tiers), [cfg, vms, tiers])
   const chosen = options.find((option) => option.key === chosenKey) ?? options[0]
   const includedVms = vms.filter((vm) => vm.include).length
+  const recommendation = recommendManagementPlane(answers)
 
   return (
     <>
@@ -60,6 +70,7 @@ export default function ManagementPlanePage() {
 
       <div className="subtabs" role="tablist" aria-label="Management Plane Advisor sections">
         <TabButton active={tab === 'recommend'} onClick={() => setTab('recommend')} icon={Route}>Recommendation</TabButton>
+        <TabButton active={tab === 'deploy'} onClick={() => setTab('deploy')} icon={ServerCog}>Deployment design</TabButton>
         <TabButton active={tab === 'compare'} onClick={() => setTab('compare')} icon={GitCompareArrows}>Capability comparison</TabButton>
         <TabButton active={tab === 'cost'} onClick={() => setTab('cost')} icon={CircleDollarSign}>Cost model</TabButton>
         <TabButton active={tab === 'vmware'} onClick={() => setTab('vmware')} icon={BookOpen}>VMware translation</TabButton>
@@ -67,7 +78,15 @@ export default function ManagementPlanePage() {
         <TabButton active={tab === 'sources'} onClick={() => setTab('sources')} icon={Database}>Sources & SKUs</TabButton>
       </div>
 
-      {tab === 'recommend' && <RecommendationPanel />}
+      {tab === 'recommend' && <RecommendationPanel answers={answers} setAnswers={setAnswers} />}
+      {tab === 'deploy' && (
+        <DeploymentDesignerPanel
+          recommendationStack={recommendation.stack}
+          chosen={chosen}
+          vms={vms}
+          tiers={tiers}
+        />
+      )}
       {tab === 'compare' && <ComparisonPanel />}
       {tab === 'vmware' && <VmwarePanel />}
       {tab === 'field' && <FieldGuidePanel />}
@@ -103,8 +122,13 @@ function TabButton({
   )
 }
 
-function RecommendationPanel() {
-  const [answers, setAnswers] = useState<AdvisorAnswers>({})
+function RecommendationPanel({
+  answers,
+  setAnswers,
+}: {
+  answers: AdvisorAnswers
+  setAnswers: (answers: AdvisorAnswers) => void
+}) {
   const recommendation = recommendManagementPlane(answers)
   const answered = Object.values(answers).filter((answer) => answer !== undefined).length
 
@@ -193,6 +217,189 @@ function RecommendationPanel() {
           </p>
         </section>
       </aside>
+    </div>
+  )
+}
+
+function DeploymentDesignerPanel({
+  recommendationStack,
+  chosen,
+  vms,
+  tiers,
+}: {
+  recommendationStack: PlaneId[]
+  chosen: ArchitectureOption
+  vms: Vm[]
+  tiers: Record<TierId, TierPolicy>
+}) {
+  const includedVms = vms.filter((vm) => vm.include).length
+  const suggestedStack: PlaneId[] = recommendationStack.length > 0
+    ? recommendationStack
+    : chosen.result.nodes <= 4
+      ? ['classic', 'wac-admin']
+      : ['scvmm', 'wac-admin']
+  const makeSuggestedInputs = () => deploymentInputsFromStack(
+    suggestedStack,
+    chosen.result.feasible ? chosen.result.nodes : 0,
+    includedVms,
+  )
+  const [inputs, setInputs] = useState<ManagementDeploymentInputs>(makeSuggestedInputs)
+  const [includeInSizing, setIncludeInSizing] = useState(true)
+  const plan = useMemo(() => planManagementDeployment(inputs), [inputs])
+  const managementVms = useMemo(() => deploymentComponentsToVms(plan.components), [plan.components])
+  const adjusted = useMemo(
+    () => includeInSizing ? solveForward(chosen.cfg, [...vms, ...managementVms], tiers) : chosen.result,
+    [chosen, includeInSizing, managementVms, tiers, vms],
+  )
+  const hostDelta = adjusted.feasible && chosen.result.feasible ? adjusted.nodes - chosen.result.nodes : null
+
+  const setNumber = (key: keyof ManagementDeploymentInputs, value: number) => {
+    setInputs({ ...inputs, [key]: Math.max(0, value) })
+  }
+
+  return (
+    <div className="deployment-layout">
+      <aside className="panel deployment-inputs">
+        <div className="panel-heading-row">
+          <div>
+            <h2>Deployment choices</h2>
+            <p className="small muted">The advisor supplies the starting stack. Every choice remains editable.</p>
+          </div>
+          <button className="btn ghost compact" onClick={() => setInputs(makeSuggestedInputs())}>
+            <RotateCcw size={14} /> Use advisor
+          </button>
+        </div>
+
+        <label className="field">
+          <span>Fabric foundation</span>
+          <div className="license-toggle deployment-choice-toggle">
+            <button
+              className={inputs.foundation === 'classic' ? 'active' : ''}
+              onClick={() => setInputs({ ...inputs, foundation: 'classic', includeArc: false })}
+              type="button"
+            >Classic</button>
+            <button
+              className={inputs.foundation === 'scvmm' ? 'active' : ''}
+              onClick={() => setInputs({ ...inputs, foundation: 'scvmm' })}
+              type="button"
+            >SCVMM 2025</button>
+          </div>
+        </label>
+
+        <Field label="Windows Admin Center experience">
+          <select value={inputs.wac} onChange={(event) => setInputs({ ...inputs, wac: event.target.value as ManagementDeploymentInputs['wac'] })}>
+            <option value="none">None</option>
+            <option value="wac-admin">Administration Mode</option>
+            <option value="wac-virtual">Virtualization Mode (preview)</option>
+          </select>
+        </Field>
+
+        <div className="meter-toggles deployment-toggles">
+          <CostToggle label="Highly available management plane" checked={inputs.highAvailability} onChange={(checked) => setInputs({ ...inputs, highAvailability: checked })} />
+          <CostToggle label="Add Azure Arc-enabled SCVMM" checked={inputs.includeArc} onChange={(checked) => setInputs({ ...inputs, includeArc: checked })} />
+          <CostToggle label="Add dedicated AD DS / DNS VMs" checked={inputs.includeIdentityServices} onChange={(checked) => setInputs({ ...inputs, includeIdentityServices: checked })} />
+          <CostToggle label="Include management VMs in host sizing" checked={includeInSizing} onChange={setIncludeInSizing} />
+        </div>
+        {inputs.foundation !== 'scvmm' && inputs.includeArc && (
+          <div className="note warn">Arc-enabled SCVMM requires SCVMM as the fabric foundation.</div>
+        )}
+
+        <div className="form-grid two-column deployment-scale-inputs">
+          <Field label="Managed hosts">
+            <NumberInput value={inputs.managedHosts} min={0} onChange={(value) => setNumber('managedHosts', value)} />
+          </Field>
+          <Field label="Managed workload VMs">
+            <NumberInput value={inputs.managedVms} min={0} onChange={(value) => setNumber('managedVms', value)} />
+          </Field>
+          <Field label="Managed clusters">
+            <NumberInput value={inputs.managedClusters} min={1} onChange={(value) => setNumber('managedClusters', value)} />
+          </Field>
+          <Field label="Library content (GiB)">
+            <NumberInput value={inputs.libraryContentGiB} min={100} step={100} onChange={(value) => setNumber('libraryContentGiB', value)} />
+          </Field>
+        </div>
+
+        <div className="deployment-basis-note">
+          <BasisPill basis="MS" /> published requirement
+          <BasisPill basis="MS-REC" /> published recommendation
+          <BasisPill basis="TOOL" /> visible Surveyor planning profile
+        </div>
+      </aside>
+
+      <div className="deployment-results stack">
+        <section className="panel deployment-summary">
+          <div className="panel-heading-row">
+            <div>
+              <span className="matrix-category">Calculated management footprint</span>
+              <h2>{plan.scaleLabel}</h2>
+              <p className="small muted">Sized for {inputs.managedHosts.toLocaleString()} hosts, {inputs.managedVms.toLocaleString()} workload VMs, and {inputs.managedClusters.toLocaleString()} clusters.</p>
+            </div>
+            <div className={`deployment-impact ${hostDelta !== null && hostDelta > 0 ? 'changed' : ''}`}>
+              <span>Host sizing impact</span>
+              <strong>{adjusted.feasible ? `${chosen.result.nodes} → ${adjusted.nodes}` : 'Review design'}</strong>
+              <small>{!includeInSizing ? 'Management overhead excluded' : hostDelta === null ? 'Could not compare' : hostDelta > 0 ? `Adds ${hostDelta} host${hostDelta === 1 ? '' : 's'}` : 'No additional hosts'}</small>
+            </div>
+          </div>
+
+          <div className="deployment-kpis">
+            <article><span>VM instances</span><strong>{plan.totalInstances}</strong><small>Management components</small></article>
+            <article><span>Total vCPU</span><strong>{plan.totalVCpu.toLocaleString()}</strong><small>Allocated</small></article>
+            <article><span>Total memory</span><strong>{plan.totalRamGiB.toLocaleString()} GiB</strong><small>Allocated</small></article>
+            <article><span>Total disk</span><strong>{plan.totalDiskGiB.toLocaleString()} GiB</strong><small>Provisioned</small></article>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-heading-row">
+            <div>
+              <h2>Management-plane bill of materials</h2>
+              <p className="small muted">VM size is shown per instance; totals multiply by quantity.</p>
+            </div>
+          </div>
+          {plan.components.length === 0 ? (
+            <div className="note">No dedicated management VM is required for the selected Classic-only stack.</div>
+          ) : (
+            <div className="scroll deployment-table-wrap">
+              <table className="deployment-table">
+                <thead><tr><th>Component</th><th>Qty</th><th>Availability</th><th>VM size each</th><th>Operating system / licensing</th><th>Basis</th></tr></thead>
+                <tbody>
+                  {plan.components.map((item) => (
+                    <tr key={item.id}>
+                      <td><strong>{item.name}</strong><small>{item.role}</small></td>
+                      <td><strong>{item.count}</strong></td>
+                      <td>{item.availability}</td>
+                      <td>{item.resourceType === 'vm'
+                        ? <><strong>{item.vCpu} vCPU</strong><small>{item.ramGiB} GiB RAM · {item.diskGiB.toLocaleString()} GiB disk</small></>
+                        : <><strong>{item.diskGiB.toLocaleString()} GiB</strong><small>Shared storage capacity</small></>}</td>
+                      <td>{item.operatingSystem}<small>{item.licensing}</small></td>
+                      <td>
+                        <BasisPill basis={item.basis} />
+                        <small>{item.basisDetail}</small>
+                        {item.source && <a href={item.source} target="_blank" rel="noreferrer">Microsoft source</a>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <div className="two-panel-grid">
+          <section className="panel">
+            <h2>Required dependencies</h2>
+            {plan.dependencies.length > 0
+              ? <ul className="deployment-list">{plan.dependencies.map((item) => <li key={item}>{item}</li>)}</ul>
+              : <p className="small muted">No external dependencies were added.</p>}
+          </section>
+          <section className="panel">
+            <h2>Design cautions</h2>
+            {plan.cautions.length > 0
+              ? <ul className="deployment-list cautions">{plan.cautions.map((item) => <li key={item}>{item}</li>)}</ul>
+              : <p className="small muted">No scale or topology cautions for the current selections.</p>}
+          </section>
+        </div>
+      </div>
     </div>
   )
 }
