@@ -39,3 +39,31 @@ describe('existing-capacity workspace', () => {
     expect(useSurveyorStore.getState().existingCapacityNodes).toBe(6)
   })
 })
+
+describe('management deployment state', () => {
+  beforeEach(() => {
+    useSurveyorStore.getState().resetScenario()
+  })
+
+  it('persists deployment choices for the solution report', () => {
+    const initial = useSurveyorStore.getState()
+    const inputs = {
+      foundation: 'scvmm' as const,
+      wac: 'wac-admin' as const,
+      includeArc: true,
+      monitoring: 'scom' as const,
+      highAvailability: true,
+      managedHosts: 8,
+      managedVms: 400,
+      managedClusters: 2,
+      libraryContentGiB: 500,
+      includeIdentityServices: false,
+    }
+
+    initial.setManagementDeploymentInputs(inputs)
+    initial.setIncludeManagementInSizing(false)
+
+    expect(useSurveyorStore.getState().managementDeploymentInputs).toEqual(inputs)
+    expect(useSurveyorStore.getState().includeManagementInSizing).toBe(false)
+  })
+})

@@ -11,6 +11,7 @@ import {
   Home,
   Menu,
   Network,
+  FileText,
   Server,
   Share2,
   X,
@@ -25,6 +26,7 @@ const nav = [
   { to: '/results', label: 'Sizing results', icon: BarChart3 },
   { to: '/capacity', label: 'Existing capacity', icon: Calculator },
   { to: '/management-plane', label: 'Management plane', icon: Network },
+  { to: '/report', label: 'Solution report', icon: FileText },
   { to: '/method', label: 'Sources & method', icon: BookOpen },
 ]
 

@@ -3,6 +3,7 @@ import type { Vm } from './types'
 
 export type ManagementFoundation = 'classic' | 'scvmm'
 export type WacExperience = 'none' | 'wac-admin' | 'wac-virtual'
+export type MonitoringSolution = 'none' | 'scom'
 export type ManagementScale = 'small' | 'medium' | 'large' | 'beyond-tested-scale'
 export type DeploymentBasis = 'MS' | 'MS-REC' | 'TOOL'
 
@@ -10,6 +11,7 @@ export interface ManagementDeploymentInputs {
   foundation: ManagementFoundation
   wac: WacExperience
   includeArc: boolean
+  monitoring: MonitoringSolution
   highAvailability: boolean
   managedHosts: number
   managedVms: number
@@ -54,7 +56,11 @@ const SRC = {
   wac: 'https://learn.microsoft.com/windows-server/manage/windows-admin-center/plan/installation-options',
   wacHa: 'https://learn.microsoft.com/windows-server/manage/windows-admin-center/deploy/high-availability',
   wacVirtual: 'https://learn.microsoft.com/windows-server/manage/windows-admin-center/install-virtualization-mode',
-  arc: 'https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager',
+  arcQuickstart: 'https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/quickstart-connect-system-center-virtual-machine-manager-to-arc',
+  scom: 'https://learn.microsoft.com/system-center/scom/system-requirements?view=sc-om-2025',
+  scomHa: 'https://learn.microsoft.com/system-center/scom/plan-hadr-design?view=sc-om-2025',
+  scomSql: 'https://learn.microsoft.com/system-center/scom/plan-sqlserver-design?view=sc-om-2025',
+  scomDesign: 'https://learn.microsoft.com/system-center/scom/plan-mgmt-group-design?view=sc-om-2025',
 }
 
 function scaleFor(hosts: number, vms: number): ManagementScale {
@@ -89,6 +95,7 @@ export function deploymentInputsFromStack(
     foundation: stack.includes('scvmm') || stack.includes('arc-scvmm') ? 'scvmm' : 'classic',
     wac: stack.includes('wac-virtual') ? 'wac-virtual' : stack.includes('wac-admin') ? 'wac-admin' : 'none',
     includeArc: stack.includes('arc-scvmm'),
+    monitoring: 'none',
     highAvailability: true,
     managedHosts: Math.max(0, managedHosts),
     managedVms: Math.max(0, managedVms),
@@ -293,18 +300,115 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
         basisDetail: 'Published minimum free capacity for Arc-enabled SCVMM.',
         operatingSystem: 'Microsoft-managed appliance',
         licensing: 'Connector is free; attached Azure services are metered',
-        source: SRC.arc,
-        notes: ['Reserve three static IP addresses.', 'Requires outbound connectivity and internal/external DNS resolution.'],
+        source: SRC.arcQuickstart,
+        notes: [
+          'This is a separate on-premises appliance VM deployed into the SCVMM-managed fabric; it is not installed on the VMM server.',
+          'VMM server and resource bridge have a 1:1 mapping.',
+          'Reserve three static IP addresses, including a second appliance VM IP used when an upgrade creates a replacement VM.',
+          'Requires outbound connectivity and internal/external DNS resolution.',
+        ],
       }))
       dependencies.add('Azure subscription, resource group, and appropriate Azure RBAC')
       dependencies.add('Three static IP addresses and required outbound firewall allow-list')
     }
   }
 
+  if (inputs.monitoring === 'scom') {
+    const monitoredComputers = hosts + vms
+    const publishedManagementServers = Math.max(1, Math.ceil(monitoredComputers / 3_000))
+    const managementServerCount = inputs.highAvailability
+      ? Math.max(2, publishedManagementServers)
+      : publishedManagementServers
+    const managementSize = scaledSize(scale, {
+      small: { vCpu: 4, ramGiB: 8, diskGiB: 100 },
+      medium: { vCpu: 8, ramGiB: 16, diskGiB: 150 },
+      large: { vCpu: 8, ramGiB: 32, diskGiB: 200 },
+    })
+    const databaseSize = scaledSize(scale, {
+      small: { vCpu: 16, ramGiB: 32, diskGiB: 500 },
+      medium: { vCpu: 16, ramGiB: 64, diskGiB: 1_000 },
+      large: { vCpu: 24, ramGiB: 128, diskGiB: 2_000 },
+    })
+
+    components.push(component({
+      id: 'scom-management',
+      name: 'SCOM management server',
+      role: `Health, alert, performance, and availability monitoring for approximately ${monitoredComputers.toLocaleString()} managed computers.`,
+      count: managementServerCount,
+      ...managementSize,
+      availability: managementServerCount > 1 ? 'Management server resource pool · agent failover' : 'Standalone management server',
+      basis: scale === 'small' ? 'MS' : 'TOOL',
+      basisDetail: scale === 'small'
+        ? 'Microsoft-published minimum compute and 3,000 agent-managed computers per management server; Surveyor adds a 100 GiB OS/application disk allowance.'
+        : 'Microsoft scale limit with a visible Surveyor compute and disk profile for the selected estate size.',
+      operatingSystem: 'Windows Server 2025',
+      licensing: 'System Center management licenses; confirm edition and managed OSE rights',
+      source: inputs.highAvailability ? SRC.scomHa : SRC.scom,
+      notes: ['Install the required OLE DB and ODBC SQL drivers on every management server.', 'Management servers and databases should remain on the same low-latency LAN.'],
+    }))
+
+    components.push(component({
+      id: 'scom-sql',
+      name: 'SQL Server for SCOM databases',
+      role: 'Hosts the OperationsManager operational database and OperationsManagerDW reporting data warehouse.',
+      count: inputs.highAvailability ? 2 : 1,
+      ...databaseSize,
+      availability: inputs.highAvailability ? 'Always On availability group' : 'Dedicated standalone SQL Server',
+      basis: 'TOOL',
+      basisDetail: 'Surveyor planning profile because Microsoft directs architects to workload sizing rather than publishing one universal SQL VM size.',
+      operatingSystem: 'Windows Server 2025 + supported SQL Server',
+      licensing: 'SQL Server licensing must be confirmed with the licensing provider',
+      source: SRC.scomSql,
+      notes: ['SQL Server Full-Text Search and a supported collation are required.', 'Validate database growth, retention, management packs, and storage IOPS with the Operations Manager Sizing Helper.'],
+    }))
+
+    components.push(component({
+      id: 'scom-reporting',
+      name: 'SCOM reporting server',
+      role: 'Operations Manager reporting integrated with SQL Server Reporting Services in native mode.',
+      count: 1,
+      vCpu: 4,
+      ramGiB: 8,
+      diskGiB: 100,
+      availability: 'Dedicated reporting role · no automatic HA topology',
+      basis: 'TOOL',
+      basisDetail: 'Microsoft publishes a 4-core, 8 GiB minimum and recommends a dedicated reporting system; Surveyor adds a 100 GiB OS/application disk allowance.',
+      operatingSystem: 'Windows Server 2025 Desktop Experience + supported SSRS',
+      licensing: 'System Center and SQL Server reporting rights must be confirmed',
+      source: SRC.scomDesign,
+      notes: ['Use SSRS native mode.', 'Do not share the SSRS instance with other reporting applications.'],
+    }))
+
+    components.push(component({
+      id: 'scom-web',
+      name: 'SCOM web console server',
+      role: 'Browser access to Monitoring and My Workspace views.',
+      count: 1,
+      vCpu: 4,
+      ramGiB: 8,
+      diskGiB: 100,
+      availability: 'Standalone web console role',
+      basis: 'TOOL',
+      basisDetail: 'Microsoft-published 4-core, 8 GiB minimum with a Surveyor 100 GiB OS/application disk allowance.',
+      operatingSystem: 'Windows Server 2025 Desktop Experience + IIS',
+      licensing: 'System Center management licensing applies',
+      source: SRC.scom,
+      notes: ['Microsoft does not support Network Load Balancing for the Operations Manager web console server.'],
+    }))
+
+    dependencies.add('SCOM service accounts for management, data access, data warehouse write, and reporting data reader roles')
+    dependencies.add('SCOM agents and applicable Microsoft or vendor management packs for monitored workloads')
+    dependencies.add('SQL Server Full-Text Search, supported collation, SSRS native mode, and current SQL client drivers')
+    if (!inputs.includeIdentityServices) dependencies.add('Existing healthy Active Directory and DNS services for SCOM authentication and discovery')
+    cautions.push('SCOM database performance is storage-I/O sensitive. Validate database growth, retention, and IOPS before production deployment.')
+    cautions.push('Do not checkpoint, pause, or save-state virtual machines running SCOM components; Microsoft does not support those virtualization operations.')
+    if (inputs.highAvailability) cautions.push('The management servers and databases are redundant, but the calculated reporting and web console roles remain single instances and require a documented recovery procedure.')
+  }
+
   if (scale === 'beyond-tested-scale') {
     cautions.push('The selected estate exceeds the published 1,000-host or 25,000-VM scale of one VMM or WAC Virtualization Mode instance. Split the management estate and validate the topology with Microsoft.')
   }
-  if (inputs.foundation === 'classic' && inputs.wac === 'none' && !inputs.includeIdentityServices) {
+  if (inputs.foundation === 'classic' && inputs.wac === 'none' && inputs.monitoring === 'none' && !inputs.includeIdentityServices) {
     cautions.push('Classic Hyper-V tools require no dedicated management VM. Existing AD/DNS and operator workstations remain external dependencies.')
   }
   if (inputs.wac === 'wac-admin' && hosts > 50) {
