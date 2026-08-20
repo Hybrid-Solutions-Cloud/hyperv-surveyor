@@ -90,13 +90,14 @@ export function deploymentInputsFromStack(
   stack: PlaneId[],
   managedHosts: number,
   managedVms: number,
+  recommendations: Partial<Pick<ManagementDeploymentInputs, 'monitoring' | 'highAvailability'>> = {},
 ): ManagementDeploymentInputs {
   return {
     foundation: stack.includes('scvmm') || stack.includes('arc-scvmm') ? 'scvmm' : 'classic',
     wac: stack.includes('wac-virtual') ? 'wac-virtual' : stack.includes('wac-admin') ? 'wac-admin' : 'none',
     includeArc: stack.includes('arc-scvmm'),
-    monitoring: 'none',
-    highAvailability: true,
+    monitoring: recommendations.monitoring ?? 'none',
+    highAvailability: recommendations.highAvailability ?? true,
     managedHosts: Math.max(0, managedHosts),
     managedVms: Math.max(0, managedVms),
     managedClusters: 1,

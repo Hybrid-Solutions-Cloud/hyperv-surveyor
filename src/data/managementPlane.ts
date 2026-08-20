@@ -66,15 +66,24 @@ export interface DecisionQuestion {
   ifYes: string
   ifNo: string
   why: string
+  sources: Array<{
+    label: string
+    url: string
+  }>
 }
 
-export const DECISION_QUESTIONS: DecisionQuestion[] = MANAGEMENT_WORKBOOK.decisionQuestions.map((question) => ({ ...question }))
+export const DECISION_QUESTIONS: DecisionQuestion[] = MANAGEMENT_WORKBOOK.decisionQuestions.map((question) => ({
+  ...question,
+  sources: question.sources.map((source) => ({ ...source })),
+}))
 
 export type AdvisorAnswers = Record<string, boolean | undefined>
 
 export interface AdvisorRecommendation {
   headline: string
   stack: PlaneId[]
+  monitoring: 'none' | 'scom'
+  highAvailability: boolean
   rationale: string[]
   cautions: string[]
 }
@@ -85,45 +94,66 @@ export function recommendManagementPlane(answers: AdvisorAnswers): AdvisorRecomm
     return {
       headline: 'Answer the qualifying questions to build a recommendation.',
       stack: [],
+      monitoring: 'none',
+      highAvailability: true,
       rationale: ['The advisor recommends a management stack, not a single product winner.'],
       cautions: [],
     }
   }
 
-  const scvmmDrivers = ['bareMetal', 'tenantSelfService', 'pureIntegration', 'drs', 'migration', 'largeFabric']
-  const requiresScvmm = scvmmDrivers.some((id) => answers[id] === true)
-  const smallOnly = answers.smallEdge === true && !requiresScvmm
-  const preferVMode = answers.productionSoon === false && answers.pureIntegration !== true
+  const hardScvmmDrivers = ['bareMetal', 'tenantSelfService', 'pureIntegration', 'drs']
+  const hasHardScvmmDriver = hardScvmmDrivers.some((id) => answers[id] === true)
+  const arcRequested = answers.delegatedPortal === true
+  const arcEligible = answers.airGap !== true && answers.azureReady === true
+  const preferVMode = answers.largeFabric === true
+    && answers.gaRequired === false
+    && answers.managementHa === false
+    && answers.pureIntegration !== true
+  const scaleNeedsGaFabric = answers.largeFabric === true && !preferVMode
+  const requiresScvmm = hasHardScvmmDriver || arcRequested || scaleNeedsGaFabric
+  const foundation: PlaneId = requiresScvmm ? 'scvmm' : 'classic'
   const wacPlane: PlaneId = preferVMode ? 'wac-virtual' : 'wac-admin'
-  const stack: PlaneId[] = smallOnly ? ['classic', wacPlane] : ['scvmm', wacPlane]
+  const stack: PlaneId[] = [foundation, wacPlane]
+  const monitoring = answers.monitoring === true ? 'scom' : 'none'
+  const highAvailability = answers.managementHa !== false
 
-  if (answers.azureReady === true && answers.airGap !== true && !smallOnly) stack.push('arc-scvmm')
+  if (arcRequested && arcEligible) stack.push('arc-scvmm')
 
   const rationale: string[] = []
-  if (smallOnly) rationale.push('The small dedicated footprint does not currently justify a full fabric-management layer.')
+  if (answers.smallEdge && !requiresScvmm) rationale.push('The small dedicated footprint favors Classic tools with WAC unless a hard fabric requirement emerges.')
   if (answers.bareMetal) rationale.push('Repeatable bare-metal provisioning makes SCVMM the fabric anchor.')
-  if (answers.tenantSelfService) rationale.push('Tenant delegation and quotas require a real fabric or Azure control plane.')
-  if (answers.pureIntegration) rationale.push('Array-aware Pure Storage workflows favor SCVMM, with WAC retained for day-two visibility.')
-  if (answers.drs) rationale.push('Dynamic optimization requirements favor SCVMM over native node fairness.')
-  if (answers.migration) rationale.push('The VMware conversion path must be included in the project plan and cost model.')
-  if (answers.largeFabric) rationale.push('A larger estate benefits from centralized inventory, templates, and governed operations.')
-  if (preferVMode) rationale.push('The delivery horizon allows vMode to be the preferred WAC experience while its production prerequisites are validated.')
-  if (answers.azureReady && answers.airGap !== true) rationale.push('Arc can be offered as an additive tenant service layer, not a replacement for SCVMM.')
+  if (answers.tenantSelfService) rationale.push('Private-cloud quotas and tenant self-service require SCVMM Clouds and self-service roles.')
+  if (answers.pureIntegration) rationale.push('Array-aware Pure Storage workflows favor SCVMM, subject to a current compatibility check.')
+  if (answers.drs) rationale.push('Compute, storage, or power optimization requirements favor SCVMM over native cluster load balancing.')
+  if (answers.migration) rationale.push('Treat VMware conversion as a separately sized and costed migration workstream, not a permanent fabric requirement.')
+  if (answers.largeFabric) rationale.push('The estate needs a centralized, governed operating experience across its scale or topology.')
+  if (preferVMode) rationale.push('WAC vMode is an evaluation candidate because Preview status and a standalone management service are acceptable.')
+  if (arcRequested && arcEligible) rationale.push('Azure portal and ARM management require Arc as an additive layer over SCVMM.')
+  if (answers.azureReady && !arcRequested) rationale.push('Arc is technically eligible, but no Azure control-plane requirement has been selected.')
+  if (monitoring === 'scom') rationale.push('Add SCOM 2025 as the centralized monitoring solution and include its components in deployment sizing.')
+  if (answers.automation) rationale.push('Validate every required automation workflow against the selected PowerShell, REST, and ARM surfaces.')
+  if (answers.managementHa) rationale.push('Size and design the management services and their databases for the stated availability objective.')
   if (rationale.length === 0) rationale.push('The current answers do not introduce a hard requirement beyond the core operating tools.')
 
   const cautions: string[] = []
-  if (answers.airGap) cautions.push('Exclude Arc-enabled SCVMM because the tenant cannot accept its outbound Azure dependency.')
-  if (answers.productionSoon) cautions.push('Use aMode for the production baseline and keep vMode on the evaluation track until support, HA, and certificate requirements are reverified.')
-  if (answers.pureIntegration) cautions.push('Keep aMode available because the Pure extension is not supported in vMode today.')
+  if (answers.airGap) cautions.push('Exclude Arc-enabled SCVMM because the environment cannot accept its ongoing outbound Azure dependency.')
+  if (arcRequested && !arcEligible) cautions.push('The requested Azure portal control plane is blocked until Azure ownership and connectivity are explicitly accepted.')
+  if (answers.gaRequired && answers.largeFabric) cautions.push('Use SCVMM with WAC Administration Mode while WAC vMode remains Preview.')
+  if (preferVMode) cautions.push('WAC vMode remains Preview; reverify support status, certificates, availability, and partner integrations before approval.')
+  if (answers.pureIntegration) cautions.push('Validate the exact Pure Storage, provider, SCVMM, and WAC compatibility matrix before committing the design.')
+  if (answers.migrationConstraints) cautions.push('SCVMM V2V alone does not meet the selected migration constraints; pilot a compatible third-party method.')
+  if (answers.operationsOwnership === false && (requiresScvmm || monitoring === 'scom')) cautions.push('The selected stack adds lifecycle responsibilities the current operations team cannot own; assign them to a managed service or simplify the design.')
   if (answers.smallEdge && requiresScvmm) cautions.push('The footprint is small, but one or more required capabilities still justify SCVMM; price the overhead explicitly.')
 
   return {
-    headline: smallOnly
-      ? `Use Classic Hyper-V tools with ${preferVMode ? 'WAC vMode as the preferred experience' : 'WAC Administration Mode'}.`
-      : stack.includes('arc-scvmm')
-        ? `Use SCVMM as the fabric, ${preferVMode ? 'WAC vMode as the preferred experience' : 'WAC aMode for day two'}, and Arc as an optional tenant layer.`
-        : `Use SCVMM as the fabric of record with ${preferVMode ? 'WAC vMode preferred where its current gaps are acceptable' : 'WAC Administration Mode alongside it'}.`,
+    headline: stack.includes('arc-scvmm')
+      ? `Use SCVMM as the fabric, ${preferVMode ? 'WAC vMode as the preferred experience' : 'WAC aMode for day two'}, and Arc as the Azure control layer.`
+      : foundation === 'scvmm'
+        ? `Use SCVMM as the fabric of record with ${preferVMode ? 'WAC vMode where its current gaps are acceptable' : 'WAC Administration Mode alongside it'}.`
+        : `Use Classic Hyper-V tools with ${preferVMode ? 'WAC vMode as an evaluation experience' : 'WAC Administration Mode'}.`,
     stack,
+    monitoring,
+    highAvailability,
     rationale,
     cautions,
   }

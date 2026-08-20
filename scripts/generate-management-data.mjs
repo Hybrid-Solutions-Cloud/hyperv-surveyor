@@ -5,13 +5,41 @@ import * as XLSX from 'xlsx'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const source = path.join(root, 'Reference', 'HyperV_Management_Plane_Comparison.xlsx')
+const decisionSource = path.join(root, 'Reference', 'management-decision-questions.fact-checked.json')
 const destination = path.join(root, 'src', 'data', 'managementWorkbook.generated.ts')
 const workbook = XLSX.read(fs.readFileSync(source), { type: 'buffer', cellFormula: true })
+const decisionGuide = JSON.parse(fs.readFileSync(decisionSource, 'utf8'))
 
 const sourceOrganization = String.fromCharCode(72, 65, 65, 83)
 const publicCopyReplacements = [
+  ['SCVMM is the only plane that does bare-metal provisioning, tenant clouds with quotas, Pure array integration and V2V. Those four are table stakes for the business.', 'SCVMM combines bare-metal provisioning, tenant clouds with quotas, array integration, and native offline V2V. Confirm which of those capabilities are steady-state requirements and treat migration as a separate workstream.'],
+  ['Add Arc-enabled SCVMM on top as a paid upsell.', 'Add Arc-enabled SCVMM only when Azure portal, ARM, or Azure RBAC management is a stated requirement.'],
+  ['The connector is free. You are selling Azure RBAC self-service, Update Manager, Defender and Cost Management — priced per VM per month.', 'Arc projects the SCVMM fabric into Azure. Price each enabled Azure service separately because entitlement, per-resource, and ingestion charges vary.'],
+  ['System Center adds ~59% to Microsoft host licensing plus a SQL Server. Indefensible at that size.', 'A small footprint rarely justifies the additional management and database lifecycle by itself, but required capabilities can still justify SCVMM. Model licensing from a current quote.'],
+  ['Anything going live before mid-2027', 'Any production design that requires generally available, supported components'],
+  ['Public Preview, no HA design, self-signed certs only, no Pure path. Right bet, wrong year.', 'WAC vMode is Preview. Reverify production support, vMode-specific availability, certificate options, and partner integrations before approval.'],
+  ['Lab / evaluation track for 2027', 'Lab or evaluation track for WAC vMode'],
+  ['Stand up WAC vMode now and re-assess at the 2027 planning cycle.', 'Evaluate WAC vMode in a non-production environment and re-assess at the design approval gate.'],
+  ['Gate the re-assessment on four things: GA, a documented HA design, CA certificate support, and a Pure Storage integration path.', 'Gate the re-assessment on GA support, a documented availability design, enterprise certificate support, and required partner integrations.'],
+  ['–  ~59% uplift on your Microsoft host licensing, per managed host core', '–  Additional System Center licensing must be priced from the applicable agreement and current quote'],
+  ['The only plane with a true DRS equivalent (Dynamic Optimization) and Power Optimization', 'Richer policy-driven compute/storage Dynamic Optimization and host Power Optimization than native Node Fairness'],
+  ['Native V2V from VMware, ~4x faster in the 2025 release', 'Native offline V2V from supported VMware versions; Microsoft documents faster conversion beginning with VMM 2022 UR2'],
+  ['4. WAC Virtualization Mode\n(vMode — Public Preview 2)', '4. WAC Virtualization Mode\n(vMode — Preview)'],
+  ['–  NO Pure Storage integration path today', '–  Partner-extension and Pure Storage compatibility must be verified for the selected release'],
+  ['–  NO documented HA design at all, unlike aMode', '–  No vMode-specific HA design is currently documented, unlike aMode'],
+  ['–  Self-signed 60-day certificates ONLY; CA certs not yet available', '–  The current vMode installer generates a 60-day self-signed certificate; reverify enterprise certificate support'],
+  ['–  Pure extension gives visibility only, no placement intelligence', '–  Pure extension scope and compatibility must be verified for the selected WAC release'],
+  ['Lab evaluation now. Re-assess at the 2027 planning cycle, gated on four things: GA, a documented HA design, CA certificate support, and a Pure Storage path.', 'Evaluate in a non-production environment. Gate approval on GA support, a documented availability design, enterprise certificate support, and required partner integrations.'],
+  ['Anything going to production before mid-2027, and anything with a signed SLA behind it.', 'Any production or SLA-backed design while the required capabilities remain Preview or unsupported.'],
+  ['The connector, control plane and resource bridge are all FREE', 'The Arc projection layer can enable Azure control; confirm current pricing for every enabled Azure service'],
+  ['Real self-service through Azure RBAC — the best tenant portal of any plane', 'Azure portal and ARM lifecycle operations governed through Azure RBAC'],
+  ['Azure services are metered per VM per month and accumulate quickly', 'Optional Azure services can add per-resource, consumption, and log-ingestion charges'],
+  ["Microsoft's own 'choose an Arc service' guide omits Arc-SCVMM entirely — Azure Local is the favoured path", 'Product scope and roadmap differ across Arc-enabled SCVMM and Azure Local; validate the target platform explicitly'],
+  ['As a per-tenant UPSELL on top of SCVMM, where the tenant already lives in Azure and wants one control plane across on-prem and cloud.', 'On top of SCVMM when Azure portal, ARM, or Azure RBAC management is a stated requirement and the organization accepts the dependency.'],
+  ['Anywhere you need bare-metal provisioning, tenant clouds, Pure array integration, or V2V. This is the default answer for the core business.', 'Use it where bare-metal provisioning, tenant clouds, array integration, or policy-driven optimization are steady-state requirements. Treat V2V as a separate project workstream.'],
+  ['Arc-enabled servers and SCVMM require live outbound connectivity; agents must check in and Update Manager only counts a machine as managed on days it is Connected.', 'Arc-enabled SCVMM requires an ongoing resource-bridge connection to Azure; enabled guest services have their own connectivity and billing-state requirements.'],
   ['Classic + WAC aMode is economically sensible. Continue to Q8.', 'Prefer Classic + WAC vMode if the production-readiness answer permits it; otherwise use aMode. Continue to Q8.'],
-  ['Classic + WAC aMode. Do not licence System Center.', 'Classic + WAC vMode when production readiness permits; otherwise use aMode. Do not licence System Center.'],
+  ['Classic + WAC aMode. Do not licence System Center.', 'Prefer Classic + WAC aMode unless a hard fabric requirement justifies SCVMM; evaluate vMode only when Preview status and current gaps are acceptable.'],
   ['SCVMM + WAC aMode. Arc is off the table entirely.', 'SCVMM + WAC vMode where its current gaps are acceptable; otherwise use aMode. Arc is off the table entirely.'],
   [`${sourceOrganization} RECOMMENDATION: SCVMM as the fabric of record; WAC aMode as the day-2 GUI; Arc optional per-tenant.`, 'RECOMMENDATION: SCVMM as the fabric of record; prefer WAC vMode where current gaps are acceptable, with aMode as the production fallback; Arc optional per tenant.'],
   [`Core ${sourceOrganization} multi-tenant fabric`, 'Core service-provider multi-tenant fabric'],
@@ -49,28 +77,11 @@ const sheetRows = (name) => XLSX.utils.sheet_to_json(workbook.Sheets[name], {
 }).map((row) => row.map(neutralizePublicCopy))
 
 const decisionRows = sheetRows('Decision Guide')
-const decisionIds = [
-  'airGap',
-  'bareMetal',
-  'tenantSelfService',
-  'pureIntegration',
-  'drs',
-  'migration',
-  'largeFabric',
-  'smallEdge',
-  'azureReady',
-  'productionSoon',
-]
-
 const data = {
   generatedFrom: path.basename(source),
-  decisionQuestions: decisionRows.slice(5, 15).map((row, index) => ({
-    id: decisionIds[index],
-    question: String(row[0]).replace(/^\d+\.\s*/, ''),
-    ifYes: String(row[1]),
-    ifNo: String(row[2]),
-    why: String(row[3]),
-  })),
+  decisionQuestionsVerified: String(decisionGuide.verified),
+  decisionQuestionsBasis: String(decisionGuide.basis),
+  decisionQuestions: decisionGuide.questions,
   decisionPatterns: decisionRows.slice(18, 24).map((row) => ({
     situation: String(row[0]),
     answer: String(row[1]),
@@ -162,7 +173,7 @@ const data = {
   })),
 }
 
-const banner = `// This file is generated from ${data.generatedFrom}.\n// Run npm run generate:management after changing the workbook.\n\n`
+const banner = `// This file is generated from ${data.generatedFrom} and ${path.basename(decisionSource)}.\n// Run npm run generate:management after changing either source.\n\n`
 const output = `${banner}export const MANAGEMENT_WORKBOOK = ${JSON.stringify(data, null, 2)} as const\n`
 fs.writeFileSync(destination, output, 'utf8')
 

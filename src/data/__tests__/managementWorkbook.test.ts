@@ -4,9 +4,16 @@ import { MANAGEMENT_WORKBOOK } from '../managementWorkbook.generated'
 
 describe('management workbook coverage', () => {
   it('retains every qualifying question and capability row', () => {
-    expect(DECISION_QUESTIONS).toHaveLength(10)
+    expect(DECISION_QUESTIONS).toHaveLength(16)
     expect(CAPABILITIES).toHaveLength(85)
     expect(new Set(CAPABILITIES.map((row) => row.category)).size).toBe(10)
+  })
+
+  it('keeps evidence links on every fact-backed qualifying question', () => {
+    expect(MANAGEMENT_WORKBOOK.decisionQuestionsVerified).toBe('2026-08-20')
+    for (const question of DECISION_QUESTIONS.filter((item) => item.sources.length > 0)) {
+      for (const source of question.sources) expect(source.url).toMatch(/^https:\/\//)
+    }
   })
 
   it('retains the supporting field and evidence libraries', () => {

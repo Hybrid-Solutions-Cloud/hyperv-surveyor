@@ -97,10 +97,16 @@ describe('management deployment planner', () => {
   })
 
   it('uses an advisor stack as the initial deployment choice', () => {
-    const inputs = deploymentInputsFromStack(['scvmm', 'wac-virtual', 'arc-scvmm'], 12, 600)
+    const inputs = deploymentInputsFromStack(
+      ['scvmm', 'wac-virtual', 'arc-scvmm'],
+      12,
+      600,
+      { monitoring: 'scom', highAvailability: false },
+    )
     expect(inputs.foundation).toBe('scvmm')
     expect(inputs.wac).toBe('wac-virtual')
     expect(inputs.includeArc).toBe(true)
-    expect(inputs.monitoring).toBe('none')
+    expect(inputs.monitoring).toBe('scom')
+    expect(inputs.highAvailability).toBe(false)
   })
 })

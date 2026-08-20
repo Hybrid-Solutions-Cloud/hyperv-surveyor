@@ -65,7 +65,7 @@ export default function ManagementPlanePage() {
         <div><span>Selected design</span><strong>{chosen.label}</strong></div>
         <div><span>Calculated hosts</span><strong>{chosen.result.feasible ? chosen.result.nodes : 'Review design'}</strong></div>
         <div><span>Included workloads</span><strong>{includedVms.toLocaleString()} VMs</strong></div>
-        <div className="advisor-freshness"><ShieldAlert size={16} /><span>Full advisor library generated from the supplied workbook · verify commercial terms before quoting</span></div>
+        <div className="advisor-freshness"><ShieldAlert size={16} /><span>Workbook-backed advisor library · qualifying questions fact-checked {MANAGEMENT_WORKBOOK.decisionQuestionsVerified} · verify commercial terms before quoting</span></div>
       </div>
 
       <div className="subtabs" role="tablist" aria-label="Management Plane Advisor sections">
@@ -82,6 +82,8 @@ export default function ManagementPlanePage() {
       {tab === 'deploy' && (
         <DeploymentDesignerPanel
           recommendationStack={recommendation.stack}
+          recommendationMonitoring={recommendation.monitoring}
+          recommendationHighAvailability={recommendation.highAvailability}
           chosen={chosen}
           vms={vms}
           tiers={tiers}
@@ -143,7 +145,7 @@ function RecommendationPanel({
           <button className="btn ghost compact" onClick={() => setAnswers({})}><RotateCcw size={14} /> Reset</button>
         </div>
 
-        <div className="progress-line"><i style={{ width: `${answered * 10}%` }} /></div>
+        <div className="progress-line"><i style={{ width: `${(answered / DECISION_QUESTIONS.length) * 100}%` }} /></div>
         <div className="question-count">{answered} of {DECISION_QUESTIONS.length} answered</div>
 
         <div className="question-list">
@@ -153,6 +155,13 @@ function RecommendationPanel({
               <div className="question-copy">
                 <strong>{question.question}</strong>
                 <span>{question.why}</span>
+                {question.sources.length > 0 && (
+                  <div className="question-sources">
+                    {question.sources.map((source) => (
+                      <a href={source.url} target="_blank" rel="noreferrer" key={source.url}>{source.label}</a>
+                    ))}
+                  </div>
+                )}
                 {answers[question.id] !== undefined && (
                   <div className={`question-outcome ${answers[question.id] ? 'yes' : 'no'}`}>
                     <b>{answers[question.id] ? 'If yes' : 'If no'}</b>
@@ -188,11 +197,17 @@ function RecommendationPanel({
                 const plane = MANAGEMENT_PLANES.find((item) => item.id === id)!
                 return (
                   <div className="stack-node" key={id}>
-                    <span>{index === 0 ? 'Foundation' : id === 'arc-scvmm' ? 'Optional layer' : 'Day two'}</span>
+                    <span>{index === 0 ? 'Foundation' : id === 'arc-scvmm' ? 'Azure layer' : 'Day two'}</span>
                     <strong>{plane.shortName}</strong>
                   </div>
                 )
               })}
+              {recommendation.monitoring === 'scom' && (
+                <div className="stack-node">
+                  <span>Monitoring</span>
+                  <strong>SCOM 2025</strong>
+                </div>
+              )}
             </div>
           )}
 
@@ -211,8 +226,8 @@ function RecommendationPanel({
         <section className="panel">
           <h2>Important framing</h2>
           <p className="small">
-            Prefer WAC vMode where its readiness and capability coverage fit. Keep aMode as the
-            production fallback for current gaps, and treat Arc as an additive layer over SCVMM.
+            Use WAC Administration Mode for the supported production baseline. Evaluate vMode only
+            where Preview status and current capability gaps are acceptable, and treat Arc as an additive layer over SCVMM.
             This advisor recommends a stack rather than forcing one winner.
           </p>
         </section>
@@ -223,11 +238,15 @@ function RecommendationPanel({
 
 function DeploymentDesignerPanel({
   recommendationStack,
+  recommendationMonitoring,
+  recommendationHighAvailability,
   chosen,
   vms,
   tiers,
 }: {
   recommendationStack: PlaneId[]
+  recommendationMonitoring: ManagementDeploymentInputs['monitoring']
+  recommendationHighAvailability: boolean
   chosen: ArchitectureOption
   vms: Vm[]
   tiers: Record<TierId, TierPolicy>
@@ -242,6 +261,10 @@ function DeploymentDesignerPanel({
     suggestedStack,
     chosen.result.feasible ? chosen.result.nodes : 0,
     includedVms,
+    {
+      monitoring: recommendationMonitoring,
+      highAvailability: recommendationHighAvailability,
+    },
   )
   const storedInputs = useSurveyorStore((state) => state.managementDeploymentInputs)
   const setInputs = useSurveyorStore((state) => state.setManagementDeploymentInputs)
