@@ -61,7 +61,7 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
             <Field label="Reserved / unavailable hosts" hint="Hosts kept out of normal workload placement for failure or maintenance capacity.">
               <NumberInput value={cfg.spareNodes} min={0} max={Math.max(0, nodes - 1)} onChange={n => set({ spareNodes: Math.min(Math.max(0, nodes - 1), n) })} />
             </Field>
-            <Field label="Demand multiplier" hint="Use 1.0 for current demand; 1.2 adds 20% forecast growth.">
+            <Field label="Immediate demand multiplier" hint="Use 1.0 for current demand; 1.2 adds 20% immediate headroom. Build-now annual growth is applied in addition.">
               <NumberInput value={cfg.growthFactor} min={0.1} step={0.05} onChange={n => set({ growthFactor: Math.max(0.1, n) })} />
             </Field>
             <Field label="Backup method">

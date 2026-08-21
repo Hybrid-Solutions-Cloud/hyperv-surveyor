@@ -31,6 +31,8 @@ export type StorageTier = 'performance' | 'capacity'
 
 export type PowerState = 'poweredOn' | 'poweredOff' | 'suspended'
 
+export type GrowthStrategy = 'build-now' | 'phased'
+
 /** A single workload. Imported from RVTools, or entered by hand. Always editable. */
 export interface Vm {
   id: string
@@ -101,7 +103,14 @@ export interface ClusterConfig {
   san: SanSpec
   /** Fraction of workload storage placed on S2D in a hybrid design. Remainder on SAN. */
   hybridS2dShare: number
+  /** One-time multiplier on current demand. 1.25 reserves 25% immediate headroom. */
   growthFactor: number
+  /** Expected compound annual workload growth. 0.1 = 10% per year. */
+  annualGrowthPct?: number
+  /** Number of annual forecast points after today. */
+  growthHorizonYears?: number
+  /** Build the terminal forecast now, or add nodes as demand crosses thresholds. */
+  growthStrategy?: GrowthStrategy
   smtFactor: number
   hostCoreReservePct: number
   hostRamReserveGiB: number

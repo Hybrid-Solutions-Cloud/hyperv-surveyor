@@ -1,6 +1,6 @@
 /** Export the full design to a multi-tab workbook. */
 import * as XLSX from 'xlsx'
-import type { ArchitectureOption } from '../engine/solve'
+import { forecastGrowth, type ArchitectureOption } from '../engine/solve'
 import { giBToTiB } from '../engine/compute'
 import { RESILIENCY, TIER_IDS } from '../engine/rules'
 import type { ClusterConfig, SizingResult, TierId, TierPolicy, Vm } from '../engine/types'
@@ -17,6 +17,7 @@ export function exportDesign(
   filename = 'HyperV_Surveyor_Sizing.xlsx',
 ) {
   const wb = XLSX.utils.book_new()
+  const growth = forecastGrowth(cfg, vms, tiers)
 
   // ---- Summary -------------------------------------------------------------
   const summary: any[][] = [
@@ -58,7 +59,10 @@ export function exportDesign(
     ['Physical cores required (after oversubscription)', r1(chosen.result.demand.requiredPCores)],
     ['RAM required (GiB)', r0(chosen.result.demand.requiredRamGiB)],
     ['Storage required (TiB)', r1(chosen.result.requiredStorageTiB)],
-    ['Growth factor applied', cfg.growthFactor],
+    ['Immediate headroom', `${r1(growth.plan.immediateHeadroomPct)}%`],
+    ['Annual workload growth', `${r1(growth.plan.annualGrowthPct * 100)}%`],
+    ['Growth horizon', `${growth.plan.horizonYears} years`],
+    ['Growth deployment strategy', growth.plan.strategy === 'build-now' ? 'Build terminal forecast now' : 'Add nodes as thresholds are crossed'],
   )
   if (chosen.result.capacity) {
     const c = chosen.result.capacity
@@ -71,6 +75,39 @@ export function exportDesign(
       ['Usable (TiB)', r1(c.usableTiB)])
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), 'Summary')
+
+  // ---- Growth plan ---------------------------------------------------------
+  const growthRows: any[][] = [
+    ['CAPACITY GROWTH PLAN'],
+    ['Annual growth compounds across CPU, memory, and consumed storage while preserving N+n at each forecast point.'],
+    ['Strategy', growth.plan.strategy === 'build-now' ? 'Build terminal forecast capacity now' : 'Phase nodes as demand crosses thresholds'],
+    ['Immediate headroom', `${r1(growth.plan.immediateHeadroomPct)}%`],
+    ['Annual growth', `${r1(growth.plan.annualGrowthPct * 100)}%`],
+    ['Horizon', `${growth.plan.horizonYears} years`],
+    [],
+    ['Timeline', 'Demand multiplier', 'Nodes required', 'Binding constraint', 'Deployment action'],
+  ]
+  growth.points.forEach((point, index) => {
+    const action = !point.result.feasible
+      ? 'Review node density or split into multiple clusters'
+      : growth.plan.strategy === 'build-now'
+        ? index === 0
+          ? `Build ${growth.plannedNodesToday ?? 'N/A'} nodes now`
+          : `Covered by initial ${growth.plannedNodesToday ?? 'N/A'}-node build`
+        : index === 0
+          ? `Initial build: ${point.result.nodes} nodes`
+          : point.additionalNodes && point.additionalNodes > 0
+            ? `Add ${point.additionalNodes} node${point.additionalNodes === 1 ? '' : 's'}`
+            : 'No node addition'
+    growthRows.push([
+      point.year === 0 ? 'Today' : `Year ${point.year}`,
+      r1(point.demandFactor),
+      point.result.feasible ? point.result.nodes : 'Review required',
+      point.result.binding,
+      action,
+    ])
+  })
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(growthRows), 'Growth Plan')
 
   // ---- CSV plan ------------------------------------------------------------
   const csv: any[][] = [

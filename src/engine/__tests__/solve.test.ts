@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compareArchitectures, solveForward, solveReverse } from '../solve'
+import { compareArchitectures, forecastGrowth, solveForward, solveReverse } from '../solve'
 import { computeDemand, licensableCores, usableRamPerHost } from '../compute'
 import { LIMITS } from '../rules'
 import { fleet400, makeConfig, makeTiers, vm } from './fixtures'
@@ -183,6 +183,44 @@ describe('N+1 / N+2 resiliency arithmetic', () => {
     const vms = Array.from({ length: 100 }, () => vm())
     const r = solveForward(makeConfig({ architecture: 'san', spareNodes: 1 }), vms, tiers)
     expect(r.utilisationCeiling).toBeCloseTo((r.nodes - 1) / r.nodes, 5)
+  })
+})
+
+describe('capacity growth planning', () => {
+  const workloads = Array.from({ length: 160 }, () => vm({ tier: 'database', vCpu: 8, ramGiB: 32, storageGiB: 200 }))
+
+  it('keeps phased sizing at current demand and compounds the annual timeline', () => {
+    const cfg = makeConfig({
+      architecture: 'san',
+      annualGrowthPct: 0.5,
+      growthHorizonYears: 2,
+      growthStrategy: 'phased',
+    })
+    const forecast = forecastGrowth(cfg, workloads, tiers)
+    expect(forecast.points.map((point) => point.demandFactor)).toEqual([1, 1.5, 2.25])
+    expect(solveForward(cfg, workloads, tiers).nodes).toBe(forecast.points[0].result.nodes)
+    expect(forecast.points[2].result.nodes).toBeGreaterThan(forecast.points[0].result.nodes)
+    expect(forecast.plannedNodesToday).toBe(forecast.points[0].result.nodes)
+  })
+
+  it('builds the terminal forecast into the current recommendation when selected', () => {
+    const cfg = makeConfig({
+      architecture: 'san',
+      annualGrowthPct: 0.5,
+      growthHorizonYears: 2,
+      growthStrategy: 'build-now',
+    })
+    const forecast = forecastGrowth(cfg, workloads, tiers)
+    const terminal = forecast.points[forecast.points.length - 1].result
+    expect(solveForward(cfg, workloads, tiers).nodes).toBe(terminal.nodes)
+    expect(forecast.plannedNodesToday).toBe(terminal.nodes)
+  })
+
+  it('holds fixed management VMs constant while the workload grows', () => {
+    const cfg = makeConfig({ architecture: 'san', annualGrowthPct: 1, growthHorizonYears: 1 })
+    const forecast = forecastGrowth(cfg, [vm({ vCpu: 4 })], tiers, [vm({ vCpu: 4, tier: 'infrastructure' })])
+    expect(forecast.points[0].result.demand.totalVCpu).toBe(8)
+    expect(forecast.points[1].result.demand.totalVCpu).toBe(12)
   })
 })
 

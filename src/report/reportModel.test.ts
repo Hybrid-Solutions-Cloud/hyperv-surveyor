@@ -10,6 +10,10 @@ const management: ManagementDeploymentInputs = {
   includeArc: true,
   monitoring: 'scom',
   highAvailability: true,
+  fabricHighAvailability: true,
+  scomHighAvailability: true,
+  scomSqlPlacement: 'shared-vmm',
+  arcServices: ['update-manager', 'azure-monitor'],
   managedHosts: 8,
   managedVms: 2,
   managedClusters: 1,
@@ -18,9 +22,13 @@ const management: ManagementDeploymentInputs = {
 }
 
 function sampleReport(chosenKey = 'san') {
+  const cfg = structuredClone(DEFAULT_CONFIG)
+  cfg.annualGrowthPct = 0.1
+  cfg.growthHorizonYears = 3
+  cfg.growthStrategy = 'phased'
   return buildSolutionReport({
     customerName: 'Contoso',
-    cfg: structuredClone(DEFAULT_CONFIG),
+    cfg,
     vms: [
       newVm({ name: 'APP01', vCpu: 4, ramGiB: 16, storageGiB: 200, provisionedGiB: 400 }),
       newVm({ name: 'SQL01', tier: 'database', vCpu: 8, ramGiB: 64, storageGiB: 500, provisionedGiB: 800 }),
@@ -43,6 +51,15 @@ describe('solution report', () => {
     expect(report.sections).toHaveLength(10)
     expect(componentRows.some((row) => row[0] === 'SCOM management server')).toBe(true)
     expect(componentRows.some((row) => row[0] === 'Azure Arc resource bridge appliance')).toBe(true)
+    expect(componentRows.some((row) => row[0] === 'Shared SQL Server for VMM and SCOM databases')).toBe(true)
+    expect(componentRows.some((row) => row[0] === 'SQL Server for SCOM databases')).toBe(false)
+    expect(managementSection.paragraphs[0]).toContain('SCOM 2025 HA on shared VMM SQL infrastructure')
+    expect(managementSection.tables[1].title).toBe('Selected Azure Arc services')
+    expect(managementSection.tables[1].rows.map((row) => row[0])).toEqual([
+      'Azure Arc core management',
+      'Azure Update Manager',
+      'Azure Monitor and Log Analytics',
+    ])
   })
 
   it('applies section choices to Markdown and JSON exports', () => {
@@ -62,6 +79,16 @@ describe('solution report', () => {
     const sectionIds = report.sections.map((section) => section.id)
 
     expect(sectionIds.slice(-2)).toEqual(['inventory', 'sources'])
+  })
+
+  it('includes a compounded node growth timeline in the solution report', () => {
+    const report = sampleReport()
+    const nodes = report.sections.find((section) => section.id === 'nodes')!
+    const timeline = nodes.tables.find((table) => table.title === 'Node growth timeline')!
+
+    expect(timeline.rows.map((row) => row[0])).toEqual(['Today', 'Year 1', 'Year 2', 'Year 3'])
+    expect(timeline.rows.map((row) => row[1])).toEqual(['1x', '1.1x', '1.21x', '1.33x'])
+    expect(nodes.metrics.find((metric) => metric.label === 'Growth strategy')?.value).toBe('Phase nodes with growth')
   })
 
   it('shows storage protection that matches SAN, S2D, and hybrid architecture semantics', () => {

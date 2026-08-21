@@ -21,6 +21,7 @@ import {
 } from './compute'
 import { s2dCapacity, sanCapacityTiB } from './capacity'
 import { planCsvs, totalCsvCount } from './csv'
+import { growthFactorForYear, resolveGrowthPlan, type GrowthPlan } from './growth'
 import { validateDesign } from './validate'
 import type {
   BindingConstraint, ClusterConfig, ComputeDemand, ReverseResult,
@@ -50,12 +51,13 @@ function sanRequiredTiB(cfg: ClusterConfig, demand: ComputeDemand): number {
   return 0
 }
 
-export function solveForward(
+function solveForwardAtGrowthFactor(
   cfg: ClusterConfig,
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
+  growthFactor: number,
 ): SizingResult {
-  const demand = computeDemand(vms, tiers, cfg.growthFactor)
+  const demand = computeDemand(vms, tiers, growthFactor)
   const coresPerHost = usableCoresPerHost(cfg.node, cfg)
   const ramPerHost = usableRamPerHost(cfg.node, cfg)
   const spare = cfg.spareNodes
@@ -164,6 +166,71 @@ export function solveForward(
   }
 }
 
+export function solveForward(
+  cfg: ClusterConfig,
+  vms: Vm[],
+  tiers: Record<TierId, TierPolicy>,
+): SizingResult {
+  return solveForwardAtGrowthFactor(cfg, vms, tiers, resolveGrowthPlan(cfg).currentDesignGrowthFactor)
+}
+
+export interface GrowthForecastPoint {
+  year: number
+  demandFactor: number
+  result: SizingResult
+  additionalNodes: number | null
+}
+
+export interface GrowthForecast {
+  plan: GrowthPlan
+  points: GrowthForecastPoint[]
+  currentRequiredNodes: number | null
+  plannedNodesToday: number | null
+}
+
+/**
+ * Forecasts compound workload growth. Optional fixed VMs (for example the current management
+ * plane) remain constant while the imported workload grows.
+ */
+export function forecastGrowth(
+  cfg: ClusterConfig,
+  workloadVms: Vm[],
+  tiers: Record<TierId, TierPolicy>,
+  fixedVms: Vm[] = [],
+): GrowthForecast {
+  const plan = resolveGrowthPlan(cfg)
+  let previousNodes: number | null = null
+  const points = Array.from({ length: plan.horizonYears + 1 }, (_, year): GrowthForecastPoint => {
+    const demandFactor = growthFactorForYear(plan, year)
+    const growingVms = workloadVms.map((vm) => ({
+      ...vm,
+      vCpu: vm.vCpu * demandFactor,
+      ramGiB: vm.ramGiB * demandFactor,
+      storageGiB: vm.storageGiB * demandFactor,
+      provisionedGiB: vm.provisionedGiB * demandFactor,
+    }))
+    const result = solveForwardAtGrowthFactor(cfg, [...growingVms, ...fixedVms], tiers, 1)
+    const nodes = result.feasible ? result.nodes : null
+    const additionalNodes = nodes === null
+      ? null
+      : previousNodes === null
+        ? nodes
+        : Math.max(0, nodes - previousNodes)
+    previousNodes = nodes
+    return { year, demandFactor, result, additionalNodes }
+  })
+  const first = points[0].result
+  const terminal = points[points.length - 1].result
+  return {
+    plan,
+    points,
+    currentRequiredNodes: first.feasible ? first.nodes : null,
+    plannedNodesToday: plan.strategy === 'build-now'
+      ? terminal.feasible ? terminal.nodes : null
+      : first.feasible ? first.nodes : null,
+  }
+}
+
 /** Reverse mode: fixed hardware, solve for headroom and the first binding constraint. */
 export function solveReverse(
   cfg: ClusterConfig,
@@ -171,7 +238,7 @@ export function solveReverse(
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
 ): ReverseResult {
-  const demand = computeDemand(vms, tiers, cfg.growthFactor)
+  const demand = computeDemand(vms, tiers, resolveGrowthPlan(cfg).currentDesignGrowthFactor)
   const workloadNodes = Math.max(0, nodes - cfg.spareNodes)
   const usesS2d = cfg.architecture === 's2d' || cfg.architecture === 'hybrid'
 

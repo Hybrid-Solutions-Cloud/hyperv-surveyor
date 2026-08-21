@@ -2,6 +2,7 @@ import React from 'react'
 import { RESILIENCY, TIER_IDS } from '../engine/rules'
 import { cacheRatio } from '../engine/capacity'
 import { licensableCores, totalCores } from '../engine/compute'
+import { resolveGrowthPlan } from '../engine/growth'
 import type { ClusterConfig, Resiliency, TierId, TierPolicy } from '../engine/types'
 import { Field, NumberInput } from './Shared'
 
@@ -24,11 +25,12 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
   const ratio = cacheRatio(cfg.node)
   const usesS2d = cfg.architecture === 's2d' || cfg.architecture === 'hybrid'
   const usesSan = cfg.architecture === 'san' || cfg.architecture === 'hybrid'
+  const growth = resolveGrowthPlan(cfg)
 
   return (
     <div className="stack">
       <div className="panel">
-        <h2>Resiliency</h2>
+        <h2>Resiliency and growth</h2>
         <Field label="Spare nodes (N+n)" hint="The service-provider default is N+2 — you must survive losing a node while another is draining for patches.">
           <select value={cfg.spareNodes} onChange={e => set({ spareNodes: parseInt(e.target.value) })}>
             <option value={0}>N+0 — no spare (not recommended)</option>
@@ -37,9 +39,32 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
             <option value={3}>N+3</option>
           </select>
         </Field>
-        <Field label="Growth factor" hint="Multiplier on all demand. 1.25 = 25% headroom for growth.">
-          <NumberInput value={cfg.growthFactor} step={0.05} min={1} onChange={n => set({ growthFactor: n })} />
-        </Field>
+        <h3>Capacity growth plan</h3>
+        <div className="row">
+          <Field label="Immediate headroom %" hint="One-time reserve above today's imported CPU, memory, and consumed storage demand.">
+            <NumberInput value={growth.immediateHeadroomPct} step={5} min={0} max={200} onChange={n => set({ growthFactor: 1 + Math.max(0, n) / 100 })} />
+          </Field>
+          <Field label="Annual workload growth %" hint="Compounded once per forecast year across CPU, memory, and consumed storage.">
+            <NumberInput value={growth.annualGrowthPct * 100} step={1} min={0} max={100} onChange={n => set({ annualGrowthPct: Math.max(0, n) / 100 })} />
+          </Field>
+        </div>
+        <div className="row">
+          <Field label="Planning horizon (years)">
+            <NumberInput value={growth.horizonYears} step={1} min={1} max={10} onChange={n => set({ growthHorizonYears: Math.max(1, Math.min(10, Math.round(n))) })} />
+          </Field>
+          <Field label="Growth deployment strategy">
+            <select value={growth.strategy} onChange={e => set({ growthStrategy: e.target.value as ClusterConfig['growthStrategy'] })}>
+              <option value="phased">Add nodes as growth requires them</option>
+              <option value="build-now">Build forecast capacity into today's design</option>
+            </select>
+          </Field>
+        </div>
+        <div className="note">
+          <strong>{growth.strategy === 'build-now' ? 'Build-now sizing' : 'Phased growth sizing'}</strong>
+          {growth.strategy === 'build-now'
+            ? `Today's node recommendation includes the full Year ${growth.horizonYears} demand forecast (${growth.terminalGrowthFactor.toFixed(2)}× imported demand).`
+            : `Today's node recommendation includes ${growth.baseGrowthFactor.toFixed(2)}× demand; the results page shows node additions through Year ${growth.horizonYears}.`}
+        </div>
         <Field label="Backup method" hint="VSS/volsnap caps CSVs at 10 TiB [MS]. RCT and ReFS block-clone are fine to 32 TiB and beyond.">
           <select value={cfg.backupMethod} onChange={e => set({ backupMethod: e.target.value as any })}>
             <option value="rct">Hyper-V RCT / ReFS block clone / SQL native</option>

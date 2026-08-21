@@ -2,10 +2,11 @@ import { MANAGEMENT_PLANES, type PlaneId } from '../data/managementPlane'
 import {
   deploymentComponentsToVms,
   deploymentInputsFromStack,
+  normalizeManagementDeploymentInputs,
   planManagementDeployment,
   type ManagementDeploymentInputs,
 } from '../engine/managementDeployment'
-import { compareArchitectures, solveForward } from '../engine/solve'
+import { compareArchitectures, forecastGrowth } from '../engine/solve'
 import { RESILIENCY } from '../engine/rules'
 import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
 
@@ -87,14 +88,24 @@ function yesNo(value: boolean) {
 }
 
 function managementLabel(inputs: ManagementDeploymentInputs) {
-  const foundation = inputs.foundation === 'scvmm' ? 'SCVMM 2025' : 'Classic Hyper-V tools'
+  const resolved = normalizeManagementDeploymentInputs(inputs)
+  const foundation = inputs.foundation === 'scvmm'
+    ? `SCVMM 2025 (${resolved.fabricHighAvailability ? 'HA' : 'standalone'})`
+    : 'Classic Hyper-V tools'
   const wac = inputs.wac === 'wac-admin'
     ? 'WAC Administration Mode'
     : inputs.wac === 'wac-virtual'
       ? 'WAC Virtualization Mode'
       : 'No WAC gateway'
-  const monitoring = inputs.monitoring === 'scom' ? 'SCOM 2025 monitoring' : 'Existing / no monitoring platform'
-  return `${foundation}; ${wac}; ${monitoring}${inputs.includeArc ? '; Azure Arc-enabled SCVMM' : ''}`
+  const monitoring = inputs.monitoring === 'scom'
+    ? resolved.scomHighAvailability
+      ? `SCOM 2025 HA${resolved.scomSqlPlacement === 'shared-vmm' && inputs.foundation === 'scvmm' ? ' on shared VMM SQL infrastructure' : ''}`
+      : 'SCOM 2025 single-server management group'
+    : 'Existing / no monitoring platform'
+  const arc = inputs.includeArc
+    ? `; Azure Arc core management${resolved.arcServices.length ? ` + ${resolved.arcServices.length} add-on${resolved.arcServices.length === 1 ? '' : 's'}` : ' only'}`
+    : ''
+  return `${foundation}; ${wac}; ${monitoring}${arc}`
 }
 
 function storageProtectionMetric(cfg: ClusterConfig): ReportMetric {
@@ -127,18 +138,25 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   const defaultStack: PlaneId[] = chosen.result.feasible && chosen.result.nodes <= 4
     ? ['classic', 'wac-admin']
     : ['scvmm', 'wac-admin']
-  const managementInputs: ManagementDeploymentInputs = input.managementDeploymentInputs
+  const managementInputs = normalizeManagementDeploymentInputs(input.managementDeploymentInputs
     ? { ...input.managementDeploymentInputs, monitoring: input.managementDeploymentInputs.monitoring ?? 'none' }
     : deploymentInputsFromStack(
       defaultStack,
       chosen.result.feasible ? chosen.result.nodes : 0,
       includedVms.length,
-    )
+    ))
   const managementPlan = planManagementDeployment(managementInputs)
   const managementVms = deploymentComponentsToVms(managementPlan.components)
-  const finalSizing = input.includeManagementInSizing
-    ? solveForward(chosen.cfg, [...input.vms, ...managementVms], input.tiers)
-    : chosen.result
+  const growthForecast = forecastGrowth(
+    chosen.cfg,
+    input.vms,
+    input.tiers,
+    input.includeManagementInSizing ? managementVms : [],
+  )
+  const plannedGrowthPoint = growthForecast.plan.strategy === 'build-now'
+    ? growthForecast.points[growthForecast.points.length - 1]
+    : growthForecast.points[0]
+  const finalSizing = plannedGrowthPoint.result
   const managementHostDelta = finalSizing.feasible && chosen.result.feasible
     ? finalSizing.nodes - chosen.result.nodes
     : null
@@ -168,6 +186,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   managementPlan.components.forEach((component) => {
     if (component.source) sourceMap.set(component.source, component.name)
   })
+  managementPlan.arcServices.forEach((service) => sourceMap.set(service.source, service.name))
 
   const sections: ReportSection[] = [
     {
@@ -211,7 +230,12 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
     {
       id: 'nodes',
       title: 'Node requirements',
-      paragraphs: [finalSizing.bindingExplanation],
+      paragraphs: [
+        finalSizing.bindingExplanation,
+        growthForecast.plan.strategy === 'build-now'
+          ? `The current design includes the full Year ${growthForecast.plan.horizonYears} forecast at ${(growthForecast.plan.annualGrowthPct * 100).toFixed(1)}% compounded annual workload growth.`
+          : `The current design is sized for today's demand; the timeline phases node additions over ${growthForecast.plan.horizonYears} years at ${(growthForecast.plan.annualGrowthPct * 100).toFixed(1)}% compounded annual workload growth.`,
+      ],
       metrics: [
         { label: 'Total nodes', value: finalSizing.feasible ? number(finalSizing.nodes) : 'Review required' },
         { label: 'Workload-bearing nodes', value: finalSizing.feasible ? number(finalSizing.workloadNodes) : 'N/A' },
@@ -219,20 +243,48 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Memory-only requirement', value: Number.isFinite(finalSizing.nodesIfMemoryOnly) ? number(finalSizing.nodesIfMemoryOnly) : 'N/A' },
         { label: 'Storage-only requirement', value: Number.isFinite(finalSizing.nodesIfStorageOnly) ? number(finalSizing.nodesIfStorageOnly) : 'N/A' },
         { label: 'Licensable cores', value: number(finalSizing.totalLicensableCores) },
+        { label: 'Growth strategy', value: growthForecast.plan.strategy === 'build-now' ? 'Build forecast capacity now' : 'Phase nodes with growth' },
+        { label: 'Annual growth', value: `${number(growthForecast.plan.annualGrowthPct * 100, 1)}% for ${growthForecast.plan.horizonYears} years` },
       ],
       bullets: [],
-      tables: [{
-        title: 'Per-node hardware profile',
-        headers: ['Sockets', 'Cores / socket', 'Physical cores', 'Memory', 'Capacity drives', 'Cache drives'],
-        rows: [[
-          number(chosen.cfg.node.sockets),
-          number(chosen.cfg.node.coresPerSocket),
-          number(chosen.cfg.node.sockets * chosen.cfg.node.coresPerSocket),
-          gib(chosen.cfg.node.ramGiB),
-          `${chosen.cfg.node.capacityDrivesPerNode} x ${chosen.cfg.node.capacityDriveTB} TB`,
-          `${chosen.cfg.node.cacheDrivesPerNode} x ${chosen.cfg.node.cacheDriveTB} TB`,
-        ]],
-      }],
+      tables: [
+        {
+          title: 'Per-node hardware profile',
+          headers: ['Sockets', 'Cores / socket', 'Physical cores', 'Memory', 'Capacity drives', 'Cache drives'],
+          rows: [[
+            number(chosen.cfg.node.sockets),
+            number(chosen.cfg.node.coresPerSocket),
+            number(chosen.cfg.node.sockets * chosen.cfg.node.coresPerSocket),
+            gib(chosen.cfg.node.ramGiB),
+            `${chosen.cfg.node.capacityDrivesPerNode} x ${chosen.cfg.node.capacityDriveTB} TB`,
+            `${chosen.cfg.node.cacheDrivesPerNode} x ${chosen.cfg.node.cacheDriveTB} TB`,
+          ]],
+        },
+        {
+          title: 'Node growth timeline',
+          headers: ['Timeline', 'Demand multiplier', 'Nodes required', 'Binding constraint', 'Deployment action'],
+          rows: growthForecast.points.map((point, index) => {
+            const action = !point.result.feasible
+              ? 'Review node density or split into multiple clusters'
+              : growthForecast.plan.strategy === 'build-now'
+                ? index === 0
+                  ? `Build ${growthForecast.plannedNodesToday ?? 'N/A'} nodes now`
+                  : `Covered by initial ${growthForecast.plannedNodesToday ?? 'N/A'}-node build`
+                : index === 0
+                  ? `Initial build: ${point.result.nodes} nodes`
+                  : point.additionalNodes && point.additionalNodes > 0
+                    ? `Add ${point.additionalNodes} node${point.additionalNodes === 1 ? '' : 's'}`
+                    : 'No node addition'
+            return [
+              point.year === 0 ? 'Today' : `Year ${point.year}`,
+              `${number(point.demandFactor, 2)}x`,
+              point.result.feasible ? number(point.result.nodes) : 'Review required',
+              point.result.binding,
+              action,
+            ]
+          }),
+        },
+      ],
     },
     {
       id: 'workloads',
@@ -251,7 +303,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
     {
       id: 'storage',
       title: 'Storage and CSV plan',
-      paragraphs: ['Capacity values use consumed workload storage after the configured growth factor and selected resiliency or SAN efficiency assumptions.'],
+      paragraphs: ['Capacity values use consumed workload storage after the selected immediate-headroom and growth strategy, followed by the configured resiliency or SAN efficiency assumptions.'],
       metrics: [
         { label: 'Required storage', value: tib(finalSizing.requiredStorageTiB) },
         { label: 'S2D usable capacity', value: finalSizing.capacity ? tib(finalSizing.capacity.usableTiB) : 'Not applicable' },
@@ -287,28 +339,39 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Management memory', value: gib(managementPlan.totalRamGiB) },
         { label: 'Management disk', value: gib(managementPlan.totalDiskGiB) },
         { label: 'Host impact', value: managementHostDelta === null ? 'Could not compare' : managementHostDelta > 0 ? `+${managementHostDelta} nodes` : 'No additional nodes' },
+        { label: 'Azure Arc services', value: managementInputs.includeArc ? `Core + ${managementInputs.arcServices.length} add-on${managementInputs.arcServices.length === 1 ? '' : 's'}` : 'Not selected' },
       ],
       bullets: [...managementPlan.dependencies.map((item) => `Dependency: ${item}`), ...managementPlan.cautions.map((item) => `Caution: ${item}`)],
-      tables: [{
-        title: 'Management-plane bill of materials',
-        headers: ['Component', 'Qty', 'Availability', 'vCPU each', 'RAM each', 'Disk each', 'Basis'],
-        rows: managementPlan.components.map((component) => [
-          component.name,
-          number(component.count),
-          component.availability,
-          component.resourceType === 'vm' ? number(component.vCpu) : 'N/A',
-          component.resourceType === 'vm' ? gib(component.ramGiB) : 'N/A',
-          gib(component.diskGiB),
-          component.basis,
-        ]),
-      }],
+      tables: [
+        {
+          title: 'Management-plane bill of materials',
+          headers: ['Component', 'Qty', 'Availability', 'vCPU each', 'RAM each', 'Disk each', 'Basis'],
+          rows: managementPlan.components.map((component) => [
+            component.name,
+            number(component.count),
+            component.availability,
+            component.resourceType === 'vm' ? number(component.vCpu) : 'N/A',
+            component.resourceType === 'vm' ? gib(component.ramGiB) : 'N/A',
+            gib(component.diskGiB),
+            component.basis,
+          ]),
+        },
+        ...(managementPlan.arcServices.length ? [{
+          title: 'Selected Azure Arc services',
+          headers: ['Service', 'Type', 'Billing basis', 'Deployment requirement'],
+          rows: managementPlan.arcServices.map((service) => [service.name, service.category, service.billing, service.requirement]),
+        }] : []),
+      ],
     },
     {
       id: 'assumptions',
       title: 'Assumptions and policies',
       paragraphs: ['Values marked as planning assumptions should be validated against measured workload behavior and the final hardware bill of materials.'],
       metrics: [
-        { label: 'Growth factor', value: `${number(chosen.cfg.growthFactor * 100, 1)}%` },
+        { label: 'Immediate headroom', value: `${number(growthForecast.plan.immediateHeadroomPct, 1)}%` },
+        { label: 'Annual workload growth', value: `${number(growthForecast.plan.annualGrowthPct * 100, 1)}% compounded` },
+        { label: 'Growth horizon', value: `${growthForecast.plan.horizonYears} years` },
+        { label: 'Growth deployment', value: growthForecast.plan.strategy === 'build-now' ? 'Build terminal forecast now' : 'Add nodes as thresholds are crossed' },
         { label: 'SMT factor', value: number(chosen.cfg.smtFactor, 2) },
         { label: 'Host core reserve', value: `${number(chosen.cfg.hostCoreReservePct * 100, 1)}%` },
         {

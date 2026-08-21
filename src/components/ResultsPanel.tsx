@@ -1,8 +1,8 @@
 import React from 'react'
-import type { ArchitectureOption } from '../engine/solve'
+import { forecastGrowth, type ArchitectureOption, type GrowthForecastPoint } from '../engine/solve'
 import { RESILIENCY, TIER_IDS } from '../engine/rules'
 import { giBToTiB } from '../engine/compute'
-import type { TierId, TierPolicy } from '../engine/types'
+import type { TierId, TierPolicy, Vm } from '../engine/types'
 import { Card, FindingsList, fmt0, fmt1 } from './Shared'
 
 interface Props {
@@ -10,6 +10,7 @@ interface Props {
   chosenKey: string
   setChosenKey: (k: string) => void
   tiers: Record<TierId, TierPolicy>
+  vms: Vm[]
   onExport: () => void
 }
 
@@ -19,7 +20,7 @@ const driverLabel: Record<string, string> = {
   'node-count': 'node count',
 }
 
-export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, onExport }: Props) {
+export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onExport }: Props) {
   const chosen = options.find(o => o.key === chosenKey) ?? options[0]
   const r = chosen.result
 
@@ -33,6 +34,19 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, onExport
   }
 
   const spare = r.nodes - r.workloadNodes
+  const growth = forecastGrowth(chosen.cfg, vms, tiers)
+  const actionFor = (point: GrowthForecastPoint, index: number) => {
+    if (!point.result.feasible) return 'Review node density or split into multiple clusters'
+    if (growth.plan.strategy === 'build-now') {
+      return index === 0
+        ? `Build ${growth.plannedNodesToday ?? '—'} nodes now`
+        : `Covered by initial ${growth.plannedNodesToday ?? '—'}-node build`
+    }
+    if (index === 0) return `Initial build: ${point.result.nodes} nodes`
+    return point.additionalNodes && point.additionalNodes > 0
+      ? `Add ${point.additionalNodes} node${point.additionalNodes === 1 ? '' : 's'}`
+      : 'No node addition'
+  }
 
   return (
     <div className="stack">
@@ -135,6 +149,48 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, onExport
       </div>
 
       <div className="panel">
+        <h2>Capacity growth plan</h2>
+        <div className={`note ${growth.points.every((point) => point.result.feasible) ? 'ok' : 'warn'}`}>
+          <strong>{growth.plan.strategy === 'build-now' ? 'Forecast capacity is included now' : 'Nodes are phased with demand'}</strong>
+          {growth.plan.annualGrowthPct > 0
+            ? `${(growth.plan.annualGrowthPct * 100).toFixed(1)}% annual growth compounds through Year ${growth.plan.horizonYears}. Immediate headroom is ${growth.plan.immediateHeadroomPct.toFixed(1)}%.`
+            : `No annual growth is currently entered. Immediate headroom is ${growth.plan.immediateHeadroomPct.toFixed(1)}%; set an annual percentage under Hardware and assumptions to create a changing forecast.`}
+        </div>
+        <div className="grid cards">
+          <Card k="Nodes required today" v={growth.currentRequiredNodes ?? 'Review'} s={`${growth.plan.baseGrowthFactor.toFixed(2)}× imported demand`} />
+          <Card k="Nodes planned today" v={growth.plannedNodesToday ?? 'Review'} s={growth.plan.strategy === 'build-now' ? `includes Year ${growth.plan.horizonYears}` : 'phased starting point'} />
+          <Card k={`Year ${growth.plan.horizonYears} demand`} v={`${growth.plan.terminalGrowthFactor.toFixed(2)}×`} s="of imported demand" />
+        </div>
+        <div className="scroll" style={{ maxHeight: 'none', marginTop: 16 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Timeline</th>
+                <th className="num">Demand multiplier</th>
+                <th className="num">Nodes required</th>
+                <th>Binding constraint</th>
+                <th>Deployment action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {growth.points.map((point, index) => (
+                <tr key={point.year}>
+                  <td><strong>{point.year === 0 ? 'Today' : `Year ${point.year}`}</strong></td>
+                  <td className="num mono">{point.demandFactor.toFixed(2)}×</td>
+                  <td className="num"><strong>{point.result.feasible ? point.result.nodes : 'Review'}</strong></td>
+                  <td><span className={`pill ${point.result.binding === 'storage' ? 'warn' : 'info'}`}>{point.result.binding}</span></td>
+                  <td>{actionFor(point, index)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="small muted" style={{ marginTop: 8 }}>
+          This is a planning forecast, not measured trend analysis. It compounds the entered growth percentage across the current workload mix and preserves the selected N+n reserve at every point.
+        </p>
+      </div>
+
+      <div className="panel">
         <h2>CSV / LUN layout</h2>
         <p className="small muted" style={{ marginTop: -6 }}>
           CSV count is the largest of capacity, recovery blast radius, and node count — then rounded up to a
@@ -222,7 +278,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, onExport
         <h2>Export</h2>
         <button className="btn" onClick={onExport}>Download workbook (.xlsx)</button>
         <p className="small muted" style={{ marginTop: 8 }}>
-          Five tabs: architecture comparison, CSV plan, validation findings, tier policy, and the full inventory.
+          Six tabs: architecture comparison, growth plan, CSV plan, validation findings, tier policy, and the full inventory.
         </p>
       </div>
     </div>

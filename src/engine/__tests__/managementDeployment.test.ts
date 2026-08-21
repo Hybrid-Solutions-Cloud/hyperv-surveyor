@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   deploymentComponentsToVms,
   deploymentInputsFromStack,
+  normalizeManagementDeploymentInputs,
   planManagementDeployment,
   type ManagementDeploymentInputs,
 } from '../managementDeployment'
@@ -12,6 +13,10 @@ const base: ManagementDeploymentInputs = {
   includeArc: false,
   monitoring: 'none',
   highAvailability: false,
+  fabricHighAvailability: false,
+  scomHighAvailability: false,
+  scomSqlPlacement: 'dedicated',
+  arcServices: [],
   managedHosts: 24,
   managedVms: 800,
   managedClusters: 3,
@@ -30,7 +35,7 @@ describe('management deployment planner', () => {
   })
 
   it('turns the supported components into HA pairs', () => {
-    const plan = planManagementDeployment({ ...base, highAvailability: true })
+    const plan = planManagementDeployment({ ...base, fabricHighAvailability: true })
     expect(plan.components.find((item) => item.id === 'vmm')?.count).toBe(2)
     expect(plan.components.find((item) => item.id === 'sql')?.count).toBe(2)
     expect(plan.components.find((item) => item.id === 'library')?.count).toBe(2)
@@ -39,7 +44,7 @@ describe('management deployment planner', () => {
   })
 
   it('does not invent HA for Virtualization Mode preview', () => {
-    const plan = planManagementDeployment({ ...base, wac: 'wac-virtual', highAvailability: true })
+    const plan = planManagementDeployment({ ...base, wac: 'wac-virtual', fabricHighAvailability: true })
     expect(plan.components.find((item) => item.id === 'wac-virtual')?.count).toBe(1)
     expect(plan.cautions.some((item) => item.includes('not published an HA'))).toBe(true)
   })
@@ -56,16 +61,24 @@ describe('management deployment planner', () => {
     expect(bridge).toMatchObject({ count: 1, vCpu: 4, ramGiB: 32, diskGiB: 100 })
     expect(bridge?.notes.some((item) => item.includes('separate on-premises appliance VM'))).toBe(true)
     expect(bridge?.notes.some((item) => item.includes('second appliance VM IP'))).toBe(true)
+    expect(plan.arcServices.map((service) => service.id)).toEqual(['core-management'])
+  })
+
+  it('adds selected Arc guest services without inventing more appliance VMs', () => {
+    const plan = planManagementDeployment({ ...base, includeArc: true, arcServices: ['update-manager', 'azure-monitor'] })
+    expect(plan.arcServices.map((service) => service.id)).toEqual(['core-management', 'update-manager', 'azure-monitor'])
+    expect(plan.components.filter((item) => item.id === 'arc-bridge')).toHaveLength(1)
+    expect(plan.dependencies.some((item) => item.includes('Connected Machine agent'))).toBe(true)
   })
 
   it('maps the deployment to infrastructure VMs for capacity impact', () => {
-    const plan = planManagementDeployment({ ...base, highAvailability: true })
+    const plan = planManagementDeployment({ ...base, fabricHighAvailability: true })
     const vms = deploymentComponentsToVms(plan.components)
     expect(vms).toHaveLength(8)
     expect(vms.every((vm) => vm.tier === 'infrastructure' && vm.include)).toBe(true)
   })
 
-  it('adds a workload-sized SCOM monitoring deployment', () => {
+  it('combines SCOM roles on one server when SCOM HA is not selected', () => {
     const plan = planManagementDeployment({ ...base, monitoring: 'scom' })
     expect(plan.components.map((item) => item.id)).toEqual([
       'vmm',
@@ -73,17 +86,15 @@ describe('management deployment planner', () => {
       'library',
       'library-content',
       'wac-admin',
-      'scom-management',
-      'scom-sql',
-      'scom-reporting',
-      'scom-web',
+      'scom-all-in-one',
     ])
-    expect(plan.components.find((item) => item.id === 'scom-management')?.count).toBe(1)
-    expect(plan.totalInstances).toBe(8)
+    expect(plan.components.find((item) => item.id === 'scom-all-in-one')).toMatchObject({ count: 1, vCpu: 16, ramGiB: 48 })
+    expect(plan.totalInstances).toBe(5)
+    expect(plan.cautions.some((item) => item.includes('smallest production loads'))).toBe(true)
   })
 
   it('makes SCOM management and database roles redundant when HA is selected', () => {
-    const plan = planManagementDeployment({ ...base, monitoring: 'scom', highAvailability: true })
+    const plan = planManagementDeployment({ ...base, monitoring: 'scom', scomHighAvailability: true })
     expect(plan.components.find((item) => item.id === 'scom-management')?.count).toBe(2)
     expect(plan.components.find((item) => item.id === 'scom-sql')?.count).toBe(2)
     expect(plan.components.find((item) => item.id === 'scom-reporting')?.count).toBe(1)
@@ -91,8 +102,45 @@ describe('management deployment planner', () => {
     expect(plan.cautions.some((item) => item.includes('reporting and web console roles remain single'))).toBe(true)
   })
 
+  it('can share the VMM SQL Always On infrastructure with SCOM databases', () => {
+    const plan = planManagementDeployment({
+      ...base,
+      monitoring: 'scom',
+      fabricHighAvailability: true,
+      scomHighAvailability: true,
+      scomSqlPlacement: 'shared-vmm',
+    })
+    const sharedSql = plan.components.find((item) => item.id === 'sql')
+    expect(sharedSql).toMatchObject({ name: 'Shared SQL Server for VMM and SCOM databases', count: 2, vCpu: 32, ramGiB: 48 })
+    expect(sharedSql?.availability).toContain('Shared SQL Always On')
+    expect(plan.components.some((item) => item.id === 'scom-sql')).toBe(false)
+  })
+
+  it('requires fabric HA before sharing the VMM SQL Always On infrastructure', () => {
+    const plan = planManagementDeployment({
+      ...base,
+      monitoring: 'scom',
+      scomHighAvailability: true,
+      scomSqlPlacement: 'shared-vmm',
+    })
+    expect(plan.components.find((item) => item.id === 'sql')?.count).toBe(1)
+    expect(plan.components.find((item) => item.id === 'scom-sql')?.count).toBe(2)
+    expect(plan.cautions.some((item) => item.includes('requires SCVMM / WAC high availability'))).toBe(true)
+  })
+
+  it('keeps fabric and SCOM availability choices independent', () => {
+    const scomHaOnly = planManagementDeployment({ ...base, monitoring: 'scom', scomHighAvailability: true })
+    expect(scomHaOnly.components.find((item) => item.id === 'vmm')?.count).toBe(1)
+    expect(scomHaOnly.components.find((item) => item.id === 'scom-management')?.count).toBe(2)
+    expect(scomHaOnly.components.find((item) => item.id === 'scom-sql')?.count).toBe(2)
+
+    const fabricHaOnly = planManagementDeployment({ ...base, monitoring: 'scom', fabricHighAvailability: true })
+    expect(fabricHaOnly.components.find((item) => item.id === 'vmm')?.count).toBe(2)
+    expect(fabricHaOnly.components.find((item) => item.id === 'scom-all-in-one')?.count).toBe(1)
+  })
+
   it('scales SCOM management servers at the published 3,000-agent limit', () => {
-    const plan = planManagementDeployment({ ...base, monitoring: 'scom', managedHosts: 500, managedVms: 6_000 })
+    const plan = planManagementDeployment({ ...base, monitoring: 'scom', scomHighAvailability: true, managedHosts: 500, managedVms: 6_000 })
     expect(plan.components.find((item) => item.id === 'scom-management')?.count).toBe(3)
   })
 
@@ -108,5 +156,20 @@ describe('management deployment planner', () => {
     expect(inputs.includeArc).toBe(true)
     expect(inputs.monitoring).toBe('scom')
     expect(inputs.highAvailability).toBe(false)
+    expect(inputs.fabricHighAvailability).toBe(false)
+    expect(inputs.scomHighAvailability).toBe(false)
+    expect(inputs.scomSqlPlacement).toBe('dedicated')
+    expect(inputs.arcServices).toEqual([])
+  })
+
+  it('migrates the legacy global HA choice into both independent choices', () => {
+    const legacy = normalizeManagementDeploymentInputs({
+      ...base,
+      fabricHighAvailability: undefined,
+      scomHighAvailability: undefined,
+      highAvailability: true,
+    })
+    expect(legacy.fabricHighAvailability).toBe(true)
+    expect(legacy.scomHighAvailability).toBe(true)
   })
 })

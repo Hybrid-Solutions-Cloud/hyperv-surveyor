@@ -14,11 +14,14 @@ import {
   ServerCog,
   ShieldAlert,
 } from 'lucide-react'
-import { compareArchitectures, solveForward, type ArchitectureOption } from '../engine/solve'
+import { compareArchitectures, forecastGrowth, type ArchitectureOption } from '../engine/solve'
 import {
+  ARC_SERVICE_CATALOG,
   deploymentComponentsToVms,
   deploymentInputsFromStack,
+  normalizeManagementDeploymentInputs,
   planManagementDeployment,
+  type ArcServiceId,
   type ManagementDeploymentInputs,
 } from '../engine/managementDeployment'
 import {
@@ -47,7 +50,7 @@ type AdvisorTab = 'recommend' | 'deploy' | 'compare' | 'cost' | 'vmware' | 'fiel
 export default function ManagementPlanePage() {
   const [tab, setTab] = useState<AdvisorTab>('recommend')
   const [answers, setAnswers] = useState<AdvisorAnswers>({})
-  const { cfg, vms, tiers, chosenKey } = useSurveyorStore()
+  const { cfg, vms, tiers, chosenKey, managementDeploymentInputs } = useSurveyorStore()
   const options = useMemo(() => compareArchitectures(cfg, vms, tiers), [cfg, vms, tiers])
   const chosen = options.find((option) => option.key === chosenKey) ?? options[0]
   const includedVms = vms.filter((vm) => vm.include).length
@@ -100,6 +103,7 @@ export default function ManagementPlanePage() {
           initialCoresPerSocket={cfg.node.coresPerSocket}
           initialVms={includedVms || 320}
           spareHosts={cfg.spareNodes}
+          initialManagementInputs={managementDeploymentInputs}
         />
       )}
     </>
@@ -270,19 +274,28 @@ function DeploymentDesignerPanel({
   const setInputs = useSurveyorStore((state) => state.setManagementDeploymentInputs)
   const includeInSizing = useSurveyorStore((state) => state.includeManagementInSizing)
   const setIncludeInSizing = useSurveyorStore((state) => state.setIncludeManagementInSizing)
-  const inputs: ManagementDeploymentInputs = storedInputs
+  const inputs = normalizeManagementDeploymentInputs(storedInputs
     ? { ...storedInputs, monitoring: storedInputs.monitoring ?? 'none' }
-    : makeSuggestedInputs()
+    : makeSuggestedInputs())
   const plan = useMemo(() => planManagementDeployment(inputs), [inputs])
   const managementVms = useMemo(() => deploymentComponentsToVms(plan.components), [plan.components])
-  const adjusted = useMemo(
-    () => includeInSizing ? solveForward(chosen.cfg, [...vms, ...managementVms], tiers) : chosen.result,
-    [chosen, includeInSizing, managementVms, tiers, vms],
-  )
+  const adjusted = useMemo(() => {
+    if (!includeInSizing) return chosen.result
+    const forecast = forecastGrowth(chosen.cfg, vms, tiers, managementVms)
+    return forecast.plan.strategy === 'build-now'
+      ? forecast.points[forecast.points.length - 1].result
+      : forecast.points[0].result
+  }, [chosen, includeInSizing, managementVms, tiers, vms])
   const hostDelta = adjusted.feasible && chosen.result.feasible ? adjusted.nodes - chosen.result.nodes : null
 
   const setNumber = (key: keyof ManagementDeploymentInputs, value: number) => {
     setInputs({ ...inputs, [key]: Math.max(0, value) })
+  }
+  const setArcService = (id: ArcServiceId, checked: boolean) => {
+    const arcServices = checked
+      ? [...new Set([...inputs.arcServices, id])]
+      : inputs.arcServices.filter((service) => service !== id)
+    setInputs({ ...inputs, arcServices })
   }
 
   return (
@@ -303,7 +316,7 @@ function DeploymentDesignerPanel({
           <div className="license-toggle deployment-choice-toggle">
             <button
               className={inputs.foundation === 'classic' ? 'active' : ''}
-              onClick={() => setInputs({ ...inputs, foundation: 'classic', includeArc: false })}
+              onClick={() => setInputs({ ...inputs, foundation: 'classic', includeArc: false, arcServices: [] })}
               type="button"
             >Classic</button>
             <button
@@ -330,13 +343,48 @@ function DeploymentDesignerPanel({
         </Field>
 
         <div className="meter-toggles deployment-toggles">
-          <CostToggle label="Highly available management plane" checked={inputs.highAvailability} onChange={(checked) => setInputs({ ...inputs, highAvailability: checked })} />
-          <CostToggle label="Add Azure Arc-enabled SCVMM" checked={inputs.includeArc} onChange={(checked) => setInputs({ ...inputs, includeArc: checked })} />
+          <CostToggle label={`${inputs.foundation === 'scvmm' ? 'SCVMM / WAC' : 'WAC'} high availability`} checked={inputs.fabricHighAvailability} onChange={(checked) => setInputs({ ...inputs, fabricHighAvailability: checked, highAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />
+          {inputs.monitoring === 'scom' && <CostToggle label="SCOM high availability" checked={inputs.scomHighAvailability} onChange={(checked) => setInputs({ ...inputs, scomHighAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />}
+          <CostToggle label="Add Azure Arc-enabled SCVMM" checked={inputs.includeArc} onChange={(checked) => setInputs({ ...inputs, includeArc: checked, arcServices: checked ? inputs.arcServices : [] })} />
           <CostToggle label="Add dedicated AD DS / DNS VMs" checked={inputs.includeIdentityServices} onChange={(checked) => setInputs({ ...inputs, includeIdentityServices: checked })} />
           <CostToggle label="Include management VMs in host sizing" checked={includeInSizing} onChange={setIncludeInSizing} />
         </div>
+        {inputs.monitoring === 'scom' && inputs.scomHighAvailability && inputs.foundation === 'scvmm' && inputs.fabricHighAvailability && (
+          <Field label="SCOM database placement">
+            <select value={inputs.scomSqlPlacement} onChange={(event) => setInputs({ ...inputs, scomSqlPlacement: event.target.value as ManagementDeploymentInputs['scomSqlPlacement'] })}>
+              <option value="dedicated">Dedicated SCOM SQL Always On pair</option>
+              <option value="shared-vmm">Share VMM SQL Always On infrastructure</option>
+            </select>
+          </Field>
+        )}
+        {inputs.monitoring === 'scom' && inputs.scomHighAvailability && inputs.foundation === 'scvmm' && !inputs.fabricHighAvailability && (
+          <div className="note"><strong>Dedicated SCOM SQL required</strong>Sharing VMM's SQL Always On infrastructure becomes available when SCVMM / WAC high availability is enabled.</div>
+        )}
+        {inputs.monitoring === 'scom' && !inputs.scomHighAvailability && (
+          <div className="note warn"><strong>Single-server SCOM topology</strong>One VM contains the management server, databases, reporting, and web console roles. Microsoft positions this mainly for labs and only the smallest production loads.</div>
+        )}
         {inputs.foundation !== 'scvmm' && inputs.includeArc && (
           <div className="note warn">Arc-enabled SCVMM requires SCVMM as the fabric foundation.</div>
+        )}
+        {inputs.includeArc && (
+          <div className="arc-service-picker">
+            <h3>Azure Arc services</h3>
+            <div className="arc-core-choice">
+              <Check size={15} />
+              <span><strong>Core Arc management</strong><small>No additional charge for the core control plane; includes SCVMM inventory and VM lifecycle projection.</small></span>
+            </div>
+            <div className="meter-toggles">
+              {ARC_SERVICE_CATALOG.map((service) => (
+                <CostToggle
+                  key={service.id}
+                  label={`${service.name} · ${service.billing}`}
+                  checked={inputs.arcServices.includes(service.id as ArcServiceId)}
+                  onChange={(checked) => setArcService(service.id as ArcServiceId, checked)}
+                />
+              ))}
+            </div>
+            {inputs.arcServices.length > 0 && <p className="small muted">Guest-level add-ons require the Azure Connected Machine agent on each selected VM. Charges or qualifying entitlements are evaluated separately.</p>}
+          </div>
         )}
 
         <div className="form-grid two-column deployment-scale-inputs">
@@ -383,6 +431,32 @@ function DeploymentDesignerPanel({
             <article><span>Total disk</span><strong>{plan.totalDiskGiB.toLocaleString()} GiB</strong><small>Provisioned</small></article>
           </div>
         </section>
+
+        {inputs.includeArc && (
+          <section className="panel">
+            <div className="panel-heading-row">
+              <div>
+                <h2>Azure Arc service plan</h2>
+                <p className="small muted">Core management is separated from optional guest-level Azure services so the free control plane is not confused with metered add-ons.</p>
+              </div>
+            </div>
+            {plan.arcServices.length === 0 ? (
+              <div className="note warn">Select SCVMM as the fabric foundation to build the Arc service plan.</div>
+            ) : (
+              <div className="arc-service-grid">
+                {plan.arcServices.map((service) => (
+                  <article className={service.category === 'Core management' ? 'core' : ''} key={service.id}>
+                    <span>{service.category}</span>
+                    <strong>{service.name}</strong>
+                    <p>{service.billing}</p>
+                    <small>{service.requirement}</small>
+                    <a href={service.source} target="_blank" rel="noreferrer">Microsoft source</a>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         <section className="panel">
           <div className="panel-heading-row">
@@ -757,13 +831,20 @@ function CostPanel({
   initialCoresPerSocket,
   initialVms,
   spareHosts,
+  initialManagementInputs,
 }: {
   initialHosts: number
   initialSockets: number
   initialCoresPerSocket: number
   initialVms: number
   spareHosts: number
+  initialManagementInputs: ManagementDeploymentInputs | null
 }) {
+  const deploymentInputs = initialManagementInputs
+    ? normalizeManagementDeploymentInputs(initialManagementInputs)
+    : null
+  const deploymentArcServices = new Set(deploymentInputs?.arcServices ?? [])
+  const arcEnabled = deploymentInputs?.includeArc ?? true
   const [inputs, setInputs] = useState<ManagementCostInputs>({
     hosts: Math.max(1, initialHosts),
     sockets: initialSockets,
@@ -773,14 +854,14 @@ function CostPanel({
     termYears: 3,
     sqlCores: 4,
     waiveUpdateAndGuest: true,
-    includeUpdateManager: true,
-    includeDefenderP2: true,
-    includeGuestConfig: true,
-    includeLogAnalytics: true,
+    includeUpdateManager: arcEnabled && (deploymentInputs ? deploymentArcServices.has('update-manager') : true),
+    includeDefenderP2: arcEnabled && (deploymentInputs ? deploymentArcServices.has('defender-for-servers') : true),
+    includeGuestConfig: arcEnabled && (deploymentInputs ? deploymentArcServices.has('machine-configuration') || deploymentArcServices.has('change-tracking') : true),
+    includeLogAnalytics: arcEnabled && (deploymentInputs ? deploymentArcServices.has('azure-monitor') || deploymentArcServices.has('change-tracking') : true),
     logAnalyticsGbPerVm: 2,
     model: 'spla',
   })
-  const [selectedPlane, setSelectedPlane] = useState<PlaneId>('scvmm')
+  const [selectedPlane, setSelectedPlane] = useState<PlaneId>(deploymentInputs?.includeArc ? 'arc-scvmm' : deploymentInputs?.foundation === 'classic' ? 'classic' : 'scvmm')
   const [rateCard, setRateCard] = useState<ManagementRateCard>({ ...DEFAULT_MANAGEMENT_RATE_CARD })
   const [commercial, setCommercial] = useState<CommercialInputs>({
     motion: 'msp',
@@ -879,6 +960,7 @@ function CostPanel({
         )}
 
         <h3>Arc metered services</h3>
+        {deploymentInputs && <p className="small muted">Initialized from Deployment design. Pricing selections remain editable here.</p>}
         <div className="meter-toggles">
           <CostToggle label={`Update Manager · ${money(rateCard.updateManagerPerVmMonth)}/VM/mo`} checked={inputs.includeUpdateManager} onChange={(checked) => setInputs({ ...inputs, includeUpdateManager: checked })} />
           <CostToggle label={`Defender for Servers P2 · ${money(rateCard.defenderP2PerVmMonth)}/VM/mo`} checked={inputs.includeDefenderP2} onChange={(checked) => setInputs({ ...inputs, includeDefenderP2: checked })} />

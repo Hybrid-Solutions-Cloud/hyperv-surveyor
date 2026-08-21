@@ -21,6 +21,7 @@ export default function ResultsPage() {
         chosenKey={chosen.key}
         setChosenKey={setChosenKey}
         tiers={tiers}
+        vms={vms}
         onExport={() => exportDesign(options, chosen, chosen.cfg, tiers, vms)}
       />
     </>
