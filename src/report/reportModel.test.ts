@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { reportToJson, reportToMarkdown, reportToPdfBlob, reportToWordBlob } from './exportReport'
+import { reportToHtml, reportToJson, reportToMarkdown, reportToPdfBlob, reportToWordBlob } from './exportReport'
 import { buildSolutionReport, defaultReportSelection } from './reportModel'
 import { DEFAULT_CONFIG, defaultTiers, newVm } from '../state/defaults'
 import type { ManagementDeploymentInputs } from '../engine/managementDeployment'
@@ -55,6 +55,34 @@ describe('solution report', () => {
     expect(markdown).toContain('## Management plane')
     expect(markdown).not.toContain('## VM inventory')
     expect(json.sections.map((section: { id: string }) => section.id)).toEqual(['executive', 'management'])
+  })
+
+  it('places VM inventory immediately above sources and methodology', () => {
+    const report = sampleReport()
+    const sectionIds = report.sections.map((section) => section.id)
+
+    expect(sectionIds.slice(-2)).toEqual(['inventory', 'sources'])
+  })
+
+  it('creates a self-contained interactive HTML report from selected sections', () => {
+    const report = sampleReport()
+    const selection = Object.fromEntries(Object.keys(defaultReportSelection()).map((id) => [id, id === 'executive' || id === 'management'])) as ReturnType<typeof defaultReportSelection>
+    const html = reportToHtml(report, selection)
+
+    expect(html).toContain('<!doctype html>')
+    expect(html).toContain('<style>')
+    expect(html).toContain('Print / Save as PDF')
+    expect(html).toContain('Executive summary')
+    expect(html).toContain('Management plane')
+    expect(html).not.toContain('VM inventory')
+  })
+
+  it('describes host memory reserve as a greater-of calculation', () => {
+    const assumptions = sampleReport().sections.find((section) => section.id === 'assumptions')!
+    const memoryReserve = assumptions.metrics.find((metric) => metric.label === 'Host RAM reserve')!
+
+    expect(memoryReserve.value).toContain('Greater of')
+    expect(memoryReserve.detail).toContain('not added together')
   })
 
   it('creates real Word and PDF file payloads', async () => {

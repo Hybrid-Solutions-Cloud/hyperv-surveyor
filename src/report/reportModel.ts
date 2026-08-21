@@ -13,11 +13,11 @@ export const REPORT_SECTION_DEFINITIONS = [
   { id: 'architecture', label: 'Solution architecture' },
   { id: 'nodes', label: 'Node requirements' },
   { id: 'workloads', label: 'Workload summary' },
-  { id: 'inventory', label: 'VM inventory' },
   { id: 'storage', label: 'Storage and CSV plan' },
   { id: 'management', label: 'Management plane' },
   { id: 'assumptions', label: 'Assumptions and policies' },
   { id: 'findings', label: 'Findings and cautions' },
+  { id: 'inventory', label: 'VM inventory' },
   { id: 'sources', label: 'Sources and methodology' },
 ] as const
 
@@ -225,26 +225,6 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       tables: [{ title: 'Workloads by tier', headers: ['Tier', 'VMs', 'vCPU', 'Memory', 'Consumed storage'], rows: tierRows }],
     },
     {
-      id: 'inventory',
-      title: 'VM inventory',
-      paragraphs: [`${includedVms.length.toLocaleString()} included workload records.`],
-      metrics: [],
-      bullets: [],
-      tables: [{
-        headers: ['VM', 'Tier', 'vCPU', 'Memory', 'Consumed', 'Provisioned', 'Power state', 'Guest OS'],
-        rows: includedVms.map((vm) => [
-          vm.name,
-          input.tiers[vm.tier].label,
-          number(vm.vCpu),
-          gib(vm.ramGiB),
-          gib(vm.storageGiB),
-          gib(vm.provisionedGiB),
-          vm.powerState,
-          vm.guestOs ?? '',
-        ]),
-      }],
-    },
-    {
       id: 'storage',
       title: 'Storage and CSV plan',
       paragraphs: ['Capacity values use consumed workload storage after the configured growth factor and selected resiliency or SAN efficiency assumptions.'],
@@ -307,7 +287,11 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Growth factor', value: `${number(chosen.cfg.growthFactor * 100, 1)}%` },
         { label: 'SMT factor', value: number(chosen.cfg.smtFactor, 2) },
         { label: 'Host core reserve', value: `${number(chosen.cfg.hostCoreReservePct * 100, 1)}%` },
-        { label: 'Host RAM reserve', value: `${gib(chosen.cfg.hostRamReserveGiB)} + ${number(chosen.cfg.hostRamReservePct * 100, 1)}%` },
+        {
+          label: 'Host RAM reserve',
+          value: `Greater of ${gib(chosen.cfg.hostRamReserveGiB)} or ${number(chosen.cfg.hostRamReservePct * 100, 1)}%`,
+          detail: 'The larger value is reserved per host; the two values are not added together.',
+        },
         { label: 'Backup method', value: chosen.cfg.backupMethod },
       ],
       bullets: [],
@@ -333,6 +317,26 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       tables: [{
         headers: ['Severity', 'Basis', 'Finding'],
         rows: finalSizing.findings.map((finding) => [finding.severity.toUpperCase(), finding.basis, finding.message]),
+      }],
+    },
+    {
+      id: 'inventory',
+      title: 'VM inventory',
+      paragraphs: [`${includedVms.length.toLocaleString()} included workload records. The detailed inventory is intentionally placed near the end of the report, immediately before sources and methodology.`],
+      metrics: [],
+      bullets: [],
+      tables: [{
+        headers: ['VM', 'Tier', 'vCPU', 'Memory', 'Consumed', 'Provisioned', 'Power state', 'Guest OS'],
+        rows: includedVms.map((vm) => [
+          vm.name,
+          input.tiers[vm.tier].label,
+          number(vm.vCpu),
+          gib(vm.ramGiB),
+          gib(vm.storageGiB),
+          gib(vm.provisionedGiB),
+          vm.powerState,
+          vm.guestOs ?? '',
+        ]),
       }],
     },
     {

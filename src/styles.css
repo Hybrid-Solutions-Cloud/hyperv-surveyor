@@ -400,6 +400,7 @@ tr.infeasible td { opacity: 0.48; }
 .report-export-heading { display: flex; justify-content: space-between; gap: 8px; margin: 16px 0 8px; color: var(--navy-800); font-size: 10px; }
 .report-export-heading span { color: var(--muted); font-size: 8px; }
 .report-export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.report-export-grid button:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .report-export-grid button { display: flex; align-items: center; gap: 7px; min-height: 49px; padding: 8px 9px; color: var(--navy-800); background: #fff; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; text-align: left; }
 .report-export-grid button:hover:not(:disabled) { border-color: var(--blue); background: var(--info-bg); }
 .report-export-grid button:disabled { cursor: not-allowed; opacity: 0.45; }

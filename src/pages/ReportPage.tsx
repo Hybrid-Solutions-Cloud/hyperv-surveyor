@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
-import { CheckSquare, FileCode2, FileDown, FileText, Printer, Square, SlidersHorizontal } from 'lucide-react'
+import { CheckSquare, FileCode2, FileDown, FileText, Globe2, Printer, Square, SlidersHorizontal } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/Shared'
 import {
   downloadJsonReport,
+  downloadHtmlReport,
   downloadMarkdownReport,
   downloadPdfReport,
   downloadWordReport,
@@ -103,6 +104,7 @@ export default function ReportPage() {
             <button type="button" disabled={selectedCount === 0} onClick={() => downloadJsonReport(report, selection)}><FileCode2 size={16} /><span>Structured data<small>.json</small></span></button>
             <button type="button" disabled={selectedCount === 0 || exporting === 'word'} onClick={exportWord}><FileDown size={16} /><span>{exporting === 'word' ? 'Building…' : 'Microsoft Word'}<small>.docx</small></span></button>
             <button type="button" disabled={selectedCount === 0} onClick={() => downloadPdfReport(report, selection)}><Printer size={16} /><span>PDF document<small>.pdf</small></span></button>
+            <button type="button" disabled={selectedCount === 0} onClick={() => downloadHtmlReport(report, selection)}><Globe2 size={16} /><span>Interactive HTML<small>.html · offline</small></span></button>
           </div>
           {exportError && <div className="note warn">{exportError}</div>}
           <p className="small muted report-local-note">Exports are generated locally in this browser. Customer inventory is not uploaded.</p>
