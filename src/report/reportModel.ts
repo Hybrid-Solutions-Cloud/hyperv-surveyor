@@ -6,6 +6,7 @@ import {
   type ManagementDeploymentInputs,
 } from '../engine/managementDeployment'
 import { compareArchitectures, solveForward } from '../engine/solve'
+import { RESILIENCY } from '../engine/rules'
 import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
 
 export const REPORT_SECTION_DEFINITIONS = [
@@ -96,6 +97,29 @@ function managementLabel(inputs: ManagementDeploymentInputs) {
   return `${foundation}; ${wac}; ${monitoring}${inputs.includeArc ? '; Azure Arc-enabled SCVMM' : ''}`
 }
 
+function storageProtectionMetric(cfg: ClusterConfig): ReportMetric {
+  const s2dResiliency = RESILIENCY[cfg.resiliency].label
+  if (cfg.architecture === 'san') {
+    return {
+      label: 'Storage protection',
+      value: 'External SAN (array-managed; not modeled)',
+      detail: 'S2D resiliency does not apply to this design. Confirm array protection and replication in the final storage design.',
+    }
+  }
+  if (cfg.architecture === 'hybrid') {
+    return {
+      label: 'Storage protection',
+      value: `S2D: ${s2dResiliency}; SAN: array-managed`,
+      detail: 'The S2D setting applies only to S2D-hosted data. SAN protection and replication are not modeled by Surveyor.',
+    }
+  }
+  return {
+    label: 'S2D resiliency',
+    value: s2dResiliency,
+    detail: 'Applies to Storage Spaces Direct capacity in this design.',
+  }
+}
+
 export function buildSolutionReport(input: SolutionReportInputs): SolutionReport {
   const includedVms = input.vms.filter((vm) => vm.include)
   const options = compareArchitectures(input.cfg, input.vms, input.tiers)
@@ -168,7 +192,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       paragraphs: [chosen.result.bindingExplanation],
       metrics: [
         { label: 'Architecture', value: chosen.label },
-        { label: 'Resiliency', value: chosen.cfg.resiliency },
+        storageProtectionMetric(chosen.cfg),
         { label: 'Failure reserve', value: `N+${chosen.cfg.spareNodes}` },
         { label: 'Binding constraint', value: finalSizing.binding },
       ],

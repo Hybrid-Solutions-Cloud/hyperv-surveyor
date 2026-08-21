@@ -17,7 +17,7 @@ const management: ManagementDeploymentInputs = {
   includeIdentityServices: false,
 }
 
-function sampleReport() {
+function sampleReport(chosenKey = 'san') {
   return buildSolutionReport({
     customerName: 'Contoso',
     cfg: structuredClone(DEFAULT_CONFIG),
@@ -26,7 +26,7 @@ function sampleReport() {
       newVm({ name: 'SQL01', tier: 'database', vCpu: 8, ramGiB: 64, storageGiB: 500, provisionedGiB: 800 }),
     ],
     tiers: defaultTiers(),
-    chosenKey: 'san',
+    chosenKey,
     managementDeploymentInputs: management,
     includeManagementInSizing: true,
     generatedAt: '2026-08-20T12:00:00.000Z',
@@ -62,6 +62,35 @@ describe('solution report', () => {
     const sectionIds = report.sections.map((section) => section.id)
 
     expect(sectionIds.slice(-2)).toEqual(['inventory', 'sources'])
+  })
+
+  it('shows storage protection that matches SAN, S2D, and hybrid architecture semantics', () => {
+    const metricFor = (chosenKey: string) => sampleReport(chosenKey)
+      .sections.find((section) => section.id === 'architecture')!
+      .metrics.find((metric) => metric.label === 'Storage protection' || metric.label === 'S2D resiliency')!
+
+    const san = metricFor('san')
+    expect(san.label).toBe('Storage protection')
+    expect(san.value).toBe('External SAN (array-managed; not modeled)')
+    expect(san.detail).toContain('S2D resiliency does not apply')
+    expect(san.value).not.toContain('mirror')
+
+    const s2d = metricFor('s2d-3wm')
+    expect(s2d.label).toBe('S2D resiliency')
+    expect(s2d.value).toBe('Three-way mirror')
+
+    const hybrid = metricFor('hybrid')
+    expect(hybrid.label).toBe('Storage protection')
+    expect(hybrid.value).toBe('S2D: Three-way mirror; SAN: array-managed')
+  })
+
+  it('uses SAN protection wording in the interactive HTML architecture section', () => {
+    const selection = Object.fromEntries(Object.keys(defaultReportSelection()).map((id) => [id, id === 'architecture'])) as ReturnType<typeof defaultReportSelection>
+    const html = reportToHtml(sampleReport('san'), selection)
+
+    expect(html).toContain('<span>Storage protection</span>')
+    expect(html).toContain('External SAN (array-managed; not modeled)')
+    expect(html).not.toContain('<span>Resiliency</span>')
   })
 
   it('creates a self-contained interactive HTML report from selected sections', () => {
