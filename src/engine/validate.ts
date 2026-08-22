@@ -2,6 +2,7 @@
 import { LIMITS, RESILIENCY, SRC } from './rules'
 import { cacheRatio, rawPerServerTB, usesCacheTier } from './capacity'
 import { s2dMetadataRamGiB, totalCores } from './compute'
+import { assessPerformanceData } from './performance'
 import type { ClusterConfig, CsvPlan, Finding, TierId, TierPolicy, Vm } from './types'
 
 const err = (code: string, message: string, basis: Finding['basis'], source?: string): Finding => ({
@@ -25,6 +26,32 @@ export function validateDesign(
   const node = cfg.node
   const usesS2d = cfg.architecture === 's2d' || cfg.architecture === 'hybrid'
   const cores = totalCores(node)
+  const performance = assessPerformanceData(vms, cfg)
+
+  if ((cfg.sizingBasis ?? 'allocation') === 'measured-p95') {
+    const benchmarkFactor = Math.max(0.1, cfg.cpuPerformanceFactor ?? 1)
+    f.push(info('CPU_BENCHMARK_FACTOR',
+      `A ${benchmarkFactor.toFixed(2)}x target/source per-core benchmark factor is applied to CPU demand. Validate it with comparable source and target benchmark evidence; clock speed alone is not sufficient.`,
+      'TOOL'))
+    if (performance.measuredVms === 0) {
+      f.push(warn('PERFORMANCE_DATA_MISSING',
+        'Measured P95 sizing is selected, but no VM performance measurements matched the inventory. CPU and memory fall back to allocation.',
+        'TOOL'))
+    } else if (performance.confidence !== 'high') {
+      f.push(warn('PERFORMANCE_DATA_COVERAGE',
+        `Measured-data confidence is ${performance.confidence} (${performance.score}/100). ${performance.fallbackVms} VM(s) use allocation fallback; review coverage before approving the design.`,
+        'TOOL'))
+    } else {
+      f.push(info('PERFORMANCE_DATA_HIGH_CONFIDENCE',
+        `Measured-data confidence is high (${performance.score}/100) with ${performance.observationDaysMedian ?? 0} median observation days.`,
+        'TOOL'))
+    }
+    if ((Object.values(tiers) as TierPolicy[]).some((tier) => tier.rightSizingFactor !== 1)) {
+      f.push(info('MEASURED_RIGHT_SIZING_PRECEDENCE',
+        'For each measured resource, P95 plus the comfort factor replaces the tier right-sizing factor. The tier factor applies only where that CPU or memory measurement is missing, preventing double discounting.',
+        'TOOL'))
+    }
+  }
 
   // ---- Node count ceilings -------------------------------------------------
   if (usesS2d && nodes > LIMITS.S2D_MAX_NODES) {
@@ -112,11 +139,11 @@ export function validateDesign(
   }
 
   // ---- Quorum --------------------------------------------------------------
-  if (nodes === 2) {
+  if (nodes === 2 && (cfg.witnessType ?? 'cloud') === 'none') {
     f.push(err('WITNESS_REQUIRED',
       'A 2-node cluster requires a witness. Without one, dynamic quorum zeroes a node vote and an unexpected failure of the surviving voter takes the cluster down. Use a cloud witness or a file share witness.',
       'MS', SRC.quorum))
-  } else if (nodes === 3 || nodes === 4) {
+  } else if ((nodes === 3 || nodes === 4) && (cfg.witnessType ?? 'cloud') === 'none') {
     f.push(warn('WITNESS_RECOMMENDED',
       `A ${nodes}-node cluster should have a witness — it is what allows a second sequential failure to be survived.`,
       'MS-REC', SRC.quorum))
@@ -143,11 +170,12 @@ export function validateDesign(
         `${p.tier} CSVs at ${p.sizeTiB.toFixed(1)} TiB exceed the ${LIMITS.VSS_CSV_LIMIT_TIB} TiB limit for VSS/volsnap-based backup.`,
         'MS', SRC.planVolumes))
     }
-    if (p.count % nodes !== 0) {
-      f.push(warn('CSV_MULTIPLE',
-        `${p.tier} ${p.domain.toUpperCase()} CSV count (${p.count}) is not a multiple of the node count (${nodes}); coordinator ownership will distribute unevenly.`,
-        'MS-REC', SRC.planVolumes))
-    }
+  }
+  const s2dCsvs = csvPlans.filter((plan) => plan.domain === 's2d').reduce((sum, plan) => sum + plan.count, 0)
+  if (s2dCsvs > 0 && (s2dCsvs < nodes || s2dCsvs % nodes !== 0)) {
+    f.push(warn('CSV_MULTIPLE',
+      `The S2D domain has ${s2dCsvs} volumes across ${nodes} nodes. Plan at least one volume per node and use a total that is a node-count multiple for even coordinator ownership.`,
+      'MS-REC', SRC.planVolumes))
   }
 
   // ---- Hybrid-specific -----------------------------------------------------

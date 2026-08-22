@@ -10,6 +10,7 @@ export const DEFAULT_CONFIG: ClusterConfig = {
   resiliency: 'three-way-mirror',
   nestedMapMirrorPct: 0.1,
   backupMethod: 'rct',
+  witnessType: 'cloud',
   // Representative modern 2U node — dual 48-core EPYC class, 1.5 TiB RAM, all-NVMe.
   // Not a Dell BOM: the tool derives a reference architecture from the workload rather than
   // picking from a catalogue, because customers frequently reuse hardware they already own.
@@ -22,6 +23,9 @@ export const DEFAULT_CONFIG: ClusterConfig = {
     cacheDrivesPerNode: 2,
     cacheDriveTB: 3.2,
     media: 'all-flash',
+    cpuVendor: 'amd',
+    s2dIopsPerNode: 0,
+    s2dThroughputMBpsPerNode: 0,
   },
   san: {
     usableTiB: 500,
@@ -29,12 +33,17 @@ export const DEFAULT_CONFIG: ClusterConfig = {
     // "10:1 including thin provisioning" figure — that is not data reduction.
     drr: 2.5,
     thinProvisioningSavings: 0,
+    maxIops: 0,
+    maxThroughputMBps: 0,
   },
   hybridS2dShare: 0.3,
   growthFactor: 1.0,
   annualGrowthPct: 0,
   growthHorizonYears: 3,
   growthStrategy: 'phased',
+  sizingBasis: 'allocation',
+  performanceComfortFactor: 1.25,
+  cpuPerformanceFactor: 1.0,
   smtFactor: 1.0,
   hostCoreReservePct: 0.04,
   hostRamReserveGiB: 32,

@@ -5,6 +5,9 @@ export type ManagementFoundation = 'classic' | 'scvmm'
 export type WacExperience = 'none' | 'wac-admin' | 'wac-virtual'
 export type MonitoringSolution = 'none' | 'scom'
 export type ScomSqlPlacement = 'dedicated' | 'shared-vmm'
+export type ManagementPlacement = 'workload-cluster' | 'dedicated-management-cluster' | 'external-fabric'
+export type ArcConnectivity = 'public' | 'proxy' | 'private-link'
+export type ScomAuxiliaryRecovery = 'rebuild' | 'warm-standby'
 export type ArcServiceId = 'update-manager' | 'azure-monitor' | 'defender-for-servers' | 'machine-configuration' | 'change-tracking'
 export type ManagementScale = 'small' | 'medium' | 'large' | 'beyond-tested-scale'
 export type DeploymentBasis = 'MS' | 'MS-REC' | 'TOOL'
@@ -25,6 +28,16 @@ export interface ManagementDeploymentInputs {
   managedClusters: number
   libraryContentGiB: number
   includeIdentityServices: boolean
+  managementPlacement?: ManagementPlacement
+  arcConnectivity?: ArcConnectivity
+  arcRegion?: string
+  arcGuestScopePct?: number
+  logAnalyticsRetentionDays?: number
+  scomManagementPackCount?: number
+  scomDailyDataGiB?: number
+  scomOperationalRetentionDays?: number
+  scomWarehouseRetentionDays?: number
+  scomAuxiliaryRecovery?: ScomAuxiliaryRecovery
 }
 
 export interface ManagementComponent {
@@ -73,6 +86,16 @@ export type ResolvedManagementDeploymentInputs = ManagementDeploymentInputs & {
   scomHighAvailability: boolean
   scomSqlPlacement: ScomSqlPlacement
   arcServices: ArcServiceId[]
+  managementPlacement: ManagementPlacement
+  arcConnectivity: ArcConnectivity
+  arcRegion: string
+  arcGuestScopePct: number
+  logAnalyticsRetentionDays: number
+  scomManagementPackCount: number
+  scomDailyDataGiB: number
+  scomOperationalRetentionDays: number
+  scomWarehouseRetentionDays: number
+  scomAuxiliaryRecovery: ScomAuxiliaryRecovery
 }
 
 const SRC = {
@@ -158,6 +181,16 @@ export function normalizeManagementDeploymentInputs(inputs: ManagementDeployment
     scomHighAvailability: inputs.scomHighAvailability ?? legacyHa,
     scomSqlPlacement: inputs.scomSqlPlacement ?? 'dedicated',
     arcServices: (inputs.arcServices ?? []).filter((service): service is ArcServiceId => knownArcServices.has(service)),
+    managementPlacement: inputs.managementPlacement ?? 'workload-cluster',
+    arcConnectivity: inputs.arcConnectivity ?? 'public',
+    arcRegion: inputs.arcRegion?.trim() || 'Not selected',
+    arcGuestScopePct: Math.min(100, Math.max(0, inputs.arcGuestScopePct ?? 100)),
+    logAnalyticsRetentionDays: Math.max(30, inputs.logAnalyticsRetentionDays ?? 30),
+    scomManagementPackCount: Math.max(0, inputs.scomManagementPackCount ?? 20),
+    scomDailyDataGiB: Math.max(0.1, inputs.scomDailyDataGiB ?? Math.max(1, inputs.managedVms / 500)),
+    scomOperationalRetentionDays: Math.max(1, inputs.scomOperationalRetentionDays ?? 7),
+    scomWarehouseRetentionDays: Math.max(1, inputs.scomWarehouseRetentionDays ?? 400),
+    scomAuxiliaryRecovery: inputs.scomAuxiliaryRecovery ?? 'rebuild',
   }
 }
 
@@ -206,6 +239,16 @@ export function deploymentInputsFromStack(
     managedClusters: 1,
     libraryContentGiB: 500,
     includeIdentityServices: false,
+    managementPlacement: 'workload-cluster',
+    arcConnectivity: 'public',
+    arcRegion: 'Not selected',
+    arcGuestScopePct: 100,
+    logAnalyticsRetentionDays: 30,
+    scomManagementPackCount: 20,
+    scomDailyDataGiB: Math.max(1, managedVms / 500),
+    scomOperationalRetentionDays: 7,
+    scomWarehouseRetentionDays: 400,
+    scomAuxiliaryRecovery: 'rebuild',
   }
 }
 
@@ -221,6 +264,13 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
   const arcServices: ArcServicePlan[] = []
   const dependencies = new Set<string>()
   const cautions: string[] = []
+  const placementLabel = resolved.managementPlacement === 'workload-cluster'
+    ? 'the workload cluster'
+    : resolved.managementPlacement === 'dedicated-management-cluster'
+      ? 'a dedicated management cluster'
+      : 'an external virtualization fabric'
+  dependencies.add(`Management components placed on ${placementLabel}; validate bootstrapping, failure domains, and recovery order`)
+  if (resolved.managementPlacement === 'workload-cluster') cautions.push('Management VMs share the workload failure domain. Keep redundant instances on separate nodes and document how the fabric is managed during a cluster-wide outage.')
 
   if (inputs.includeIdentityServices) {
     components.push(component({
@@ -417,13 +467,22 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
         ],
       }))
       dependencies.add('Azure subscription, resource group, and appropriate Azure RBAC')
-      dependencies.add('Three static IP addresses and required outbound firewall allow-list')
+      dependencies.add(`Azure region: ${resolved.arcRegion}; confirm service availability, data residency, and paired recovery requirements`)
+      if (resolved.arcConnectivity === 'private-link') {
+        dependencies.add('Azure Arc Private Link Scope, private endpoints, private DNS zones, and routing from the management network')
+      } else if (resolved.arcConnectivity === 'proxy') {
+        dependencies.add('Highly available outbound proxy, certificate trust, bypass rules, and the required Azure endpoint allow-list')
+      } else {
+        dependencies.add('Direct outbound HTTPS allow-list for Azure Arc endpoints')
+      }
+      dependencies.add('Three static IP addresses for the Arc resource bridge lifecycle')
       arcServices.push(ARC_CORE_SERVICE)
       const selectedAddOns = ARC_SERVICE_CATALOG.filter((service) => resolved.arcServices.includes(service.id as ArcServiceId))
       arcServices.push(...selectedAddOns)
       if (selectedAddOns.length > 0) {
-        dependencies.add('Azure Connected Machine agent on every SCVMM VM selected for guest-level Azure services')
+        dependencies.add(`Azure Connected Machine agent on the selected ${resolved.arcGuestScopePct.toFixed(0)}% guest-service scope (approximately ${Math.ceil(vms * resolved.arcGuestScopePct / 100).toLocaleString()} VMs)`)
         dependencies.add('Guest-agent outbound connectivity, Azure Policy/RBAC assignments, and service-specific Azure extensions')
+        if (selectedAddOns.some((service) => service.id === 'azure-monitor' || service.id === 'change-tracking')) dependencies.add(`Log Analytics workspace retention: ${resolved.logAnalyticsRetentionDays} days; validate ingestion, archive, and regional placement`)
       }
     }
   }
@@ -441,12 +500,15 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
       medium: { vCpu: 16, ramGiB: 64, diskGiB: 1_000 },
       large: { vCpu: 24, ramGiB: 128, diskGiB: 2_000 },
     })
+    const calculatedScomDatabaseGiB = Math.ceil(resolved.scomDailyDataGiB * (resolved.scomOperationalRetentionDays + resolved.scomWarehouseRetentionDays) * 1.25 + 200)
+    databaseSize.diskGiB = Math.max(databaseSize.diskGiB, calculatedScomDatabaseGiB)
     if (!scomHa) {
       const singleServerSize = scaledSize(scale, {
         small: { vCpu: 16, ramGiB: 48, diskGiB: 800 },
         medium: { vCpu: 24, ramGiB: 96, diskGiB: 1_500 },
         large: { vCpu: 32, ramGiB: 160, diskGiB: 2_500 },
       })
+      singleServerSize.diskGiB = Math.max(singleServerSize.diskGiB, calculatedScomDatabaseGiB)
       components.push(component({
         id: 'scom-all-in-one',
         name: 'SCOM single-server management group',
@@ -530,11 +592,11 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
         id: 'scom-reporting',
         name: 'SCOM reporting server',
         role: 'Operations Manager reporting integrated with SQL Server Reporting Services in native mode.',
-        count: 1,
+        count: resolved.scomAuxiliaryRecovery === 'warm-standby' ? 2 : 1,
         vCpu: 4,
         ramGiB: 8,
         diskGiB: 100,
-        availability: 'Dedicated reporting role · no automatic HA topology',
+        availability: resolved.scomAuxiliaryRecovery === 'warm-standby' ? 'Primary plus warm standby · documented promotion' : 'Rebuild from configuration and protected databases',
         basis: 'TOOL',
         basisDetail: 'Microsoft publishes a 4-core, 8 GiB minimum and recommends a dedicated reporting system; Surveyor adds a 100 GiB OS/application disk allowance.',
         operatingSystem: 'Windows Server 2025 Desktop Experience + supported SSRS',
@@ -547,11 +609,11 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
         id: 'scom-web',
         name: 'SCOM web console server',
         role: 'Browser access to Monitoring and My Workspace views.',
-        count: 1,
+        count: resolved.scomAuxiliaryRecovery === 'warm-standby' ? 2 : 1,
         vCpu: 4,
         ramGiB: 8,
         diskGiB: 100,
-        availability: 'Standalone web console role',
+        availability: resolved.scomAuxiliaryRecovery === 'warm-standby' ? 'Primary plus warm standby · DNS/load-balancer change' : 'Rebuild from documented configuration',
         basis: 'TOOL',
         basisDetail: 'Microsoft-published 4-core, 8 GiB minimum with a Surveyor 100 GiB OS/application disk allowance.',
         operatingSystem: 'Windows Server 2025 Desktop Experience + IIS',
@@ -559,14 +621,16 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
         source: SRC.scom,
         notes: ['Microsoft does not support Network Load Balancing for the Operations Manager web console server.'],
       }))
-      cautions.push('The SCOM management servers and databases are redundant, but the calculated reporting and web console roles remain single instances and require a documented recovery procedure.')
+      cautions.push(resolved.scomAuxiliaryRecovery === 'warm-standby'
+        ? 'SCOM reporting and web roles include warm standbys, but Microsoft does not publish an automatic HA topology for these roles. Document promotion and test it.'
+        : 'SCOM reporting and web console roles use rebuild recovery rather than automatic HA. Protect configuration and document the recovery procedure.')
     }
 
     dependencies.add('SCOM service accounts for management, data access, data warehouse write, and reporting data reader roles')
     dependencies.add('SCOM agents and applicable Microsoft or vendor management packs for monitored workloads')
     dependencies.add('SQL Server Full-Text Search, supported collation, SSRS native mode, and current SQL client drivers')
     if (!inputs.includeIdentityServices) dependencies.add('Existing healthy Active Directory and DNS services for SCOM authentication and discovery')
-    cautions.push('SCOM database performance is storage-I/O sensitive. Validate database growth, retention, and IOPS before production deployment.')
+    cautions.push(`SCOM database allowance uses ${resolved.scomDailyDataGiB.toFixed(1)} GiB/day, ${resolved.scomOperationalRetentionDays} operational days, ${resolved.scomWarehouseRetentionDays} warehouse days, and ${resolved.scomManagementPackCount} expected management packs. Validate these inputs and storage IOPS with the Sizing Helper.`)
     cautions.push('Do not checkpoint, pause, or save-state virtual machines running SCOM components; Microsoft does not support those virtualization operations.')
   }
 

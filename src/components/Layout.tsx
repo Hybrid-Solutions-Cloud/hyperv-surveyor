@@ -11,7 +11,9 @@ import {
   Home,
   Menu,
   Network,
+  Workflow,
   FileText,
+  FolderOpen,
   Server,
   Share2,
   X,
@@ -26,7 +28,9 @@ const nav = [
   { to: '/results', label: 'Sizing results', icon: BarChart3 },
   { to: '/capacity', label: 'Existing capacity', icon: Calculator },
   { to: '/management-plane', label: 'Management plane', icon: Network },
+  { to: '/deployment', label: 'Implementation plan', icon: Workflow },
   { to: '/report', label: 'Solution report', icon: FileText },
+  { to: '/project', label: 'Project & scenarios', icon: FolderOpen },
   { to: '/method', label: 'Sources & method', icon: BookOpen },
 ]
 

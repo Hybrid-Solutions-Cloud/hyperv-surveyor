@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { maxCsvSizeTiB, planTierCsvs, roundUpToMultiple } from '../csv'
+import { maxCsvSizeTiB, planCsvs, planTierCsvs, roundUpToMultiple } from '../csv'
 import { DEFAULT_TIERS, LIMITS } from '../rules'
+import { makeConfig } from './fixtures'
 
 const general = DEFAULT_TIERS.general
 const database = DEFAULT_TIERS.database
@@ -43,36 +44,40 @@ describe('CSV planning — the three drivers', () => {
       tier: 'database', policy: database,
       capacityTiB: 120, vmCount: 40, nodes: 8, backup: 'rct', domain: 'san',
     })!
-    // capacity: ceil(120/8)=15 ... blast: ceil(40/5)=8 ... nodes: 8
-    expect(p.count).toBe(16)
+    // capacity: ceil(120/8)=15 ... blast: ceil(40/5)=8
+    expect(p.count).toBe(15)
   })
 
-  it('node-count-bound for a small tier on a large cluster', () => {
+  it('does not multiply the cluster-wide node-count target into every tier', () => {
     const p = planTierCsvs({
       tier: 'general', policy: general,
       capacityTiB: 4, vmCount: 4, nodes: 12, backup: 'rct', domain: 's2d',
     })!
-    expect(p.driver).toBe('node-count')
-    expect(p.count).toBe(12)
+    expect(p.count).toBe(1)
   })
 
-  it('[MS-REC] always rounds up to a whole multiple of node count', () => {
+  it('keeps a tier plan at the capacity or blast-radius requirement', () => {
     const p = planTierCsvs({
       tier: 'general', policy: { ...general, blastRadiusTiB: 32, maxVmsPerCsv: 25 },
       capacityTiB: 480, vmCount: 320, nodes: 12, backup: 'rct', domain: 's2d',
     })!
-    expect(p.count % 12).toBe(0)
-    expect(p.count).toBeGreaterThanOrEqual(p.roundedUpFrom)
+    expect(p.count).toBe(p.roundedUpFrom)
   })
 
-  it('[MS-REC] never produces fewer CSVs than nodes', () => {
-    for (const nodes of [2, 4, 8, 12, 16]) {
-      const p = planTierCsvs({
-        tier: 'general', policy: general,
-        capacityTiB: 1, vmCount: 1, nodes, backup: 'rct', domain: 's2d',
-      })!
-      expect(p.count).toBeGreaterThanOrEqual(nodes)
+  it('[MS-REC] applies node-count ownership once across all S2D tiers', () => {
+    const demand = {
+      requiredPCores: 1, requiredRamGiB: 1, totalVCpu: 1, vmCount: 2,
+      byTier: {
+        general: { pCores: 1, ramGiB: 1, vms: 1, storageGiB: 100 },
+        database: { pCores: 1, ramGiB: 1, vms: 1, storageGiB: 100 },
+        vdi: { pCores: 0, ramGiB: 0, vms: 0, storageGiB: 0 },
+        infrastructure: { pCores: 0, ramGiB: 0, vms: 0, storageGiB: 0 },
+      },
     }
+    const plans = planCsvs(makeConfig({ architecture: 's2d' }), demand, DEFAULT_TIERS, 8)
+    const total = plans.reduce((sum, plan) => sum + plan.count, 0)
+    expect(total).toBe(8)
+    expect(total % 8).toBe(0)
   })
 
   it('[MS] S2D volumes are ReFS, SAN volumes are NTFS', () => {

@@ -13,8 +13,8 @@
  *
  * ALGORITHM (per tier, per storage domain)
  *   max_csv_size = MIN(64 TiB [MS-REC], 10 TiB if VSS-volsnap [MS], blast_radius [TOOL])
- *   count = MAX(ceil(capacity/max_size), ceil(vms/max_vms_per_csv), node_count)
- *   count = round_up_to_multiple_of(count, node_count)   [MS-REC]
+ *   per_tier_count = MAX(ceil(capacity/max_size), ceil(vms/max_vms_per_csv))
+ *   total S2D volumes = at least node_count and rounded to a node-count multiple [MS-REC]
  *   error if total across all tiers > 64                 [MS-REC]
  */
 import { LIMITS, TIER_IDS } from './rules'
@@ -55,14 +55,10 @@ export function planTierCsvs(a: PlanArgs): CsvPlan | null {
   const maxSize = maxCsvSizeTiB(a.policy, a.backup)
   const byCapacity = Math.ceil(a.capacityTiB / maxSize)
   const byBlast = Math.ceil(a.vmCount / a.policy.maxVmsPerCsv)
-  const byNodes = a.nodes
+  const rawCount = Math.max(byCapacity, byBlast)
+  const count = rawCount
 
-  const rawCount = Math.max(byCapacity, byBlast, byNodes)
-  const count = roundUpToMultiple(rawCount, a.nodes)
-
-  let driver: CsvPlan['driver'] = 'node-count'
-  if (byCapacity >= byBlast && byCapacity >= byNodes) driver = 'capacity'
-  else if (byBlast >= byCapacity && byBlast >= byNodes) driver = 'blast-radius'
+  let driver: CsvPlan['driver'] = byCapacity >= byBlast ? 'capacity' : 'blast-radius'
 
   return {
     tier: a.tier,
@@ -82,8 +78,7 @@ export function planTierCsvs(a: PlanArgs): CsvPlan | null {
 
 /**
  * Build the full CSV plan across every tier and storage domain.
- * In hybrid mode each tier's capacity is split by hybridS2dShare and planned independently
- * in each domain, because the two domains have genuinely different layout drivers.
+ * In hybrid mode each tier is placed explicitly on S2D, SAN, or intentionally split.
  */
 export function planCsvs(
   cfg: ClusterConfig,
@@ -112,9 +107,8 @@ export function planCsvs(
       })
       if (p) plans.push(p)
     } else {
-      // Hybrid: performance tiers land on S2D (local NVMe), capacity tiers on SAN, unless
-      // the share slider says otherwise. Split both capacity and VM count proportionally.
-      const s2dShare = cfg.hybridS2dShare
+      const placement = policy.hybridPlacement ?? (policy.storageTier === 'performance' ? 's2d' : 'san')
+      const s2dShare = placement === 's2d' ? 1 : placement === 'san' ? 0 : cfg.hybridS2dShare
       const sanShare = 1 - s2dShare
       if (s2dShare > 0.01) {
         const p = planTierCsvs({
@@ -134,6 +128,24 @@ export function planCsvs(
         })
         if (p) plans.push(p)
       }
+    }
+  }
+
+  // Microsoft recommends at least one S2D volume per node and a total volume count that is
+  // a multiple of node count for even coordinator ownership. Apply that once across the S2D
+  // domain, not independently to every workload tier.
+  const s2dPlans = plans.filter((plan) => plan.domain === 's2d')
+  if (s2dPlans.length > 0 && nodes > 0) {
+    const current = s2dPlans.reduce((sum, plan) => sum + plan.count, 0)
+    const target = roundUpToMultiple(Math.max(current, nodes), nodes)
+    const extra = target - current
+    if (extra > 0) {
+      const targetPlan = [...s2dPlans].sort((a, b) => b.totalTiB - a.totalTiB)[0]
+      const estimatedVms = targetPlan.vmsPerCsv * targetPlan.count
+      targetPlan.count += extra
+      targetPlan.sizeTiB = Math.ceil((targetPlan.totalTiB / targetPlan.count) * 10) / 10
+      targetPlan.vmsPerCsv = Math.ceil(estimatedVms / targetPlan.count)
+      targetPlan.driver = 'node-count'
     }
   }
   return plans

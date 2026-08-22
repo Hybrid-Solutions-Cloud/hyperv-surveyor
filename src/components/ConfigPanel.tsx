@@ -65,10 +65,35 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
             ? `Today's node recommendation includes the full Year ${growth.horizonYears} demand forecast (${growth.terminalGrowthFactor.toFixed(2)}× imported demand).`
             : `Today's node recommendation includes ${growth.baseGrowthFactor.toFixed(2)}× demand; the results page shows node additions through Year ${growth.horizonYears}.`}
         </div>
+        <h3>Sizing evidence</h3>
+        <Field label="CPU and memory sizing basis">
+          <select value={cfg.sizingBasis ?? 'allocation'} onChange={e => set({ sizingBasis: e.target.value as ClusterConfig['sizingBasis'] })}>
+            <option value="allocation">Allocated vCPU and memory</option>
+            <option value="measured-p95">Measured P95 where available</option>
+          </select>
+        </Field>
+        {(cfg.sizingBasis ?? 'allocation') === 'measured-p95' && (
+          <>
+            <Field label={`Measured-data comfort factor (${(cfg.performanceComfortFactor ?? 1.25).toFixed(2)}x)`} hint="Applied to each VM's CPU and memory P95 measurement. VMs without a matching metric remain sized on allocation.">
+              <NumberInput value={cfg.performanceComfortFactor ?? 1.25} min={1} max={2} step={0.05} onChange={n => set({ performanceComfortFactor: Math.max(1, n) })} />
+            </Field>
+            <Field label="Target/source per-core benchmark" hint="1.0 means equal per-core performance; 1.20 means the target benchmark is 20% faster. Use measured benchmark evidence, not clock speed alone.">
+              <NumberInput value={cfg.cpuPerformanceFactor ?? 1} min={0.5} max={3} step={0.05} onChange={n => set({ cpuPerformanceFactor: Math.max(0.1, n) })} />
+            </Field>
+          </>
+        )}
         <Field label="Backup method" hint="VSS/volsnap caps CSVs at 10 TiB [MS]. RCT and ReFS block-clone are fine to 32 TiB and beyond.">
           <select value={cfg.backupMethod} onChange={e => set({ backupMethod: e.target.value as any })}>
             <option value="rct">Hyper-V RCT / ReFS block clone / SQL native</option>
             <option value="vss-volsnap">VSS / volsnap based</option>
+          </select>
+        </Field>
+        <Field label="Cluster quorum witness" hint="A witness is required for a complete 2-node design and recommended for small clusters.">
+          <select value={cfg.witnessType ?? 'none'} onChange={e => set({ witnessType: e.target.value as ClusterConfig['witnessType'] })}>
+            <option value="cloud">Cloud witness</option>
+            <option value="file-share">File share witness</option>
+            {cfg.architecture === 'san' && <option value="disk">Disk witness</option>}
+            <option value="none">Not selected yet</option>
           </select>
         </Field>
       </div>
@@ -80,6 +105,13 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
           <Field label="Cores / socket"><NumberInput value={cfg.node.coresPerSocket} min={1} onChange={n => setNode({ coresPerSocket: n })} /></Field>
         </div>
         <Field label="RAM per node (GiB)"><NumberInput value={cfg.node.ramGiB} min={16} step={64} onChange={n => setNode({ ramGiB: n })} /></Field>
+        <Field label="Target processor vendor" hint="Live migration cannot cross Intel and AMD processor vendors. This also drives migration-readiness checks.">
+          <select value={cfg.node.cpuVendor ?? 'unknown'} onChange={e => setNode({ cpuVendor: e.target.value as ClusterConfig['node']['cpuVendor'] })}>
+            <option value="amd">AMD</option>
+            <option value="intel">Intel</option>
+            <option value="unknown">Not decided</option>
+          </select>
+        </Field>
         <div className={`note ${lic > cores ? 'warn' : ''}`} style={{ marginTop: 4 }}>
           <strong>{cores} physical cores · {lic} licensable</strong>
           {lic > cores
@@ -117,6 +149,12 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
               {cfg.node.media === 'hybrid' ? '10%' : '5%'} for Windows Server; Azure Local imposes a hard 15% floor for hybrid.
               Cache contributes <strong>zero</strong> usable capacity.
             </div>
+            <h3>Validated S2D performance</h3>
+            <p className="small muted">Optional sustainable figures from a vendor design, proof of concept, or DiskSpd test. Leave at 0 when unknown; Surveyor will report storage performance as unvalidated.</p>
+            <div className="row">
+              <Field label="IOPS / node"><NumberInput value={cfg.node.s2dIopsPerNode ?? 0} min={0} step={1000} onChange={n => setNode({ s2dIopsPerNode: n })} /></Field>
+              <Field label="Throughput MB/s / node"><NumberInput value={cfg.node.s2dThroughputMBpsPerNode ?? 0} min={0} step={100} onChange={n => setNode({ s2dThroughputMBpsPerNode: n })} /></Field>
+            </div>
 
             <h3>Resiliency</h3>
             <Field label="Volume resiliency">
@@ -150,6 +188,10 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
             <Field label="Data reduction ratio" hint="Dedupe + compression + pattern removal ONLY. Pure's blended marketing average is 5:1; 2.5:1 is a conservative planning floor.">
               <NumberInput value={cfg.san.drr} min={1} max={10} step={0.1} onChange={n => setSan({ drr: n })} />
             </Field>
+            <div className="row">
+              <Field label="Validated array IOPS" hint="Optional sustainable workload figure; 0 means not validated."><NumberInput value={cfg.san.maxIops ?? 0} min={0} step={1000} onChange={n => setSan({ maxIops: n })} /></Field>
+              <Field label="Validated array throughput MB/s"><NumberInput value={cfg.san.maxThroughputMBps ?? 0} min={0} step={100} onChange={n => setSan({ maxThroughputMBps: n })} /></Field>
+            </div>
             {cfg.san.drr > 5 && (
               <div className="note warn">
                 <strong>DRR above 5:1</strong>
@@ -163,8 +205,8 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
 
         {cfg.architecture === 'hybrid' && (
           <>
-            <h3>Hybrid split</h3>
-            <Field label={`S2D carries ${(cfg.hybridS2dShare * 100).toFixed(0)}% of storage, SAN ${((1 - cfg.hybridS2dShare) * 100).toFixed(0)}%`}>
+            <h3>Hybrid tier placement</h3>
+            <Field label={`Split tiers use ${(cfg.hybridS2dShare * 100).toFixed(0)}% S2D and ${((1 - cfg.hybridS2dShare) * 100).toFixed(0)}% SAN`} hint="This percentage applies only to tiers explicitly set to Split below.">
               <input type="range" min={0.1} max={0.9} step={0.05} value={cfg.hybridS2dShare}
                 onChange={e => set({ hybridS2dShare: parseFloat(e.target.value) })} />
             </Field>
@@ -222,6 +264,7 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
                 <th className="num">Max VMs/CSV</th>
                 <th className="num">Blast radius TiB</th>
                 <th>Storage</th>
+                {cfg.architecture === 'hybrid' && <th>Hybrid placement</th>}
               </tr>
             </thead>
             <tbody>
@@ -238,6 +281,15 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
                       <option value="capacity">capacity</option>
                     </select>
                   </td>
+                  {cfg.architecture === 'hybrid' && (
+                    <td>
+                      <select value={tiers[id].hybridPlacement ?? (tiers[id].storageTier === 'performance' ? 's2d' : 'san')} onChange={e => setTier(id, { hybridPlacement: e.target.value as TierPolicy['hybridPlacement'] })}>
+                        <option value="s2d">S2D</option>
+                        <option value="san">SAN</option>
+                        <option value="split">Split</option>
+                      </select>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -245,7 +297,7 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
         </div>
         <p className="small muted" style={{ marginTop: 8 }}>
           Right-sizing factor multiplies allocated vCPU and RAM. Leave it at 1.0 when sizing from an
-          RVTools import unless you have measured utilisation — RVTools carries none.
+          RVTools import unless you have measured utilisation — RVTools carries none. Dynamic Memory is a deployment policy shown in the report; it does not reduce the sizing demand unless measured P95 data is selected above.
         </p>
       </div>
     </div>

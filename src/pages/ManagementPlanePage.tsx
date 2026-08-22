@@ -342,6 +342,14 @@ function DeploymentDesignerPanel({
           </select>
         </Field>
 
+        <Field label="Management VM placement" hint="Choose whether the management plane shares the workload failure domain or runs on independent infrastructure.">
+          <select value={inputs.managementPlacement} onChange={(event) => setInputs({ ...inputs, managementPlacement: event.target.value as ManagementDeploymentInputs['managementPlacement'] })}>
+            <option value="workload-cluster">Selected workload cluster</option>
+            <option value="dedicated-management-cluster">Dedicated management cluster</option>
+            <option value="external-fabric">External virtualization fabric</option>
+          </select>
+        </Field>
+
         <div className="meter-toggles deployment-toggles">
           <CostToggle label={`${inputs.foundation === 'scvmm' ? 'SCVMM / WAC' : 'WAC'} high availability`} checked={inputs.fabricHighAvailability} onChange={(checked) => setInputs({ ...inputs, fabricHighAvailability: checked, highAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />
           {inputs.monitoring === 'scom' && <CostToggle label="SCOM high availability" checked={inputs.scomHighAvailability} onChange={(checked) => setInputs({ ...inputs, scomHighAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />}
@@ -363,12 +371,43 @@ function DeploymentDesignerPanel({
         {inputs.monitoring === 'scom' && !inputs.scomHighAvailability && (
           <div className="note warn"><strong>Single-server SCOM topology</strong>One VM contains the management server, databases, reporting, and web console roles. Microsoft positions this mainly for labs and only the smallest production loads.</div>
         )}
+        {inputs.monitoring === 'scom' && (
+          <>
+            <h3>SCOM workload and retention</h3>
+            <div className="form-grid two-column deployment-scale-inputs">
+              <Field label="Expected management packs"><NumberInput value={inputs.scomManagementPackCount} min={0} onChange={(value) => setNumber('scomManagementPackCount', value)} /></Field>
+              <Field label="Collected data GiB / day"><NumberInput value={inputs.scomDailyDataGiB} min={0.1} step={0.1} onChange={(value) => setNumber('scomDailyDataGiB', value)} /></Field>
+              <Field label="Operational retention days"><NumberInput value={inputs.scomOperationalRetentionDays} min={1} onChange={(value) => setNumber('scomOperationalRetentionDays', value)} /></Field>
+              <Field label="Warehouse retention days"><NumberInput value={inputs.scomWarehouseRetentionDays} min={1} onChange={(value) => setNumber('scomWarehouseRetentionDays', value)} /></Field>
+            </div>
+            {inputs.scomHighAvailability && (
+              <Field label="Reporting and web-console recovery">
+                <select value={inputs.scomAuxiliaryRecovery} onChange={(event) => setInputs({ ...inputs, scomAuxiliaryRecovery: event.target.value as ManagementDeploymentInputs['scomAuxiliaryRecovery'] })}>
+                  <option value="rebuild">Documented rebuild recovery</option>
+                  <option value="warm-standby">Warm standby instances</option>
+                </select>
+              </Field>
+            )}
+          </>
+        )}
         {inputs.foundation !== 'scvmm' && inputs.includeArc && (
           <div className="note warn">Arc-enabled SCVMM requires SCVMM as the fabric foundation.</div>
         )}
         {inputs.includeArc && (
           <div className="arc-service-picker">
             <h3>Azure Arc services</h3>
+            <div className="form-grid two-column deployment-scale-inputs">
+              <Field label="Azure connectivity">
+                <select value={inputs.arcConnectivity} onChange={(event) => setInputs({ ...inputs, arcConnectivity: event.target.value as ManagementDeploymentInputs['arcConnectivity'] })}>
+                  <option value="public">Direct outbound public endpoints</option>
+                  <option value="proxy">Outbound proxy</option>
+                  <option value="private-link">Azure Private Link</option>
+                </select>
+              </Field>
+              <Field label="Azure region"><input value={inputs.arcRegion} onChange={(event) => setInputs({ ...inputs, arcRegion: event.target.value })} placeholder="Example: East US 2" /></Field>
+              <Field label="Guest add-on scope %"><NumberInput value={inputs.arcGuestScopePct} min={0} max={100} onChange={(value) => setNumber('arcGuestScopePct', value)} /></Field>
+              <Field label="Log Analytics retention days"><NumberInput value={inputs.logAnalyticsRetentionDays} min={30} max={2555} onChange={(value) => setNumber('logAnalyticsRetentionDays', value)} /></Field>
+            </div>
             <div className="arc-core-choice">
               <Check size={15} />
               <span><strong>Core Arc management</strong><small>No additional charge for the core control plane; includes SCVMM inventory and VM lifecycle projection.</small></span>
@@ -843,8 +882,12 @@ function CostPanel({
   const deploymentInputs = initialManagementInputs
     ? normalizeManagementDeploymentInputs(initialManagementInputs)
     : null
+  const deploymentPlan = deploymentInputs ? planManagementDeployment(deploymentInputs) : null
   const deploymentArcServices = new Set(deploymentInputs?.arcServices ?? [])
   const arcEnabled = deploymentInputs?.includeArc ?? true
+  const deploymentSqlCores = deploymentPlan?.components
+    .filter((component) => component.resourceType === 'vm' && component.id.includes('sql'))
+    .reduce((sum, component) => sum + component.vCpu * component.count, 0) ?? 4
   const [inputs, setInputs] = useState<ManagementCostInputs>({
     hosts: Math.max(1, initialHosts),
     sockets: initialSockets,
@@ -852,7 +895,9 @@ function CostPanel({
     vms: initialVms,
     spareHosts,
     termYears: 3,
-    sqlCores: 4,
+    sqlCores: Math.max(4, deploymentSqlCores),
+    includeScom: deploymentInputs?.monitoring === 'scom',
+    arcEnabledVms: deploymentInputs ? Math.ceil(initialVms * deploymentInputs.arcGuestScopePct / 100) : initialVms,
     waiveUpdateAndGuest: true,
     includeUpdateManager: arcEnabled && (deploymentInputs ? deploymentArcServices.has('update-manager') : true),
     includeDefenderP2: arcEnabled && (deploymentInputs ? deploymentArcServices.has('defender-for-servers') : true),
@@ -933,10 +978,19 @@ function CostPanel({
           <CostInput label="Sockets / host" value={inputs.sockets} onChange={(value) => setNumber('sockets', value)} />
           <CostInput label="Cores / socket" value={inputs.coresPerSocket} onChange={(value) => setNumber('coresPerSocket', value)} />
           <CostInput label="VMs in fabric" value={inputs.vms} onChange={(value) => setNumber('vms', value)} />
+          <CostInput label="Arc guest-service VMs" value={inputs.arcEnabledVms ?? inputs.vms} onChange={(value) => setNumber('arcEnabledVms', value)} />
           <CostInput label="Term in years" value={inputs.termYears} onChange={(value) => setNumber('termYears', value)} />
           <CostInput label="SQL licensed cores" value={inputs.sqlCores} onChange={(value) => setNumber('sqlCores', value)} />
           <CostInput label="Log Analytics GB / VM / month" value={inputs.logAnalyticsGbPerVm} step={0.1} onChange={(value) => setNumber('logAnalyticsGbPerVm', value)} />
         </div>
+        <div className="meter-toggles">
+          <CostToggle label="Include SCOM in System Center licensing" checked={inputs.includeScom === true} onChange={(checked) => setInputs({ ...inputs, includeScom: checked })} />
+        </div>
+        {deploymentPlan && (
+          <p className="small muted">
+            SQL cores were initialized from the saved VMM/SCOM deployment BOM. Confirm active/passive licensing rights and the final SQL topology before quoting.
+          </p>
+        )}
 
         <h3>Customer and delivery economics</h3>
         <div className="form-grid two-column">

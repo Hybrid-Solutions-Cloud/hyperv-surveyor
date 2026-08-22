@@ -12,6 +12,10 @@ export interface ManagementCostInputs {
   spareHosts: number
   termYears: number
   sqlCores: number
+  /** SCOM independently requires System Center licensing even when SCVMM is not selected. */
+  includeScom?: boolean
+  /** Guest-service billing scope. Core Arc projection remains separate and free. */
+  arcEnabledVms?: number
   waiveUpdateAndGuest: boolean
   includeUpdateManager: boolean
   includeDefenderP2: boolean
@@ -118,7 +122,7 @@ export function calculatePlaneCost(
   const coresPerHost = Math.max(inputs.sockets * inputs.coresPerSocket, inputs.sockets * 8, 16)
   const packsPerHost = Math.ceil(coresPerHost / 2)
   const months = Math.max(1, inputs.termYears * 12)
-  const needsSystemCenter = plane === 'scvmm' || plane === 'arc-scvmm'
+  const needsSystemCenter = plane === 'scvmm' || plane === 'arc-scvmm' || inputs.includeScom === true
 
   const windowsBase = inputs.model === 'perpetual'
     ? inputs.hosts * packsPerHost * rateCard.windowsPerTwoCorePack
@@ -146,7 +150,8 @@ export function calculatePlaneCost(
     + (inputs.includeGuestConfig && !inputs.waiveUpdateAndGuest ? rateCard.guestConfigPerVmMonth : 0)
     + (inputs.includeLogAnalytics ? inputs.logAnalyticsGbPerVm * rateCard.logAnalyticsPerGb : 0)
   )
-  const azure = plane === 'arc-scvmm' ? inputs.vms * azurePerVmMonth * months : 0
+  const arcEnabledVms = Math.min(inputs.vms, Math.max(0, inputs.arcEnabledVms ?? inputs.vms))
+  const azure = plane === 'arc-scvmm' ? arcEnabledVms * azurePerVmMonth * months : 0
   const managementOnly = systemCenter + sql + azure
   const total = windows + managementOnly
   const effectiveHosts = Math.max(1, inputs.hosts - Math.min(inputs.spareHosts, Math.max(0, inputs.hosts - 1)))

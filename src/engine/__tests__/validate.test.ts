@@ -19,7 +19,7 @@ describe('[MS] node ceilings', () => {
     expect(bySeverity(f, 'error')).toContain('S2D_MAX_NODES')
   })
   it('does not apply the S2D ceiling to a SAN cluster', () => {
-    const cfg = makeConfig({ architecture: 'san' })
+    const cfg = makeConfig({ architecture: 'san', witnessType: 'none' })
     const f = validateDesign(cfg, 24, [vm()], tiers, plansFor(cfg, [vm()], 24))
     expect(codes(f)).not.toContain('S2D_MAX_NODES')
   })
@@ -27,12 +27,12 @@ describe('[MS] node ceilings', () => {
 
 describe('[MS] quorum and witness', () => {
   it('errors on a 2-node cluster with no witness', () => {
-    const cfg = makeConfig({ architecture: 's2d', resiliency: 'nested-two-way-mirror' })
+    const cfg = makeConfig({ architecture: 's2d', resiliency: 'nested-two-way-mirror', witnessType: 'none' })
     const f = validateDesign(cfg, 2, [vm()], tiers, plansFor(cfg, [vm()], 2))
     expect(bySeverity(f, 'error')).toContain('WITNESS_REQUIRED')
   })
   it('warns at 3 and 4 nodes', () => {
-    const cfg = makeConfig({ architecture: 'san' })
+    const cfg = makeConfig({ architecture: 'san', witnessType: 'none' })
     for (const n of [3, 4]) {
       const f = validateDesign(cfg, n, [vm()], tiers, plansFor(cfg, [vm()], n))
       expect(bySeverity(f, 'warning')).toContain('WITNESS_RECOMMENDED')
@@ -73,7 +73,7 @@ describe('[MS] drive rules', () => {
 
 describe('[MS] resiliency minimum node counts', () => {
   it('errors on three-way mirror below 3 nodes', () => {
-    const cfg = makeConfig({ architecture: 's2d', resiliency: 'three-way-mirror' })
+    const cfg = makeConfig({ architecture: 's2d', resiliency: 'three-way-mirror', witnessType: 'none' })
     const f = validateDesign(cfg, 2, [vm()], tiers, plansFor(cfg, [vm()], 2))
     expect(bySeverity(f, 'error')).toContain('RESILIENCY_MIN_NODES')
   })

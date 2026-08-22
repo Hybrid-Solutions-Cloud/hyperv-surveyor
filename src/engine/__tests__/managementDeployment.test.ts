@@ -99,7 +99,25 @@ describe('management deployment planner', () => {
     expect(plan.components.find((item) => item.id === 'scom-sql')?.count).toBe(2)
     expect(plan.components.find((item) => item.id === 'scom-reporting')?.count).toBe(1)
     expect(plan.components.find((item) => item.id === 'scom-web')?.count).toBe(1)
-    expect(plan.cautions.some((item) => item.includes('reporting and web console roles remain single'))).toBe(true)
+    expect(plan.cautions.some((item) => item.includes('rebuild recovery'))).toBe(true)
+  })
+
+  it('can add warm standby recovery for SCOM reporting and web roles', () => {
+    const plan = planManagementDeployment({ ...base, monitoring: 'scom', scomHighAvailability: true, scomAuxiliaryRecovery: 'warm-standby' })
+    expect(plan.components.find((item) => item.id === 'scom-reporting')?.count).toBe(2)
+    expect(plan.components.find((item) => item.id === 'scom-web')?.count).toBe(2)
+  })
+
+  it('sizes SCOM database allowance from daily collection and retention', () => {
+    const plan = planManagementDeployment({ ...base, monitoring: 'scom', scomHighAvailability: true, scomDailyDataGiB: 20, scomWarehouseRetentionDays: 800 })
+    expect(plan.components.find((item) => item.id === 'scom-sql')?.diskGiB).toBeGreaterThan(20_000)
+  })
+
+  it('records Arc private connectivity, region, and scoped guest services', () => {
+    const plan = planManagementDeployment({ ...base, includeArc: true, arcServices: ['azure-monitor'], arcConnectivity: 'private-link', arcRegion: 'East US 2', arcGuestScopePct: 25 })
+    expect(plan.dependencies.some((item) => item.includes('Private Link Scope'))).toBe(true)
+    expect(plan.dependencies.some((item) => item.includes('East US 2'))).toBe(true)
+    expect(plan.dependencies.some((item) => item.includes('approximately 200 VMs'))).toBe(true)
   })
 
   it('can share the VMM SQL Always On infrastructure with SCOM databases', () => {

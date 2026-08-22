@@ -146,14 +146,14 @@ export function exportDesign(
     ['Every numeric value on this tab is a TOOL assumption. Microsoft publishes NO vCPU:pCore ratio —'],
     ['the WS2025 maximums table states "Virtual processors per logical processor: No ratio imposed by Hyper-V."'],
     [],
-    ['Tier', 'vCPU:pCore', 'Right-sizing factor', 'Dynamic Memory', 'Storage tier',
+    ['Tier', 'vCPU:pCore', 'Right-sizing factor', 'Dynamic Memory policy', 'Storage tier', 'Hybrid placement',
       'Max VMs per CSV', 'Blast radius (TiB)', 'VMs', 'pCores', 'RAM (GiB)', 'Storage (TiB)'],
   ]
   for (const id of TIER_IDS) {
     const t = tiers[id]
     const d = chosen.result.demand.byTier[id]
     tp.push([t.label, `${t.oversubscription}:1`, t.rightSizingFactor,
-      t.allowDynamicMemory ? 'Allowed' : 'Blocked', t.storageTier, t.maxVmsPerCsv,
+      t.allowDynamicMemory ? 'Allowed' : 'Blocked', t.storageTier, t.hybridPlacement ?? (t.storageTier === 'performance' ? 's2d' : 'san'), t.maxVmsPerCsv,
       t.blastRadiusTiB, d.vms, r1(d.pCores), r0(d.ramGiB), r1(giBToTiB(d.storageGiB))])
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(tp), 'Tier Policy')
@@ -162,14 +162,35 @@ export function exportDesign(
   const inv: any[][] = [[
     'VM', 'Tier', 'Included', 'Power state', 'vCPU', 'RAM (GiB)',
     'Consumed (GiB)', 'Provisioned (GiB)', 'Thin gap (GiB)', 'Guest OS',
-    'Source cluster', 'Source host', 'Auto-classified',
+    'Source cluster', 'Source host', 'Source CPU vendor', 'Firmware', 'Disks', 'NICs', 'Snapshots', 'RDM', 'Encrypted', 'vTPM',
+    'CPU P95 %', 'Memory P95 %', 'IOPS P95', 'Throughput MBps P95', 'Latency ms P95', 'Network Mbps P95', 'Observation days', 'Performance source', 'Auto-classified',
   ]]
   for (const v of vms) {
     inv.push([v.name, v.tier, v.include ? 'YES' : 'no', v.powerState, v.vCpu, r1(v.ramGiB),
       r1(v.storageGiB), r1(v.provisionedGiB), r1(Math.max(0, v.provisionedGiB - v.storageGiB)),
-      v.guestOs ?? '', v.sourceCluster ?? '', v.sourceHost ?? '', v.autoClassified ? 'YES' : ''])
+      v.guestOs ?? '', v.sourceCluster ?? '', v.sourceHost ?? '', v.sourceCpuVendor ?? '', v.firmware ?? '', v.diskCount ?? '', v.nicCount ?? '', v.snapshotCount ?? '', v.hasRdm ? 'YES' : '', v.encrypted ? 'YES' : '', v.hasVtpm ? 'YES' : '',
+      v.performance?.cpuP95Pct ?? '', v.performance?.memoryP95Pct ?? '', v.performance?.storageIopsP95 ?? '', v.performance?.storageThroughputMBpsP95 ?? '', v.performance?.storageLatencyMsP95 ?? '', v.performance?.networkMbpsP95 ?? '', v.performance?.observationDays ?? '', v.performance?.source ?? '', v.autoClassified ? 'YES' : ''])
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(inv), 'Inventory')
+
+  const quality = chosen.result.performanceAssessment
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['SIZING EVIDENCE AND DATA QUALITY'],
+    ['Sizing basis', quality.basis],
+    ['Confidence', quality.confidence],
+    ['Score', quality.score],
+    ['Included VMs', quality.includedVms],
+    ['Measured VMs', quality.measuredVms],
+    ['Allocation fallback VMs', quality.fallbackVms],
+    ['CPU P95 coverage %', r1(quality.cpuCoveragePct)],
+    ['Memory P95 coverage %', r1(quality.memoryCoveragePct)],
+    ['Storage performance coverage %', r1(quality.storagePerformanceCoveragePct)],
+    ['7+ day observation coverage %', r1(quality.observationCoveragePct)],
+    ['Median observation days', quality.observationDaysMedian ?? ''],
+    [],
+    ['Notes'],
+    ...quality.notes.map((note) => [note]),
+  ]), 'Data Quality')
 
   XLSX.writeFile(wb, filename)
 }

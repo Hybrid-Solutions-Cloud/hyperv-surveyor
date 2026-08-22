@@ -93,6 +93,9 @@ export function reportToMarkdown(report: SolutionReport, selection: ReportSelect
     '',
     `- Customer / scenario: ${report.customerName}`,
     `- Selected architecture: ${report.selectedArchitecture}`,
+    `- Author: ${report.metadata.author || 'Not specified'}`,
+    `- Organization: ${report.metadata.organization || 'Not specified'}`,
+    `- Revision: ${report.metadata.revision} · ${report.metadata.approvalStatus}`,
     `- Generated: ${new Date(report.generatedAt).toLocaleString()}`,
     '',
   ]
@@ -405,6 +408,7 @@ export async function reportToWordBlob(report: SolutionReport, selection: Report
           new Paragraph({ children: [new TextRun({ text: report.selectedArchitecture, size: 23, bold: true, color: BLUE })], spacing: { after: 300 } }),
           new Paragraph({ children: [new TextRun({ text: 'GENERATED', size: 15, bold: true, color: MUTED })], spacing: { after: 45 } }),
           new Paragraph({ children: [new TextRun({ text: new Date(report.generatedAt).toLocaleString(), size: 19, color: TEXT })], spacing: { after: 250 } }),
+          new Paragraph({ children: [new TextRun({ text: `Revision ${report.metadata.revision} · ${report.metadata.approvalStatus.toUpperCase()}${report.metadata.author ? ` · ${report.metadata.author}` : ''}`, size: 17, color: TEXT })], spacing: { after: 160 } }),
           new Paragraph({ children: [new TextRun({ text: `${sections.length} report sections included`, size: 17, italics: true, color: MUTED })] }),
         ],
       },
@@ -455,6 +459,8 @@ function drawPdfCover(doc: jsPDF, report: SolutionReport, sections: ReportSectio
   const cards = [
     ['Prepared for', report.customerName],
     ['Selected architecture', report.selectedArchitecture],
+    ['Revision / status', `${report.metadata.revision} / ${report.metadata.approvalStatus}`],
+    ['Prepared by', [report.metadata.author, report.metadata.organization].filter(Boolean).join(' · ') || 'Not specified'],
     ['Generated', new Date(report.generatedAt).toLocaleString()],
   ]
   let y = 310
@@ -846,6 +852,8 @@ export function reportToHtml(report: SolutionReport, selection: ReportSelection)
         <div class="cover-grid">
           <div><span>Prepared for</span><strong>${htmlText(report.customerName)}</strong></div>
           <div><span>Selected architecture</span><strong>${htmlText(report.selectedArchitecture)}</strong></div>
+          <div><span>Revision / status</span><strong>${htmlText(`${report.metadata.revision} / ${report.metadata.approvalStatus}`)}</strong></div>
+          <div><span>Prepared by</span><strong>${htmlText([report.metadata.author, report.metadata.organization].filter(Boolean).join(' · ') || 'Not specified')}</strong></div>
           <div><span>Generated</span><strong>${htmlText(new Date(report.generatedAt).toLocaleString())}</strong></div>
         </div>
       </header>

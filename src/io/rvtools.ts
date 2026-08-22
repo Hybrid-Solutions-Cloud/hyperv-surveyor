@@ -112,6 +112,28 @@ export function parseRvTools(data: ArrayBuffer): ImportReport {
     warnings.push('No vPartition tab — falling back to vInfo "In Use" for consumed storage. In-guest figures would be more accurate.')
   }
 
+  const snapshotCountByVm = new Map<string, number>()
+  for (const row of sheet(wb, 'vSnapshot') ?? []) {
+    const name = String(pick(row, 'VM') ?? '').trim()
+    if (name) snapshotCountByVm.set(name, (snapshotCountByVm.get(name) ?? 0) + 1)
+  }
+  const rdmByVm = new Set<string>()
+  const diskCountByVm = new Map<string, number>()
+  for (const row of sheet(wb, 'vDisk') ?? []) {
+    const name = String(pick(row, 'VM') ?? '').trim()
+    if (!name) continue
+    diskCountByVm.set(name, (diskCountByVm.get(name) ?? 0) + 1)
+    const type = String(pick(row, 'Disk type', 'Type', 'Raw') ?? '')
+    if (/rdm|raw device/i.test(type)) rdmByVm.add(name)
+  }
+
+  const hostCpuVendor = new Map<string, 'intel' | 'amd' | 'unknown'>()
+  for (const host of sheet(wb, 'vHost') ?? []) {
+    const name = String(pick(host, 'Host') ?? '').trim()
+    const model = String(pick(host, 'CPU Model') ?? '')
+    if (name) hostCpuVendor.set(name, /amd|epyc/i.test(model) ? 'amd' : /intel|xeon/i.test(model) ? 'intel' : 'unknown')
+  }
+
   let excludedTemplates = 0
   let excludedSrmPlaceholders = 0
   let excludedVcls = 0
@@ -146,6 +168,8 @@ export function parseRvTools(data: ArrayBuffer): ImportReport {
 
     const tier = classify(name, guestOs, vCpu, ramGiB, storageGiB)
     seq += 1
+    const sourceHost = String(pick(row, 'Host') ?? '')
+    const firmwareRaw = String(pick(row, 'Firmware') ?? '').toLowerCase()
     vms.push({
       id: `rv-${seq}`,
       name,
@@ -159,7 +183,15 @@ export function parseRvTools(data: ArrayBuffer): ImportReport {
       include: powerState === 'poweredOn',
       guestOs,
       sourceCluster: String(pick(row, 'Cluster') ?? ''),
-      sourceHost: String(pick(row, 'Host') ?? ''),
+      sourceHost,
+      sourceCpuVendor: hostCpuVendor.get(sourceHost) ?? 'unknown',
+      firmware: /efi|uefi/.test(firmwareRaw) ? 'efi' : /bios/.test(firmwareRaw) ? 'bios' : 'unknown',
+      diskCount: diskCountByVm.get(name) ?? (num(pick(row, 'Disks')) || undefined),
+      nicCount: num(pick(row, 'NICs')) || undefined,
+      snapshotCount: snapshotCountByVm.get(name) ?? 0,
+      hasRdm: rdmByVm.has(name),
+      encrypted: bool(pick(row, 'Encrypted')),
+      hasVtpm: bool(pick(row, 'TPM', 'vTPM')),
       autoClassified: tier !== 'general',
     })
   }

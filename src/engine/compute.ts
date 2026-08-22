@@ -1,6 +1,7 @@
 /** Compute demand and per-host usable capacity. */
 import { LIMITS, TB_TO_GIB, TIER_IDS } from './rules'
 import type { ClusterConfig, ComputeDemand, NodeSpec, TierId, TierPolicy, Vm } from './types'
+import { measuredDemandFactor } from './performance'
 
 export function totalCores(node: NodeSpec): number {
   return node.sockets * node.coresPerSocket
@@ -63,6 +64,7 @@ export function computeDemand(
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
   growthFactor: number,
+  sizing?: Pick<ClusterConfig, 'sizingBasis' | 'performanceComfortFactor' | 'cpuPerformanceFactor'>,
 ): ComputeDemand {
   const byTier = {
     general: emptyTier(),
@@ -78,8 +80,18 @@ export function computeDemand(
     if (!vm.include) continue
     const t = tiers[vm.tier]
     const rsf = t.rightSizingFactor
-    byTier[vm.tier].pCores += (vm.vCpu * rsf) / t.oversubscription
-    byTier[vm.tier].ramGiB += vm.ramGiB * rsf
+    const measured = sizing?.sizingBasis === 'measured-p95'
+    const comfort = sizing?.performanceComfortFactor ?? 1.25
+    const cpuFactor = measuredDemandFactor(vm.performance?.cpuP95Pct, comfort)
+    const memoryFactor = measuredDemandFactor(vm.performance?.memoryP95Pct, comfort)
+    const cpuPerformanceFactor = measured ? Math.max(0.1, sizing?.cpuPerformanceFactor ?? 1) : 1
+    // A measured P95 factor replaces the allocation right-sizing factor for that resource.
+    // Applying both would discount the same workload twice. Missing measurements retain the
+    // tier policy as the explicit allocation fallback.
+    const cpuDemandFactor = measured && cpuFactor !== null ? cpuFactor : rsf
+    const memoryDemandFactor = measured && memoryFactor !== null ? memoryFactor : rsf
+    byTier[vm.tier].pCores += (vm.vCpu * cpuDemandFactor) / t.oversubscription / cpuPerformanceFactor
+    byTier[vm.tier].ramGiB += vm.ramGiB * memoryDemandFactor
     byTier[vm.tier].storageGiB += vm.storageGiB
     byTier[vm.tier].vms += 1
     totalVCpu += vm.vCpu

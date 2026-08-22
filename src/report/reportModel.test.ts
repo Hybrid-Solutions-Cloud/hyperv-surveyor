@@ -48,7 +48,7 @@ describe('solution report', () => {
     const componentRows = managementSection.tables[0].rows
 
     expect(report.customerName).toBe('Contoso')
-    expect(report.sections).toHaveLength(10)
+    expect(report.sections).toHaveLength(15)
     expect(componentRows.some((row) => row[0] === 'SCOM management server')).toBe(true)
     expect(componentRows.some((row) => row[0] === 'Azure Arc resource bridge appliance')).toBe(true)
     expect(componentRows.some((row) => row[0] === 'Shared SQL Server for VMM and SCOM databases')).toBe(true)

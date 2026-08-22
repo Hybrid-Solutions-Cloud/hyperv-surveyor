@@ -27,6 +27,12 @@ export default function ReportPage() {
     chosenKey,
     managementDeploymentInputs,
     includeManagementInSizing,
+    placementInputs,
+    networkDesignInputs,
+    drDesignInputs,
+    reportMetadata,
+    setReportMetadata,
+    dataSources,
   } = useSurveyorStore()
   const [selection, setSelection] = useState(defaultReportSelection)
   const [generatedAt] = useState(() => new Date().toISOString())
@@ -40,8 +46,13 @@ export default function ReportPage() {
     chosenKey,
     managementDeploymentInputs,
     includeManagementInSizing,
+    placementInputs,
+    networkDesignInputs,
+    drDesignInputs,
+    reportMetadata,
+    dataSources,
     generatedAt,
-  }), [cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, tiers, vms])
+  }), [cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, placementInputs, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, tiers, vms])
   const visibleSections = selectedReportSections(report, selection)
   const selectedCount = Object.values(selection).filter(Boolean).length
 
@@ -106,6 +117,17 @@ export default function ReportPage() {
             <button type="button" disabled={selectedCount === 0} onClick={() => downloadPdfReport(report, selection)}><Printer size={16} /><span>PDF document<small>.pdf</small></span></button>
             <button type="button" disabled={selectedCount === 0} onClick={() => downloadHtmlReport(report, selection)}><Globe2 size={16} /><span>Interactive HTML<small>.html · offline</small></span></button>
           </div>
+
+          <details className="rate-card-details">
+            <summary>Document control</summary>
+            <div className="rate-card-body">
+              <label className="field"><span>Author</span><input value={reportMetadata.author} onChange={(event) => setReportMetadata({ ...reportMetadata, author: event.target.value })} /></label>
+              <label className="field"><span>Organization</span><input value={reportMetadata.organization} onChange={(event) => setReportMetadata({ ...reportMetadata, organization: event.target.value })} /></label>
+              <label className="field"><span>Revision</span><input value={reportMetadata.revision} onChange={(event) => setReportMetadata({ ...reportMetadata, revision: event.target.value })} /></label>
+              <label className="field"><span>Approval status</span><select value={reportMetadata.approvalStatus} onChange={(event) => setReportMetadata({ ...reportMetadata, approvalStatus: event.target.value as typeof reportMetadata.approvalStatus })}><option value="draft">Draft</option><option value="review">In review</option><option value="approved">Approved</option></select></label>
+              <label className="field"><span>Decision / sign-off notes</span><textarea rows={4} value={reportMetadata.decisionNotes} onChange={(event) => setReportMetadata({ ...reportMetadata, decisionNotes: event.target.value })} /></label>
+            </div>
+          </details>
           {exportError && <div className="note warn">{exportError}</div>}
           <p className="small muted report-local-note">Exports are generated locally in this browser. Customer inventory is not uploaded.</p>
         </aside>
@@ -115,7 +137,7 @@ export default function ReportPage() {
             <span>Hyper-V Surveyor · Solution report</span>
             <h1>{report.title}</h1>
             <p>{report.customerName} · {report.selectedArchitecture}</p>
-            <small>Generated {new Date(report.generatedAt).toLocaleString()}</small>
+            <small>Revision {report.metadata.revision} · {report.metadata.approvalStatus} · {report.metadata.author || 'Author not specified'} · Generated {new Date(report.generatedAt).toLocaleString()}</small>
           </header>
 
           {visibleSections.length === 0 ? (

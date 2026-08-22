@@ -31,8 +31,8 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
 
   const pctCpu = r.availablePCores > 0 ? r.usedPCores / r.availablePCores : 0
   const pctRam = r.availableRamGiB > 0 ? r.usedRamGiB / r.availableRamGiB : 0
-  const pctSto = r.availableStorageTiB > 0 ? r.usedStorageTiB / r.availableStorageTiB : 0
-  const over = pctCpu >= 1 || pctRam >= 1 || pctSto >= 1
+  const pctSto = r.storageDomains.length > 0 ? Math.max(...r.storageDomains.map((domain) => domain.utilisationPct / 100)) : 0
+  const over = pctCpu >= 1 || pctRam >= 1 || r.storageDomains.some((domain) => domain.utilisationPct >= 100)
 
   return (
     <div className="stack">
@@ -129,7 +129,7 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
                 </Field>
               )}
               {cfg.architecture === 'hybrid' && (
-                <Field label={`Storage on S2D: ${(cfg.hybridS2dShare * 100).toFixed(0)}%`}>
+                <Field label={`Split tiers on S2D: ${(cfg.hybridS2dShare * 100).toFixed(0)}%`} hint="Applies only to workload tiers whose hybrid placement is Split.">
                   <input type="range" min={0.1} max={0.9} step={0.05} value={cfg.hybridS2dShare} onChange={event => set({ hybridS2dShare: Number(event.target.value) })} />
                 </Field>
               )}
@@ -163,6 +163,7 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
         <Meter label={`CPU — ${fmt1(r.usedPCores)} of ${fmt1(r.availablePCores)} physical cores`} pct={pctCpu} />
         <Meter label={`Memory — ${fmt0(r.usedRamGiB)} of ${fmt0(r.availableRamGiB)} GiB`} pct={pctRam} />
         <Meter label={`Storage — ${fmt1(r.usedStorageTiB)} of ${fmt1(r.availableStorageTiB)} TiB`} pct={pctSto} />
+        {r.storageDomains.map((domain) => <Meter key={domain.domain} label={`${domain.domain.toUpperCase()} domain — ${fmt1(domain.usedTiB)} of ${fmt1(domain.availableTiB)} TiB`} pct={domain.utilisationPct / 100} />)}
 
         <div className="grid cards" style={{ marginTop: 16 }}>
           <Card k="Spare cores" v={fmt1(r.headroomPCores)} s={r.headroomPCores < 0 ? 'over-committed' : 'physical'} />

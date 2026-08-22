@@ -8,6 +8,8 @@ import {
   Network,
   Server,
   ShieldCheck,
+  Workflow,
+  FileText,
 } from 'lucide-react'
 import { useSurveyorStore } from '../state/store'
 
@@ -39,6 +41,20 @@ const workflow = [
     body: 'Use the Management Plane Advisor to compare Classic, SCVMM, Windows Admin Center, and Arc.',
     icon: Network,
     to: '/management-plane',
+  },
+  {
+    step: '05',
+    title: 'Build the implementation plan',
+    body: 'Distribute target clusters, review migration blockers, and define network and disaster-recovery requirements.',
+    icon: Workflow,
+    to: '/deployment',
+  },
+  {
+    step: '06',
+    title: 'Deliver and preserve the design',
+    body: 'Create the controlled solution report, export customer formats, and save a reopenable project with named scenarios.',
+    icon: FileText,
+    to: '/report',
   },
 ]
 

@@ -9,6 +9,8 @@ import CapacityPage from './pages/CapacityPage'
 import ManagementPlanePage from './pages/ManagementPlanePage'
 import MethodPage from './pages/MethodPage'
 import ReportPage from './pages/ReportPage'
+import ProjectPage from './pages/ProjectPage'
+import DeploymentPage from './pages/DeploymentPage'
 import { fromUrl } from './state/urlState'
 import { useSurveyorStore } from './state/store'
 
@@ -29,7 +31,9 @@ export default function App() {
         <Route path="/results" element={<ResultsPage />} />
         <Route path="/capacity" element={<CapacityPage />} />
         <Route path="/management-plane" element={<ManagementPlanePage />} />
+        <Route path="/deployment" element={<DeploymentPage />} />
         <Route path="/report" element={<ReportPage />} />
+        <Route path="/project" element={<ProjectPage />} />
         <Route path="/method" element={<MethodPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

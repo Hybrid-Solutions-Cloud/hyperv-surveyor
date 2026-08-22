@@ -16,6 +16,7 @@ export type TierId = 'general' | 'database' | 'vdi' | 'infrastructure'
 export type StorageArchitecture = 'san' | 's2d' | 'hybrid'
 
 export type S2dMedia = 'all-flash' | 'hybrid'
+export type CpuVendor = 'intel' | 'amd' | 'unknown'
 
 export type Resiliency =
   | 'two-way-mirror'
@@ -29,9 +30,28 @@ export type BackupMethod = 'rct' | 'vss-volsnap'
 
 export type StorageTier = 'performance' | 'capacity'
 
+export type HybridPlacement = 's2d' | 'san' | 'split'
+
+export type WitnessType = 'cloud' | 'file-share' | 'disk' | 'none'
+
 export type PowerState = 'poweredOn' | 'poweredOff' | 'suspended'
 
 export type GrowthStrategy = 'build-now' | 'phased'
+
+export type SizingBasis = 'allocation' | 'measured-p95'
+
+export type PerformanceSource = 'manual' | 'live-optics' | 'aria-operations' | 'azure-migrate' | 'scom' | 'other'
+
+export interface VmPerformanceMetrics {
+  cpuP95Pct?: number
+  memoryP95Pct?: number
+  storageIopsP95?: number
+  storageThroughputMBpsP95?: number
+  storageLatencyMsP95?: number
+  networkMbpsP95?: number
+  observationDays?: number
+  source?: PerformanceSource
+}
 
 /** A single workload. Imported from RVTools, or entered by hand. Always editable. */
 export interface Vm {
@@ -49,6 +69,15 @@ export interface Vm {
   guestOs?: string
   sourceCluster?: string
   sourceHost?: string
+  sourceCpuVendor?: CpuVendor
+  firmware?: 'bios' | 'efi' | 'unknown'
+  diskCount?: number
+  nicCount?: number
+  snapshotCount?: number
+  hasRdm?: boolean
+  encrypted?: boolean
+  hasVtpm?: boolean
+  performance?: VmPerformanceMetrics
   /** True when the tier was assigned by auto-classification and not reviewed. */
   autoClassified?: boolean
   notes?: string
@@ -64,6 +93,8 @@ export interface TierPolicy {
   rightSizingFactor: number
   allowDynamicMemory: boolean
   storageTier: StorageTier
+  /** Storage domain used by this tier when the selected architecture is hybrid. */
+  hybridPlacement: HybridPlacement
   /** [TOOL] — Microsoft imposes no VMs-per-CSV limit. */
   maxVmsPerCsv: number
   /** [TOOL] — recovery blast radius, in TiB, for one CSV/LUN. */
@@ -81,6 +112,10 @@ export interface NodeSpec {
   cacheDrivesPerNode: number
   cacheDriveTB: number
   media: S2dMedia
+  cpuVendor?: CpuVendor
+  /** Validated sustainable S2D performance delivered per node; 0 means not entered. */
+  s2dIopsPerNode?: number
+  s2dThroughputMBpsPerNode?: number
 }
 
 export interface SanSpec {
@@ -90,6 +125,9 @@ export interface SanSpec {
   drr: number
   /** Modelled separately from DRR and never folded into it. */
   thinProvisioningSavings: number
+  /** Validated sustainable array performance; 0 means not entered. */
+  maxIops?: number
+  maxThroughputMBps?: number
 }
 
 export interface ClusterConfig {
@@ -99,9 +137,11 @@ export interface ClusterConfig {
   /** Fraction of a nested-MAP volume that is mirror. Only used for nested-map. */
   nestedMapMirrorPct: 0.1 | 0.2 | 0.3
   backupMethod: BackupMethod
+  /** Quorum witness selected for the cluster design. */
+  witnessType?: WitnessType
   node: NodeSpec
   san: SanSpec
-  /** Fraction of workload storage placed on S2D in a hybrid design. Remainder on SAN. */
+  /** S2D share used only by tiers whose hybrid placement is explicitly set to split. */
   hybridS2dShare: number
   /** One-time multiplier on current demand. 1.25 reserves 25% immediate headroom. */
   growthFactor: number
@@ -111,6 +151,12 @@ export interface ClusterConfig {
   growthHorizonYears?: number
   /** Build the terminal forecast now, or add nodes as demand crosses thresholds. */
   growthStrategy?: GrowthStrategy
+  /** Allocation is conservative. Measured mode uses per-VM P95 metrics where present. */
+  sizingBasis?: SizingBasis
+  /** Safety multiplier applied to measured P95 CPU and memory demand. */
+  performanceComfortFactor?: number
+  /** Target/source per-core benchmark ratio. Applied only in measured P95 mode. */
+  cpuPerformanceFactor?: number
   smtFactor: number
   hostCoreReservePct: number
   hostRamReserveGiB: number
@@ -175,6 +221,8 @@ export interface SizingResult {
   capacity: CapacityResult | null
   sanCapacityTiB: number | null
   requiredStorageTiB: number
+  requiredS2dTiB: number
+  requiredSanTiB: number
   csvPlans: CsvPlan[]
   totalCsvs: number
   findings: Finding[]
@@ -182,6 +230,39 @@ export interface SizingResult {
   resiliencyOverheadPct: number
   licensableCoresPerNode: number
   totalLicensableCores: number
+  performanceAssessment: PerformanceAssessment
+  storagePerformance: StoragePerformanceAssessment
+}
+
+export interface StoragePerformanceAssessment {
+  measuredVmCoveragePct: number
+  requiredS2dIops: number
+  requiredS2dThroughputMBps: number
+  requiredSanIops: number
+  requiredSanThroughputMBps: number
+  availableS2dIops: number | null
+  availableS2dThroughputMBps: number | null
+  availableSanIops: number | null
+  availableSanThroughputMBps: number | null
+  validated: boolean
+}
+
+export type DataConfidence = 'allocation-only' | 'low' | 'medium' | 'high'
+
+export interface PerformanceAssessment {
+  basis: SizingBasis
+  confidence: DataConfidence
+  score: number
+  includedVms: number
+  cpuCoveragePct: number
+  memoryCoveragePct: number
+  storagePerformanceCoveragePct: number
+  observationCoveragePct: number
+  measuredVms: number
+  fallbackVms: number
+  observationDaysMedian: number | null
+  sources: string[]
+  notes: string[]
 }
 
 export interface ReverseResult {
@@ -201,4 +282,5 @@ export interface ReverseResult {
   additionalVmsByTier: Record<TierId, number>
   findings: Finding[]
   capacity: CapacityResult | null
+  storageDomains: Array<{ domain: 's2d' | 'san'; availableTiB: number; usedTiB: number; headroomTiB: number; utilisationPct: number }>
 }

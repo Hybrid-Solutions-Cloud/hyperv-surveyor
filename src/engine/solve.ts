@@ -14,7 +14,7 @@
  *          and parity efficiency itself improves with N, so capacity must be re-evaluated at
  *          each candidate N rather than divided once.
  */
-import { LIMITS, TIER_IDS } from './rules'
+import { LIMITS, RESILIENCY, TIER_IDS } from './rules'
 import {
   computeDemand, giBToTiB, licensableCores, requiredStorageGiB,
   usableCoresPerHost, usableRamPerHost,
@@ -22,32 +22,78 @@ import {
 import { s2dCapacity, sanCapacityTiB } from './capacity'
 import { planCsvs, totalCsvCount } from './csv'
 import { growthFactorForYear, resolveGrowthPlan, type GrowthPlan } from './growth'
-import { validateDesign } from './validate'
+import { hasErrors, validateDesign } from './validate'
+import { assessPerformanceData } from './performance'
 import type {
   BindingConstraint, ClusterConfig, ComputeDemand, ReverseResult,
   SizingResult, StorageArchitecture, TierId, TierPolicy, Vm,
 } from './types'
 
-function maxNodesFor(arch: StorageArchitecture): number {
-  return arch === 'san' ? LIMITS.CLUSTER_MAX_NODES : LIMITS.S2D_MAX_NODES
+function maxNodesFor(cfg: ClusterConfig): number {
+  if (cfg.architecture === 'san') return LIMITS.CLUSTER_MAX_NODES
+  return Math.min(LIMITS.S2D_MAX_NODES, RESILIENCY[cfg.resiliency].maxNodes)
 }
 
-function minNodesFor(arch: StorageArchitecture): number {
-  return arch === 'san' ? 2 : LIMITS.S2D_MIN_NODES
+function minNodesFor(cfg: ClusterConfig): number {
+  if (cfg.architecture === 'san') return 2
+  return Math.max(LIMITS.S2D_MIN_NODES, RESILIENCY[cfg.resiliency].minNodes)
+}
+
+function hybridS2dShareForTier(cfg: ClusterConfig, policy: TierPolicy): number {
+  const placement = policy.hybridPlacement ?? (policy.storageTier === 'performance' ? 's2d' : 'san')
+  return placement === 's2d' ? 1 : placement === 'san' ? 0 : cfg.hybridS2dShare
+}
+
+function storagePerformanceDemand(
+  cfg: ClusterConfig,
+  vms: Vm[],
+  tiers: Record<TierId, TierPolicy>,
+  growthFactor: number,
+) {
+  let requiredS2dIops = 0
+  let requiredS2dThroughputMBps = 0
+  let requiredSanIops = 0
+  let requiredSanThroughputMBps = 0
+  let measured = 0
+  let included = 0
+  vms.forEach((vm) => {
+    if (!vm.include) return
+    included += 1
+    const iops = vm.performance?.storageIopsP95
+    const throughput = vm.performance?.storageThroughputMBpsP95
+    if (iops === undefined && throughput === undefined) return
+    measured += 1
+    const s2dShare = cfg.architecture === 's2d' ? 1 : cfg.architecture === 'san' ? 0 : hybridS2dShareForTier(cfg, tiers[vm.tier])
+    requiredS2dIops += (iops ?? 0) * s2dShare * growthFactor
+    requiredS2dThroughputMBps += (throughput ?? 0) * s2dShare * growthFactor
+    requiredSanIops += (iops ?? 0) * (1 - s2dShare) * growthFactor
+    requiredSanThroughputMBps += (throughput ?? 0) * (1 - s2dShare) * growthFactor
+  })
+  return {
+    requiredS2dIops,
+    requiredS2dThroughputMBps,
+    requiredSanIops,
+    requiredSanThroughputMBps,
+    measuredVmCoveragePct: included > 0 ? (measured / included) * 100 : 0,
+  }
 }
 
 /** Storage the S2D domain must carry, in TiB. In hybrid, only the S2D share. */
-function s2dRequiredTiB(cfg: ClusterConfig, demand: ComputeDemand): number {
+function s2dRequiredTiB(cfg: ClusterConfig, demand: ComputeDemand, tiers: Record<TierId, TierPolicy>): number {
   const totalTiB = giBToTiB(requiredStorageGiB(demand))
   if (cfg.architecture === 's2d') return totalTiB
-  if (cfg.architecture === 'hybrid') return totalTiB * cfg.hybridS2dShare
+  if (cfg.architecture === 'hybrid') {
+    return TIER_IDS.reduce((sum, id) => sum + giBToTiB(demand.byTier[id].storageGiB) * hybridS2dShareForTier(cfg, tiers[id]), 0)
+  }
   return 0
 }
 
-function sanRequiredTiB(cfg: ClusterConfig, demand: ComputeDemand): number {
+function sanRequiredTiB(cfg: ClusterConfig, demand: ComputeDemand, tiers: Record<TierId, TierPolicy>): number {
   const totalTiB = giBToTiB(requiredStorageGiB(demand))
   if (cfg.architecture === 'san') return totalTiB
-  if (cfg.architecture === 'hybrid') return totalTiB * (1 - cfg.hybridS2dShare)
+  if (cfg.architecture === 'hybrid') {
+    return TIER_IDS.reduce((sum, id) => sum + giBToTiB(demand.byTier[id].storageGiB) * (1 - hybridS2dShareForTier(cfg, tiers[id])), 0)
+  }
   return 0
 }
 
@@ -57,7 +103,7 @@ function solveForwardAtGrowthFactor(
   tiers: Record<TierId, TierPolicy>,
   growthFactor: number,
 ): SizingResult {
-  const demand = computeDemand(vms, tiers, growthFactor)
+  const demand = computeDemand(vms, tiers, growthFactor, cfg)
   const coresPerHost = usableCoresPerHost(cfg.node, cfg)
   const ramPerHost = usableRamPerHost(cfg.node, cfg)
   const spare = cfg.spareNodes
@@ -69,22 +115,37 @@ function solveForwardAtGrowthFactor(
   const nodesIfMemoryOnly =
     ramPerHost > 0 ? Math.ceil(demand.requiredRamGiB / ramPerHost) + spare : Infinity
 
-  const needS2dTiB = s2dRequiredTiB(cfg, demand)
-  const needSanTiB = sanRequiredTiB(cfg, demand)
+  const needS2dTiB = s2dRequiredTiB(cfg, demand, tiers)
+  const needSanTiB = sanRequiredTiB(cfg, demand, tiers)
+  const storagePerformanceDemandValue = storagePerformanceDemand(cfg, vms, tiers, growthFactor)
   const sanAvailable = cfg.architecture === 'san' || cfg.architecture === 'hybrid'
     ? sanCapacityTiB(cfg.san) : null
-
-  let nodesIfStorageOnly = minNodesFor(cfg.architecture)
-  if (usesS2d) {
-    let found = Infinity
-    for (let n = minNodesFor(cfg.architecture); n <= maxNodesFor(cfg.architecture); n++) {
-      if (s2dCapacity(cfg, n).usableTiB >= needS2dTiB) { found = n; break }
-    }
-    nodesIfStorageOnly = found
+  const sanCapacityOk = sanAvailable === null || sanAvailable >= needSanTiB
+  const sanIopsAvailable = (cfg.san.maxIops ?? 0) > 0 ? cfg.san.maxIops! : null
+  const sanThroughputAvailable = (cfg.san.maxThroughputMBps ?? 0) > 0 ? cfg.san.maxThroughputMBps! : null
+  const sanPerformanceOk = (sanIopsAvailable === null || storagePerformanceDemandValue.requiredSanIops <= sanIopsAvailable)
+    && (sanThroughputAvailable === null || storagePerformanceDemandValue.requiredSanThroughputMBps <= sanThroughputAvailable)
+  const sanOk = sanCapacityOk && sanPerformanceOk
+  const s2dPerformanceOk = (nodes: number) => {
+    const availableIops = (cfg.node.s2dIopsPerNode ?? 0) > 0 ? cfg.node.s2dIopsPerNode! * nodes : null
+    const availableThroughput = (cfg.node.s2dThroughputMBpsPerNode ?? 0) > 0 ? cfg.node.s2dThroughputMBpsPerNode! * nodes : null
+    return (availableIops === null || storagePerformanceDemandValue.requiredS2dIops <= availableIops)
+      && (availableThroughput === null || storagePerformanceDemandValue.requiredS2dThroughputMBps <= availableThroughput)
   }
 
-  const min = minNodesFor(cfg.architecture)
-  const max = maxNodesFor(cfg.architecture)
+  let nodesIfStorageOnly = sanOk ? minNodesFor(cfg) : Infinity
+  let nodesIfS2dStorageOnly = minNodesFor(cfg)
+  if (usesS2d) {
+    let found = Infinity
+    for (let n = minNodesFor(cfg); n <= maxNodesFor(cfg); n++) {
+      if (s2dCapacity(cfg, n).usableTiB >= needS2dTiB && s2dPerformanceOk(n)) { found = n; break }
+    }
+    nodesIfS2dStorageOnly = found
+    nodesIfStorageOnly = sanOk ? found : Infinity
+  }
+
+  const min = minNodesFor(cfg)
+  const max = maxNodesFor(cfg)
 
   let nodes = Infinity
   for (let n = min; n <= max; n++) {
@@ -92,12 +153,12 @@ function solveForwardAtGrowthFactor(
     if (workload < 1) continue
     const cpuOk = demand.requiredPCores <= workload * coresPerHost
     const ramOk = demand.requiredRamGiB <= workload * ramPerHost
-    const s2dOk = !usesS2d || s2dCapacity(cfg, n).usableTiB >= needS2dTiB
-    if (cpuOk && ramOk && s2dOk) { nodes = n; break }
+    const s2dOk = !usesS2d || (s2dCapacity(cfg, n).usableTiB >= needS2dTiB && s2dPerformanceOk(n))
+    if (cpuOk && ramOk && s2dOk && sanOk) { nodes = n; break }
   }
 
-  const feasible = Number.isFinite(nodes)
-  const finalNodes = feasible ? nodes : max
+  const resourceFeasible = Number.isFinite(nodes)
+  const finalNodes = resourceFeasible ? nodes : max
   const workloadNodes = Math.max(0, finalNodes - spare)
 
   // Which constraint bound? The one whose single-constraint node count equals the answer.
@@ -106,21 +167,38 @@ function solveForwardAtGrowthFactor(
   const candidates: Array<[BindingConstraint, number]> = [
     ['cpu', nodesIfCpuOnly],
     ['memory', nodesIfMemoryOnly],
-    ['storage', usesS2d ? nodesIfStorageOnly : -Infinity],
+    ['storage', usesS2d || !sanOk ? nodesIfStorageOnly : -Infinity],
     ['node-floor', min],
   ]
   candidates.sort((a, b) => b[1] - a[1])
   binding = candidates[0][0]
 
   const cap = usesS2d ? s2dCapacity(cfg, finalNodes) : null
+  const performanceUtilisation = Math.max(
+    (cfg.node.s2dIopsPerNode ?? 0) > 0 ? storagePerformanceDemandValue.requiredS2dIops / (cfg.node.s2dIopsPerNode! * finalNodes) : 0,
+    (cfg.node.s2dThroughputMBpsPerNode ?? 0) > 0 ? storagePerformanceDemandValue.requiredS2dThroughputMBps / (cfg.node.s2dThroughputMBpsPerNode! * finalNodes) : 0,
+    sanIopsAvailable ? storagePerformanceDemandValue.requiredSanIops / sanIopsAvailable : 0,
+    sanThroughputAvailable ? storagePerformanceDemandValue.requiredSanThroughputMBps / sanThroughputAvailable : 0,
+  )
+  const capacityUtilisation = Math.max(
+    cap && cap.usableTiB > 0 ? needS2dTiB / cap.usableTiB : 0,
+    sanAvailable && sanAvailable > 0 ? needSanTiB / sanAvailable : 0,
+  )
 
-  if (!feasible) {
+  if (!resourceFeasible) {
     const reasons: string[] = []
     if (nodesIfCpuOnly > max) reasons.push(`CPU alone needs ${nodesIfCpuOnly} nodes`)
     if (nodesIfMemoryOnly > max) reasons.push(`memory alone needs ${nodesIfMemoryOnly} nodes`)
-    if (usesS2d && !Number.isFinite(nodesIfStorageOnly)) {
-      reasons.push(`storage cannot be satisfied within ${max} nodes at ${cap ? (cap.efficiency * 100).toFixed(1) : '?'}% efficiency`)
+    if (usesS2d && !Number.isFinite(nodesIfS2dStorageOnly)) {
+      const capacityPassesAtCeiling = s2dCapacity(cfg, max).usableTiB >= needS2dTiB
+      reasons.push(capacityPassesAtCeiling
+        ? `measured S2D IOPS or throughput exceeds the entered sustainable capability within ${max} nodes`
+        : `S2D capacity cannot be satisfied within ${max} nodes at ${cap ? (cap.efficiency * 100).toFixed(1) : '?'}% efficiency`)
     }
+    if (!sanCapacityOk && sanAvailable !== null) {
+      reasons.push(`SAN capacity provides ${sanAvailable.toFixed(1)} TiB effective but ${needSanTiB.toFixed(1)} TiB is required`)
+    }
+    if (!sanPerformanceOk) reasons.push('measured SAN IOPS or throughput demand exceeds the entered sustainable array capability')
     bindingExplanation = `Not feasible in a single cluster: ${reasons.join('; ')}. Ceiling is ${max} nodes${usesS2d ? ' because S2D is enabled' : ''}. Split into multiple clusters, use denser nodes, or choose a more capacity-efficient resiliency.`
   } else {
     switch (binding) {
@@ -131,7 +209,9 @@ function solveForwardAtGrowthFactor(
         bindingExplanation = `Memory-bound. ${demand.requiredRamGiB.toFixed(0)} GiB required across ${workloadNodes} workload nodes at ${ramPerHost.toFixed(0)} GiB usable each. CPU alone would need ${nodesIfCpuOnly} nodes${usesS2d ? `, storage alone ${nodesIfStorageOnly}` : ''}.`
         break
       case 'storage':
-        bindingExplanation = `Storage-bound. ${needS2dTiB.toFixed(1)} TiB required and ${cap?.efficiencyLabel} yields ${((cap?.efficiency ?? 0) * 100).toFixed(1)}% efficiency, so ${(needS2dTiB / (cap?.efficiency || 1)).toFixed(0)} TiB raw is needed after reserve. Compute alone would need ${Math.max(nodesIfCpuOnly, nodesIfMemoryOnly)} nodes.`
+        bindingExplanation = performanceUtilisation > capacityUtilisation
+          ? `Storage-bound (performance). Measured IOPS or throughput consumes ${(performanceUtilisation * 100).toFixed(1)}% of the entered sustainable capability. Compute alone would need ${Math.max(nodesIfCpuOnly, nodesIfMemoryOnly)} nodes. Validate peak concurrency and target performance with a proof of concept.`
+          : `Storage-bound (capacity). ${needS2dTiB.toFixed(1)} TiB required on S2D and ${cap?.efficiencyLabel} yields ${((cap?.efficiency ?? 0) * 100).toFixed(1)}% efficiency. Compute alone would need ${Math.max(nodesIfCpuOnly, nodesIfMemoryOnly)} nodes.`
         break
       default:
         bindingExplanation = `Node-floor-bound. The workload fits in fewer nodes, but ${min} is the minimum for this architecture and N+${spare} resiliency.`
@@ -140,6 +220,24 @@ function solveForwardAtGrowthFactor(
 
   const csvPlans = planCsvs(cfg, demand, tiers, finalNodes)
   const findings = validateDesign(cfg, finalNodes, vms, tiers, csvPlans)
+  const storagePerformance = {
+    ...storagePerformanceDemandValue,
+    availableS2dIops: usesS2d && (cfg.node.s2dIopsPerNode ?? 0) > 0 ? cfg.node.s2dIopsPerNode! * finalNodes : null,
+    availableS2dThroughputMBps: usesS2d && (cfg.node.s2dThroughputMBpsPerNode ?? 0) > 0 ? cfg.node.s2dThroughputMBpsPerNode! * finalNodes : null,
+    availableSanIops: cfg.architecture === 'san' || cfg.architecture === 'hybrid' ? sanIopsAvailable : null,
+    availableSanThroughputMBps: cfg.architecture === 'san' || cfg.architecture === 'hybrid' ? sanThroughputAvailable : null,
+    validated: storagePerformanceDemandValue.measuredVmCoveragePct >= 80
+      && (!usesS2d || ((cfg.node.s2dIopsPerNode ?? 0) > 0 && (cfg.node.s2dThroughputMBpsPerNode ?? 0) > 0))
+      && (!(cfg.architecture === 'san' || cfg.architecture === 'hybrid') || (sanIopsAvailable !== null && sanThroughputAvailable !== null)),
+  }
+  if (!storagePerformance.validated) findings.push({ severity: 'warning', code: 'STORAGE_PERFORMANCE_UNVALIDATED', message: `Storage capacity is calculated, but end-to-end performance is not fully validated. Measured IOPS/throughput coverage is ${storagePerformance.measuredVmCoveragePct.toFixed(0)}%; enter sustainable target capabilities for every active storage domain.`, basis: 'TOOL' })
+  if (!sanPerformanceOk) findings.push({ severity: 'error', code: 'SAN_PERFORMANCE_EXCEEDED', message: 'Measured SAN IOPS or throughput demand exceeds the entered sustainable array capability.', basis: 'TOOL' })
+  if (usesS2d && !s2dPerformanceOk(finalNodes)) findings.push({ severity: 'error', code: 'S2D_PERFORMANCE_EXCEEDED', message: `Measured S2D IOPS or throughput demand cannot be satisfied within ${finalNodes} nodes using the entered per-node capability.`, basis: 'TOOL' })
+  const feasible = resourceFeasible && !hasErrors(findings)
+  if (resourceFeasible && !feasible) {
+    const blockers = findings.filter((finding) => finding.severity === 'error').map((finding) => finding.message)
+    bindingExplanation = `Design is not feasible until hard validation errors are resolved: ${blockers.join('; ')}`
+  }
 
   return {
     architecture: cfg.architecture,
@@ -156,6 +254,8 @@ function solveForwardAtGrowthFactor(
     capacity: cap,
     sanCapacityTiB: sanAvailable,
     requiredStorageTiB: giBToTiB(requiredStorageGiB(demand)),
+    requiredS2dTiB: needS2dTiB,
+    requiredSanTiB: needSanTiB,
     csvPlans,
     totalCsvs: totalCsvCount(csvPlans),
     findings,
@@ -163,6 +263,8 @@ function solveForwardAtGrowthFactor(
     resiliencyOverheadPct: finalNodes > 0 ? (spare / finalNodes) * 100 : 0,
     licensableCoresPerNode: licensableCores(cfg.node),
     totalLicensableCores: licensableCores(cfg.node) * finalNodes,
+    performanceAssessment: assessPerformanceData(vms, cfg),
+    storagePerformance,
   }
 }
 
@@ -208,6 +310,12 @@ export function forecastGrowth(
       ramGiB: vm.ramGiB * demandFactor,
       storageGiB: vm.storageGiB * demandFactor,
       provisionedGiB: vm.provisionedGiB * demandFactor,
+      performance: vm.performance ? {
+        ...vm.performance,
+        storageIopsP95: vm.performance.storageIopsP95 === undefined ? undefined : vm.performance.storageIopsP95 * demandFactor,
+        storageThroughputMBpsP95: vm.performance.storageThroughputMBpsP95 === undefined ? undefined : vm.performance.storageThroughputMBpsP95 * demandFactor,
+        networkMbpsP95: vm.performance.networkMbpsP95 === undefined ? undefined : vm.performance.networkMbpsP95 * demandFactor,
+      } : undefined,
     }))
     const result = solveForwardAtGrowthFactor(cfg, [...growingVms, ...fixedVms], tiers, 1)
     const nodes = result.feasible ? result.nodes : null
@@ -238,7 +346,7 @@ export function solveReverse(
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
 ): ReverseResult {
-  const demand = computeDemand(vms, tiers, resolveGrowthPlan(cfg).currentDesignGrowthFactor)
+  const demand = computeDemand(vms, tiers, resolveGrowthPlan(cfg).currentDesignGrowthFactor, cfg)
   const workloadNodes = Math.max(0, nodes - cfg.spareNodes)
   const usesS2d = cfg.architecture === 's2d' || cfg.architecture === 'hybrid'
 
@@ -251,7 +359,18 @@ export function solveReverse(
   else if (cfg.architecture === 's2d') availableStorageTiB = cap?.usableTiB ?? 0
   else availableStorageTiB = (cap?.usableTiB ?? 0) + sanCapacityTiB(cfg.san)
 
-  const usedStorageTiB = giBToTiB(requiredStorageGiB(demand))
+  const usedS2dTiB = s2dRequiredTiB(cfg, demand, tiers)
+  const usedSanTiB = sanRequiredTiB(cfg, demand, tiers)
+  const usedStorageTiB = usedS2dTiB + usedSanTiB
+  const storageDomains: ReverseResult['storageDomains'] = []
+  if (usesS2d) {
+    const available = cap?.usableTiB ?? 0
+    storageDomains.push({ domain: 's2d', availableTiB: available, usedTiB: usedS2dTiB, headroomTiB: available - usedS2dTiB, utilisationPct: available > 0 ? (usedS2dTiB / available) * 100 : 100 })
+  }
+  if (cfg.architecture === 'san' || cfg.architecture === 'hybrid') {
+    const available = sanCapacityTiB(cfg.san)
+    storageDomains.push({ domain: 'san', availableTiB: available, usedTiB: usedSanTiB, headroomTiB: available - usedSanTiB, utilisationPct: available > 0 ? (usedSanTiB / available) * 100 : 100 })
+  }
 
   const headroomPCores = availablePCores - demand.requiredPCores
   const headroomRamGiB = availableRamGiB - demand.requiredRamGiB
@@ -259,7 +378,7 @@ export function solveReverse(
 
   const pctCpu = availablePCores > 0 ? demand.requiredPCores / availablePCores : 1
   const pctRam = availableRamGiB > 0 ? demand.requiredRamGiB / availableRamGiB : 1
-  const pctSto = availableStorageTiB > 0 ? usedStorageTiB / availableStorageTiB : 1
+  const pctSto = storageDomains.length > 0 ? Math.max(...storageDomains.map((domain) => domain.utilisationPct / 100)) : 1
 
   let binding: BindingConstraint = 'cpu'
   let worst = pctCpu
@@ -276,6 +395,15 @@ export function solveReverse(
 
   // "How many more VMs of profile X fit" — the question an SE is actually asked mid-call.
   const additionalVmsByTier = {} as Record<TierId, number>
+  const domainHeadroom = (domain: 's2d' | 'san') => storageDomains.find((item) => item.domain === domain)?.headroomTiB ?? 0
+  const storageHeadroomForTier = (policy: TierPolicy) => {
+    if (cfg.architecture === 's2d') return domainHeadroom('s2d')
+    if (cfg.architecture === 'san') return domainHeadroom('san')
+    const share = hybridS2dShareForTier(cfg, policy)
+    if (share <= 0) return domainHeadroom('san')
+    if (share >= 1) return domainHeadroom('s2d')
+    return Math.min(domainHeadroom('s2d') / share, domainHeadroom('san') / (1 - share))
+  }
   for (const id of TIER_IDS) {
     const t = demand.byTier[id]
     const policy = tiers[id]
@@ -283,7 +411,7 @@ export function solveReverse(
       // No exemplar in the inventory: use a nominal 4 vCPU / 16 GiB / 200 GiB profile. [TOOL]
       const cpuFit = headroomPCores / (4 / policy.oversubscription)
       const ramFit = headroomRamGiB / 16
-      const stoFit = (headroomStorageTiB * 1024) / 200
+      const stoFit = (storageHeadroomForTier(policy) * 1024) / 200
       additionalVmsByTier[id] = Math.max(0, Math.floor(Math.min(cpuFit, ramFit, stoFit)))
       continue
     }
@@ -292,7 +420,7 @@ export function solveReverse(
     const avgSto = t.storageGiB / t.vms
     const cpuFit = avgCores > 0 ? headroomPCores / avgCores : Infinity
     const ramFit = avgRam > 0 ? headroomRamGiB / avgRam : Infinity
-    const stoFit = avgSto > 0 ? (headroomStorageTiB * 1024) / avgSto : Infinity
+    const stoFit = avgSto > 0 ? (storageHeadroomForTier(policy) * 1024) / avgSto : Infinity
     additionalVmsByTier[id] = Math.max(0, Math.floor(Math.min(cpuFit, ramFit, stoFit)))
   }
 
@@ -310,6 +438,7 @@ export function solveReverse(
     additionalVmsByTier,
     findings,
     capacity: cap,
+    storageDomains,
   }
 }
 

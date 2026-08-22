@@ -25,6 +25,12 @@ const base: ManagementCostInputs = {
 }
 
 describe('management-plane cost parity', () => {
+  it('includes System Center and SQL when SCOM is selected without SCVMM', () => {
+    const classic = calculatePlaneCost('classic', { ...base, includeScom: true })
+    expect(classic.systemCenter).toBeGreaterThan(0)
+    expect(classic.sql).toBeGreaterThan(0)
+  })
+
   it('matches the reference perpetual scenario', () => {
     expect(calculatePlaneCost('classic', base).total).toBeCloseTo(325_009.92, 2)
     expect(calculatePlaneCost('scvmm', base).total).toBeCloseTo(526_627.92, 2)

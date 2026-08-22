@@ -186,6 +186,58 @@ describe('N+1 / N+2 resiliency arithmetic', () => {
   })
 })
 
+describe('storage and hard-rule feasibility', () => {
+  it('marks a SAN design infeasible when effective array capacity is too small', () => {
+    const cfg = makeConfig({ architecture: 'san', san: { usableTiB: 1, drr: 1 } })
+    const r = solveForward(cfg, [vm({ storageGiB: 4096 })], tiers)
+    expect(r.feasible).toBe(false)
+    expect(r.bindingExplanation).toContain('SAN capacity')
+  })
+
+  it('honours the selected S2D resiliency minimum node count', () => {
+    const cfg = makeConfig({ architecture: 's2d', resiliency: 'three-way-mirror', spareNodes: 0 })
+    const r = solveForward(cfg, [vm({ vCpu: 1, ramGiB: 1, storageGiB: 1 })], tiers)
+    expect(r.nodes).toBeGreaterThanOrEqual(3)
+    expect(r.feasible).toBe(true)
+  })
+
+  it('lets hard validation errors block feasibility', () => {
+    const cfg = makeConfig({ architecture: 'san' })
+    const r = solveForward(cfg, [vm({ vCpu: LIMITS.MAX_VCPU_PER_VM + 1 })], tiers)
+    expect(r.feasible).toBe(false)
+    expect(r.findings.some((finding) => finding.code === 'VM_VCPU_MAX')).toBe(true)
+  })
+
+  it('blocks a SAN design when measured IOPS exceeds entered sustainable capability', () => {
+    const cfg = makeConfig({ architecture: 'san', san: { maxIops: 500, maxThroughputMBps: 10_000 } })
+    const r = solveForward(cfg, [vm({ performance: { storageIopsP95: 1_000, storageThroughputMBpsP95: 100 } })], tiers)
+    expect(r.feasible).toBe(false)
+    expect(r.findings.some((finding) => finding.code === 'SAN_PERFORMANCE_EXCEEDED')).toBe(true)
+    expect(r.bindingExplanation).toContain('SAN IOPS or throughput')
+  })
+
+  it('adds S2D nodes when measured storage performance is the binding constraint', () => {
+    const cfg = makeConfig({
+      architecture: 's2d',
+      spareNodes: 0,
+      resiliency: 'three-way-mirror',
+      node: { s2dIopsPerNode: 1_000, s2dThroughputMBpsPerNode: 1_000 },
+    })
+    const r = solveForward(cfg, [vm({ performance: { storageIopsP95: 3_500, storageThroughputMBpsP95: 100 } })], tiers)
+    expect(r.feasible).toBe(true)
+    expect(r.nodes).toBe(4)
+    expect(r.binding).toBe('storage')
+    expect(r.bindingExplanation).toContain('Storage-bound (performance)')
+  })
+
+  it('keeps unknown storage performance as a warning instead of inventing a capability', () => {
+    const r = solveForward(makeConfig({ architecture: 'san' }), [vm({ performance: { storageIopsP95: 1_000, storageThroughputMBpsP95: 100 } })], tiers)
+    expect(r.feasible).toBe(true)
+    expect(r.storagePerformance.validated).toBe(false)
+    expect(r.findings.some((finding) => finding.code === 'STORAGE_PERFORMANCE_UNVALIDATED')).toBe(true)
+  })
+})
+
 describe('capacity growth planning', () => {
   const workloads = Array.from({ length: 160 }, () => vm({ tier: 'database', vCpu: 8, ramGiB: 32, storageGiB: 200 }))
 
@@ -221,6 +273,19 @@ describe('capacity growth planning', () => {
     const forecast = forecastGrowth(cfg, [vm({ vCpu: 4 })], tiers, [vm({ vCpu: 4, tier: 'infrastructure' })])
     expect(forecast.points[0].result.demand.totalVCpu).toBe(8)
     expect(forecast.points[1].result.demand.totalVCpu).toBe(12)
+  })
+
+  it('grows measured storage performance demand with the workload forecast', () => {
+    const cfg = makeConfig({
+      architecture: 'san',
+      annualGrowthPct: 1,
+      growthHorizonYears: 1,
+      san: { maxIops: 1_500, maxThroughputMBps: 1_500 },
+    })
+    const forecast = forecastGrowth(cfg, [vm({ performance: { storageIopsP95: 1_000, storageThroughputMBpsP95: 100 } })], tiers)
+    expect(forecast.points[0].result.storagePerformance.requiredSanIops).toBe(1_000)
+    expect(forecast.points[1].result.storagePerformance.requiredSanIops).toBe(2_000)
+    expect(forecast.points[1].result.feasible).toBe(false)
   })
 })
 
