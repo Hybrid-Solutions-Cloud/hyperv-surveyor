@@ -4,6 +4,8 @@ import { ResultsPanel } from '../components/ResultsPanel'
 import { PageHeader } from '../components/Shared'
 import { Link } from 'react-router-dom'
 import { useSurveyorStore } from '../state/store'
+import { JourneyBar } from '../components/JourneyBar'
+import { ManagementCheckpoint } from '../components/ManagementCheckpoint'
 
 export default function ResultsPage() {
   const { cfg, vms, tiers, chosenKey, setChosenKey, sharedInventoryOmitted } = useSurveyorStore()
@@ -13,10 +15,11 @@ export default function ResultsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Step 3"
-        title="Sizing results"
+        eyebrow="New platform · Platform outcome"
+        title="New-platform results"
         description="Compare the same workload across every supported architecture and see the CPU, memory, or storage constraint that determines each answer."
       />
+      <JourneyBar detail="This result answers how much new infrastructure is required. Existing-hardware fit is calculated in Existing hardware & fit." />
       {sharedInventoryOmitted !== null && vms.length === 0 && (
         <div className="note err" style={{ marginBottom: 16 }}>
           <strong>This shared link omitted {sharedInventoryOmitted.toLocaleString()} workload records</strong>
@@ -34,6 +37,7 @@ export default function ResultsPage() {
         onExport={() => exportDesign(options, chosen, chosen.cfg, tiers, vms)}
       />
       )}
+      {vms.some((vm) => vm.include) && !(sharedInventoryOmitted !== null && vms.length === 0) && <ManagementCheckpoint context="new-platform" />}
     </>
   )
 }

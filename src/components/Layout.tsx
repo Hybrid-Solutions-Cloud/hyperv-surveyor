@@ -20,29 +20,36 @@ import {
 } from 'lucide-react'
 import { useSurveyorStore } from '../state/store'
 import { toUrl, urlOmittedInventory } from '../state/urlState'
+import { ENGAGEMENT_LABELS, journeyResumeRoute } from '../state/journey'
 
-const nav = [
-  { to: '/', label: 'Overview', icon: Home, end: true },
-  { to: '/workloads', label: 'Workloads', icon: Cpu },
-  { to: '/configuration', label: 'Hardware & assumptions', icon: Server },
-  { to: '/results', label: 'Sizing results', icon: BarChart3 },
-  { to: '/capacity', label: 'Existing capacity', icon: Calculator },
-  { to: '/management-plane', label: 'Management plane', icon: Network },
-  { to: '/deployment', label: 'Implementation plan', icon: Workflow },
-  { to: '/report', label: 'Solution report', icon: FileText },
-  { to: '/project', label: 'Project & scenarios', icon: FolderOpen },
-  { to: '/method', label: 'Sources & method', icon: BookOpen },
+const navGroups = [
+  { label: 'Start', items: [{ to: '/', label: 'Planning paths', icon: Home, end: true }] },
+  { label: 'Platform', items: [
+    { to: '/workloads', label: 'Workloads', icon: Cpu },
+    { to: '/configuration', label: 'Proposed hardware', icon: Server },
+    { to: '/results', label: 'New-platform results', icon: BarChart3 },
+    { to: '/capacity', label: 'Existing hardware & fit', icon: Calculator },
+  ] },
+  { label: 'Operate', items: [
+    { to: '/management-plane', label: 'Management plane', icon: Network },
+    { to: '/deployment', label: 'Implementation plan', icon: Workflow },
+  ] },
+  { label: 'Deliver', items: [
+    { to: '/report', label: 'Solution report', icon: FileText },
+    { to: '/project', label: 'Project & scenarios', icon: FolderOpen },
+    { to: '/method', label: 'Sources & method', icon: BookOpen },
+  ] },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [shareMessage, setShareMessage] = useState('')
-  const { customerName, vms, cfg, tiers } = useSurveyorStore()
+  const { customerName, vms, cfg, tiers, engagementMode, managementDecision, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes } = useSurveyorStore()
   const included = vms.filter((vm) => vm.include).length
 
   async function shareScenario() {
-    const scenario = { customerName, vms, cfg, tiers }
-    const url = toUrl(scenario, '/results')
+    const scenario = { customerName, vms, cfg, tiers, engagementMode, managementDecision, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes }
+    const url = toUrl(scenario, engagementMode ? journeyResumeRoute(engagementMode, included) : '/results')
     try {
       await navigator.clipboard.writeText(url)
       setShareMessage(urlOmittedInventory(scenario) ? 'Link copied — inventory omitted' : 'Scenario link copied')
@@ -84,24 +91,33 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </a>
 
         <nav className="side-nav" aria-label="Primary navigation">
-          {nav.map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              onClick={() => setMenuOpen(false)}
-              className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
-            >
-              <Icon size={17} />
-              <span>{label}</span>
-              <ChevronRight className="nav-arrow" size={14} />
-            </NavLink>
+          {navGroups.map((group) => (
+            <div className="nav-group" key={group.label}>
+              <div className="nav-group-label">{group.label}</div>
+              {group.items.map((item) => {
+                const { to, label, icon: Icon } = item
+                return (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={'end' in item ? item.end : undefined}
+                  onClick={() => setMenuOpen(false)}
+                  className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
+                >
+                  <Icon size={17} />
+                  <span>{label}</span>
+                  <ChevronRight className="nav-arrow" size={14} />
+                </NavLink>
+                )
+              })}
+            </div>
           ))}
         </nav>
 
         <div className="sidebar-status">
           <div className="sidebar-status-label">Current scenario</div>
           <strong>{customerName || 'Untitled design'}</strong>
+          <span>{engagementMode ? ENGAGEMENT_LABELS[engagementMode] : 'Choose a planning path'}</span>
           <span>{included.toLocaleString()} included VMs</span>
           <button className="sidebar-action" onClick={shareScenario}>
             <Share2 size={15} /> Share scenario

@@ -4,6 +4,8 @@ import { forecastGrowth, type ArchitectureOption } from '../engine/solve'
 import { giBToTiB } from '../engine/compute'
 import { RESILIENCY, TIER_IDS } from '../engine/rules'
 import type { ClusterConfig, SizingResult, TierId, TierPolicy, Vm } from '../engine/types'
+import { assessFitGap } from '../engine/fitGap'
+import type { EngagementMode } from '../state/journey'
 
 const r1 = (n: number) => Math.round(n * 10) / 10
 const r0 = (n: number) => Math.round(n)
@@ -202,4 +204,76 @@ export function summariseForClipboard(s: SizingResult, label: string): string {
     `Storage required ${r1(s.requiredStorageTiB)} TiB · ${s.totalCsvs} CSVs · ${s.totalLicensableCores} licensable cores`,
   ]
   return lines.join('\n')
+}
+
+export function exportExistingCapacity(
+  cfg: ClusterConfig,
+  nodes: number,
+  tiers: Record<TierId, TierPolicy>,
+  vms: Vm[],
+  mode: EngagementMode | null,
+  filename = mode === 'fit-gap' ? 'HyperV_Surveyor_Fit_Gap.xlsx' : 'HyperV_Surveyor_Existing_Capacity.xlsx',
+) {
+  const wb = XLSX.utils.book_new()
+  const assessment = assessFitGap(cfg, nodes, vms, tiers)
+  const r = assessment.reverse
+  const status = assessment.fits === null ? 'NOT ASSESSED' : assessment.fits ? 'FITS' : 'DOES NOT FIT'
+  const summary: any[][] = [
+    ['Hyper-V Surveyor — Existing Capacity and Fit'],
+    ['Generated', new Date().toISOString().slice(0, 16).replace('T', ' ')],
+    ['Engagement', mode === 'fit-gap' ? 'Fit workloads to existing hardware' : 'Assess existing capacity'],
+    [],
+    ['HARDWARE CAPACITY'],
+    ['Existing nodes', assessment.existingNodes],
+    ['Reserved / unavailable nodes', cfg.spareNodes],
+    ['Workload-bearing nodes', r.workloadNodes],
+    ['Architecture', cfg.architecture],
+    ['Usable physical cores', r1(r.availablePCores)],
+    ['Usable memory (GiB)', r0(r.availableRamGiB)],
+    ['Usable storage (TiB)', r1(r.availableStorageTiB)],
+    [],
+    ['WORKLOAD FIT'],
+    ['Included VMs', assessment.assessedVms],
+    ['Decision', status],
+    ['Binding resource', r.binding],
+    ['Explanation', r.bindingExplanation],
+    ['Same-spec nodes required', assessment.requiredNodesAtSameSpec ?? 'Not resolved'],
+    ['Additional same-spec nodes', assessment.additionalNodes ?? 'Cannot resolve with nodes alone'],
+    ['CPU deficit (physical cores)', r1(assessment.deficits.physicalCores)],
+    ['Memory deficit (GiB)', r1(assessment.deficits.ramGiB)],
+    ['S2D capacity deficit (TiB)', r1(assessment.deficits.s2dTiB)],
+    ['SAN capacity deficit (TiB)', r1(assessment.deficits.sanTiB)],
+    [],
+    ['RECOMMENDATIONS'],
+    ...assessment.recommendations.map((recommendation) => [recommendation]),
+  ]
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), 'Capacity and Fit')
+
+  const tierCapacity: any[][] = [
+    ['ADDITIONAL VM CAPACITY'],
+    ['Values are mutually exclusive. Filling one tier consumes headroom available to the others. Empty tiers use the documented nominal fallback profile.'],
+    [],
+    ['Tier', 'Current VMs', 'Additional VMs', 'Ceiling', 'vCPU:pCore', 'Demand factor'],
+    ...TIER_IDS.map((id) => {
+      const current = vms.filter((vm) => vm.include && vm.tier === id).length
+      const more = r.additionalVmsByTier[id]
+      return [tiers[id].label, current, more, current + more, tiers[id].oversubscription, tiers[id].rightSizingFactor]
+    }),
+  ]
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(tierCapacity), 'VM Capacity')
+
+  const findings: any[][] = [
+    ['VALIDATION FINDINGS'],
+    ['Severity', 'Basis', 'Code', 'Message', 'Source'],
+    ...r.findings.map((finding) => [finding.severity.toUpperCase(), finding.basis, finding.code, finding.message, finding.source ?? '']),
+  ]
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(findings), 'Findings')
+
+  const inventory: any[][] = [[
+    'VM', 'Tier', 'Included', 'Power state', 'vCPU', 'RAM (GiB)', 'Consumed (GiB)', 'Provisioned (GiB)', 'Guest OS', 'Source cluster', 'Source host',
+  ], ...vms.map((vm) => [
+    vm.name, tiers[vm.tier].label, vm.include ? 'YES' : 'no', vm.powerState, vm.vCpu, r1(vm.ramGiB), r1(vm.storageGiB), r1(vm.provisionedGiB), vm.guestOs ?? '', vm.sourceCluster ?? '', vm.sourceHost ?? '',
+  ])]
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(inventory), 'Inventory')
+  XLSX.writeFile(wb, filename)
 }

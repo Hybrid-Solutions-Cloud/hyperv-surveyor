@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState } from 'react'
 import { Download, FolderOpen, Save, Trash2, Upload } from 'lucide-react'
-import { compareArchitectures } from '../engine/solve'
+import { compareArchitectures, solveForward } from '../engine/solve'
 import { PageHeader } from '../components/Shared'
 import { createProject, downloadProject, parseProject, type ProjectPayload } from '../state/project'
 import { useSurveyorStore } from '../state/store'
+import { ENGAGEMENT_LABELS } from '../state/journey'
 
 export default function ProjectPage() {
   const store = useSurveyorStore()
@@ -13,6 +14,8 @@ export default function ProjectPage() {
   const [error, setError] = useState('')
 
   const currentPayload: ProjectPayload = {
+    engagementMode: store.engagementMode,
+    managementDecision: store.managementDecision,
     customerName: store.customerName,
     vms: store.vms,
     cfg: store.cfg,
@@ -36,8 +39,21 @@ export default function ProjectPage() {
   ].map((scenario) => {
     const options = compareArchitectures(scenario.cfg, scenario.vms, scenario.tiers)
     const selected = options.find((option) => option.key === scenario.chosenKey) ?? options[0]
-    return { scenario, selected }
-  }), [store.cfg, store.vms, store.tiers, store.chosenKey, store.customerName, store.existingCapacityCfg, store.existingCapacityTiers, store.existingCapacityNodes, store.managementDeploymentInputs, store.includeManagementInSizing, store.placementInputs, store.networkDesignInputs, store.drDesignInputs, store.reportMetadata, store.dataSources, store.savedScenarios])
+    const usesExisting = scenario.engagementMode === 'existing-capacity' || scenario.engagementMode === 'fit-gap'
+    const managementOnly = scenario.engagementMode === 'management-only'
+    const result = managementOnly
+      ? null
+      : usesExisting
+        ? solveForward(scenario.existingCapacityCfg, scenario.vms, scenario.existingCapacityTiers)
+        : selected.result
+    const architecture = managementOnly
+      ? 'Management only'
+      : usesExisting ? `Existing ${scenario.existingCapacityCfg.architecture.toUpperCase()}` : selected.label
+    const nodes = managementOnly
+      ? '—'
+      : usesExisting ? `${scenario.existingCapacityNodes} existing` : result?.feasible ? result.nodes.toLocaleString() : 'Review'
+    return { scenario, result, architecture, nodes }
+  }), [store.engagementMode, store.managementDecision, store.cfg, store.vms, store.tiers, store.chosenKey, store.customerName, store.existingCapacityCfg, store.existingCapacityTiers, store.existingCapacityNodes, store.managementDeploymentInputs, store.includeManagementInSizing, store.placementInputs, store.networkDesignInputs, store.drDesignInputs, store.reportMetadata, store.dataSources, store.savedScenarios])
 
   async function openProject(file: File) {
     setError('')
@@ -90,17 +106,18 @@ export default function ProjectPage() {
         <h2>Scenario comparison</h2>
         <div className="scroll" style={{ maxHeight: 'none' }}>
           <table>
-            <thead><tr><th>Scenario</th><th>Architecture</th><th className="num">VMs</th><th className="num">Nodes</th><th>Constraint</th><th className="num">Storage</th><th>Evidence</th><th /></tr></thead>
+            <thead><tr><th>Scenario</th><th>Planning path</th><th>Architecture</th><th className="num">VMs</th><th className="num">Nodes</th><th>Constraint</th><th className="num">Storage</th><th>Evidence</th><th /></tr></thead>
             <tbody>
-              {comparison.map(({ scenario, selected }) => (
+              {comparison.map(({ scenario, result, architecture, nodes }) => (
                 <tr key={scenario.id}>
                   <td><strong>{scenario.name}</strong>{scenario.createdAt && <div className="small muted">{new Date(scenario.createdAt).toLocaleString()}</div>}</td>
-                  <td>{selected.label}</td>
+                  <td>{scenario.engagementMode ? ENGAGEMENT_LABELS[scenario.engagementMode] : 'Not selected'}</td>
+                  <td>{architecture}</td>
                   <td className="num">{scenario.vms.filter((vm) => vm.include).length.toLocaleString()}</td>
-                  <td className="num"><strong>{selected.result.feasible ? selected.result.nodes : 'Review'}</strong></td>
-                  <td><span className={`pill ${selected.result.feasible ? 'info' : 'err'}`}>{selected.result.binding}</span></td>
-                  <td className="num">{selected.result.requiredStorageTiB.toFixed(1)} TiB</td>
-                  <td>{selected.result.performanceAssessment.confidence.replace('-', ' ')} · {selected.result.performanceAssessment.score}/100</td>
+                  <td className="num"><strong>{nodes}</strong></td>
+                  <td>{result ? <span className={`pill ${result.feasible ? 'info' : 'err'}`}>{result.binding}</span> : 'Not assessed'}</td>
+                  <td className="num">{result ? `${result.requiredStorageTiB.toFixed(1)} TiB` : '—'}</td>
+                  <td>{result ? `${result.performanceAssessment.confidence.replace('-', ' ')} · ${result.performanceAssessment.score}/100` : 'Management inputs only'}</td>
                   <td className="nowrap">
                     {scenario.id !== 'current' && <>
                       <button className="btn ghost" onClick={() => store.loadNamedScenario(scenario.id)}>Load</button>{' '}

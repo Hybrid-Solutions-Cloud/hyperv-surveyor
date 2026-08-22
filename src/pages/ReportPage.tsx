@@ -17,9 +17,12 @@ import {
   type ReportSectionId,
 } from '../report/reportModel'
 import { useSurveyorStore } from '../state/store'
+import { JourneyBar } from '../components/JourneyBar'
 
 export default function ReportPage() {
   const {
+    engagementMode,
+    managementDecision,
     customerName,
     cfg,
     vms,
@@ -33,12 +36,17 @@ export default function ReportPage() {
     reportMetadata,
     setReportMetadata,
     dataSources,
+    existingCapacityCfg,
+    existingCapacityTiers,
+    existingCapacityNodes,
   } = useSurveyorStore()
-  const [selection, setSelection] = useState(defaultReportSelection)
+  const [selection, setSelection] = useState(() => defaultReportSelection(engagementMode))
   const [generatedAt] = useState(() => new Date().toISOString())
   const [exporting, setExporting] = useState<'word' | null>(null)
   const [exportError, setExportError] = useState('')
   const report = useMemo(() => buildSolutionReport({
+    engagementMode,
+    managementDecision,
     customerName,
     cfg,
     vms,
@@ -51,8 +59,11 @@ export default function ReportPage() {
     drDesignInputs,
     reportMetadata,
     dataSources,
+    existingCapacityCfg,
+    existingCapacityTiers,
+    existingCapacityNodes,
     generatedAt,
-  }), [cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, placementInputs, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, tiers, vms])
+  }), [engagementMode, managementDecision, cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, placementInputs, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, tiers, vms])
   const visibleSections = selectedReportSections(report, selection)
   const selectedCount = Object.values(selection).filter(Boolean).length
 
@@ -76,6 +87,7 @@ export default function ReportPage() {
         title="Solution report"
         description="Build a complete customer-ready record of the selected architecture, workloads, node requirements, storage plan, and management-plane deployment."
       />
+      <JourneyBar detail="The report records the selected planning path, supplied evidence, platform outcome, and management decision." />
 
       <div className="report-layout">
         <aside className="panel report-controls">
@@ -102,7 +114,7 @@ export default function ReportPage() {
 
           <div className="report-management-status">
             <strong>Management selection</strong>
-            <span>{managementDeploymentInputs ? 'Using your saved deployment choices' : 'Using the advisor baseline'}</span>
+            <span>{managementDecision === 'design' ? (managementDeploymentInputs ? 'Using your saved deployment choices' : 'Using the advisor baseline') : managementDecision === 'existing' ? 'Existing management solution recorded' : managementDecision === 'deferred' ? 'Decision intentionally deferred' : 'Management plane not assessed'}</span>
             <Link to="/management-plane">Review management design</Link>
           </div>
 

@@ -45,28 +45,40 @@ import {
 } from '../data/managementPlane'
 import { MANAGEMENT_WORKBOOK } from '../data/managementWorkbook.generated'
 import type { TierId, TierPolicy, Vm } from '../engine/types'
+import { JourneyBar } from '../components/JourneyBar'
 
 type AdvisorTab = 'recommend' | 'deploy' | 'compare' | 'cost' | 'vmware' | 'field' | 'sources'
 export default function ManagementPlanePage() {
   const [tab, setTab] = useState<AdvisorTab>('recommend')
   const [answers, setAnswers] = useState<AdvisorAnswers>({})
-  const { cfg, vms, tiers, chosenKey, managementDeploymentInputs } = useSurveyorStore()
+  const { cfg, vms, tiers, chosenKey, managementDeploymentInputs, engagementMode, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes } = useSurveyorStore()
   const options = useMemo(() => compareArchitectures(cfg, vms, tiers), [cfg, vms, tiers])
   const chosen = options.find((option) => option.key === chosenKey) ?? options[0]
   const includedVms = vms.filter((vm) => vm.include).length
   const recommendation = recommendManagementPlane(answers)
+  const usesExistingHardware = engagementMode === 'existing-capacity' || engagementMode === 'fit-gap'
+  const managementOnly = engagementMode === 'management-only'
+  const platformCfg = usesExistingHardware ? existingCapacityCfg : cfg
+  const platformTiers = usesExistingHardware ? existingCapacityTiers : tiers
+  const platformNodes = managementOnly ? (managementDeploymentInputs?.managedHosts ?? 0) : usesExistingHardware ? existingCapacityNodes : chosen.result.feasible ? chosen.result.nodes : 0
+  const platformLabel = managementOnly
+    ? 'Management-only scope'
+    : usesExistingHardware
+      ? `Existing ${existingCapacityCfg.architecture.toUpperCase()} estate`
+      : chosen.label
 
   return (
     <>
       <PageHeader
-        eyebrow="Step 4 · Internal advisor"
+        eyebrow="Operating model · Internal advisor"
         title="Management Plane Advisor"
         description="Turn the fabric requirements into an explainable operating-model recommendation, then compare capability and licensing impact."
       />
+      <JourneyBar detail="This can follow any platform path or run independently when the infrastructure decision is already made." />
 
       <div className="advisor-context">
-        <div><span>Selected design</span><strong>{chosen.label}</strong></div>
-        <div><span>Calculated hosts</span><strong>{chosen.result.feasible ? chosen.result.nodes : 'Review design'}</strong></div>
+        <div><span>Platform context</span><strong>{platformLabel}</strong></div>
+        <div><span>{usesExistingHardware ? 'Existing hosts' : managementOnly ? 'Managed hosts' : 'Calculated hosts'}</span><strong>{platformNodes || 'Enter in deployment design'}</strong></div>
         <div><span>Included workloads</span><strong>{includedVms.toLocaleString()} VMs</strong></div>
         <div className="advisor-freshness"><ShieldAlert size={16} /><span>Workbook-backed advisor library · qualifying questions fact-checked {MANAGEMENT_WORKBOOK.decisionQuestionsVerified} · verify commercial terms before quoting</span></div>
       </div>
@@ -87,9 +99,11 @@ export default function ManagementPlanePage() {
           recommendationStack={recommendation.stack}
           recommendationMonitoring={recommendation.monitoring}
           recommendationHighAvailability={recommendation.highAvailability}
-          chosen={chosen}
+          platformKind={managementOnly ? 'management-only' : usesExistingHardware ? 'existing' : 'new'}
+          platformCfg={platformCfg}
+          platformNodes={platformNodes}
           vms={vms}
-          tiers={tiers}
+          tiers={platformTiers}
         />
       )}
       {tab === 'compare' && <ComparisonPanel />}
@@ -98,11 +112,11 @@ export default function ManagementPlanePage() {
       {tab === 'sources' && <SourcesPanel />}
       {tab === 'cost' && (
         <CostPanel
-          initialHosts={chosen.result.feasible ? chosen.result.nodes : 8}
-          initialSockets={cfg.node.sockets}
-          initialCoresPerSocket={cfg.node.coresPerSocket}
+          initialHosts={platformNodes || 8}
+          initialSockets={platformCfg.node.sockets}
+          initialCoresPerSocket={platformCfg.node.coresPerSocket}
           initialVms={includedVms || 320}
-          spareHosts={cfg.spareNodes}
+          spareHosts={platformCfg.spareNodes}
           initialManagementInputs={managementDeploymentInputs}
         />
       )}
@@ -244,26 +258,30 @@ function DeploymentDesignerPanel({
   recommendationStack,
   recommendationMonitoring,
   recommendationHighAvailability,
-  chosen,
+  platformKind,
+  platformCfg,
+  platformNodes,
   vms,
   tiers,
 }: {
   recommendationStack: PlaneId[]
   recommendationMonitoring: ManagementDeploymentInputs['monitoring']
   recommendationHighAvailability: boolean
-  chosen: ArchitectureOption
+  platformKind: 'new' | 'existing' | 'management-only'
+  platformCfg: ArchitectureOption['cfg']
+  platformNodes: number
   vms: Vm[]
   tiers: Record<TierId, TierPolicy>
 }) {
   const includedVms = vms.filter((vm) => vm.include).length
   const suggestedStack: PlaneId[] = recommendationStack.length > 0
     ? recommendationStack
-    : chosen.result.nodes <= 4
+    : platformNodes <= 4
       ? ['classic', 'wac-admin']
       : ['scvmm', 'wac-admin']
   const makeSuggestedInputs = () => deploymentInputsFromStack(
     suggestedStack,
-    chosen.result.feasible ? chosen.result.nodes : 0,
+    platformNodes,
     includedVms,
     {
       monitoring: recommendationMonitoring,
@@ -271,7 +289,12 @@ function DeploymentDesignerPanel({
     },
   )
   const storedInputs = useSurveyorStore((state) => state.managementDeploymentInputs)
-  const setInputs = useSurveyorStore((state) => state.setManagementDeploymentInputs)
+  const persistInputs = useSurveyorStore((state) => state.setManagementDeploymentInputs)
+  const setManagementDecision = useSurveyorStore((state) => state.setManagementDecision)
+  const setInputs = (next: ManagementDeploymentInputs) => {
+    persistInputs(next)
+    setManagementDecision('design')
+  }
   const includeInSizing = useSurveyorStore((state) => state.includeManagementInSizing)
   const setIncludeInSizing = useSurveyorStore((state) => state.setIncludeManagementInSizing)
   const inputs = normalizeManagementDeploymentInputs(storedInputs
@@ -279,14 +302,43 @@ function DeploymentDesignerPanel({
     : makeSuggestedInputs())
   const plan = useMemo(() => planManagementDeployment(inputs), [inputs])
   const managementVms = useMemo(() => deploymentComponentsToVms(plan.components), [plan.components])
-  const adjusted = useMemo(() => {
-    if (!includeInSizing) return chosen.result
-    const forecast = forecastGrowth(chosen.cfg, vms, tiers, managementVms)
+  const consumesWorkloadCapacity = includeInSizing && inputs.managementPlacement === 'workload-cluster' && platformKind !== 'management-only'
+  const baseSizing = useMemo(() => {
+    if (platformKind === 'management-only') return null
+    const forecast = forecastGrowth(platformCfg, vms, tiers)
     return forecast.plan.strategy === 'build-now'
       ? forecast.points[forecast.points.length - 1].result
       : forecast.points[0].result
-  }, [chosen, includeInSizing, managementVms, tiers, vms])
-  const hostDelta = adjusted.feasible && chosen.result.feasible ? adjusted.nodes - chosen.result.nodes : null
+  }, [platformCfg, platformKind, tiers, vms])
+  const adjusted = useMemo(() => {
+    if (platformKind === 'management-only') return null
+    if (!consumesWorkloadCapacity) return baseSizing
+    const forecast = forecastGrowth(platformCfg, vms, tiers, managementVms)
+    return forecast.plan.strategy === 'build-now'
+      ? forecast.points[forecast.points.length - 1].result
+      : forecast.points[0].result
+  }, [baseSizing, consumesWorkloadCapacity, managementVms, platformCfg, platformKind, tiers, vms])
+  const hostDelta = adjusted?.feasible
+    ? platformKind === 'existing'
+      ? Math.max(0, adjusted.nodes - platformNodes)
+      : baseSizing?.feasible ? adjusted.nodes - baseSizing.nodes : null
+    : null
+  const impactValue = platformKind === 'management-only'
+    ? 'BOM only'
+    : !adjusted?.feasible
+      ? 'Review design'
+      : platformKind === 'existing'
+        ? adjusted.nodes <= platformNodes ? `${platformNodes} existing · fits` : `${platformNodes} → ${adjusted.nodes}`
+        : `${baseSizing?.nodes ?? '—'} → ${adjusted.nodes}`
+  const impactDetail = platformKind === 'management-only'
+    ? 'No workload cluster supplied'
+    : inputs.managementPlacement !== 'workload-cluster'
+      ? 'No workload-cluster capacity consumed'
+      : !includeInSizing
+        ? 'Management overhead excluded'
+        : hostDelta === null
+          ? 'Could not compare'
+          : hostDelta > 0 ? `Adds ${hostDelta} host${hostDelta === 1 ? '' : 's'}` : 'No additional hosts'
 
   const setNumber = (key: keyof ManagementDeploymentInputs, value: number) => {
     setInputs({ ...inputs, [key]: Math.max(0, value) })
@@ -344,7 +396,7 @@ function DeploymentDesignerPanel({
 
         <Field label="Management VM placement" hint="Choose whether the management plane shares the workload failure domain or runs on independent infrastructure.">
           <select value={inputs.managementPlacement} onChange={(event) => setInputs({ ...inputs, managementPlacement: event.target.value as ManagementDeploymentInputs['managementPlacement'] })}>
-            <option value="workload-cluster">Selected workload cluster</option>
+            <option value="workload-cluster">Same cluster as workload VMs</option>
             <option value="dedicated-management-cluster">Dedicated management cluster</option>
             <option value="external-fabric">External virtualization fabric</option>
           </select>
@@ -355,8 +407,10 @@ function DeploymentDesignerPanel({
           {inputs.monitoring === 'scom' && <CostToggle label="SCOM high availability" checked={inputs.scomHighAvailability} onChange={(checked) => setInputs({ ...inputs, scomHighAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />}
           <CostToggle label="Add Azure Arc-enabled SCVMM" checked={inputs.includeArc} onChange={(checked) => setInputs({ ...inputs, includeArc: checked, arcServices: checked ? inputs.arcServices : [] })} />
           <CostToggle label="Add dedicated AD DS / DNS VMs" checked={inputs.includeIdentityServices} onChange={(checked) => setInputs({ ...inputs, includeIdentityServices: checked })} />
-          <CostToggle label="Include management VMs in host sizing" checked={includeInSizing} onChange={setIncludeInSizing} />
+          {inputs.managementPlacement === 'workload-cluster' && platformKind !== 'management-only' && <CostToggle label="Include management VMs in workload-cluster sizing" checked={includeInSizing} onChange={setIncludeInSizing} />}
         </div>
+        {inputs.managementPlacement !== 'workload-cluster' && <div className="note"><strong>Separate capacity domain</strong>Management VMs remain in the BOM but do not consume workload-cluster capacity for dedicated-cluster or external-fabric placement.</div>}
+        {inputs.managementPlacement === 'workload-cluster' && platformKind === 'management-only' && <div className="note warn"><strong>Workload capacity not supplied</strong>The BOM is complete, but host impact cannot be calculated until a platform or existing-hardware profile is added.</div>}
         {inputs.monitoring === 'scom' && inputs.scomHighAvailability && inputs.foundation === 'scvmm' && inputs.fabricHighAvailability && (
           <Field label="SCOM database placement">
             <select value={inputs.scomSqlPlacement} onChange={(event) => setInputs({ ...inputs, scomSqlPlacement: event.target.value as ManagementDeploymentInputs['scomSqlPlacement'] })}>
@@ -458,8 +512,8 @@ function DeploymentDesignerPanel({
             </div>
             <div className={`deployment-impact ${hostDelta !== null && hostDelta > 0 ? 'changed' : ''}`}>
               <span>Host sizing impact</span>
-              <strong>{adjusted.feasible ? `${chosen.result.nodes} → ${adjusted.nodes}` : 'Review design'}</strong>
-              <small>{!includeInSizing ? 'Management overhead excluded' : hostDelta === null ? 'Could not compare' : hostDelta > 0 ? `Adds ${hostDelta} host${hostDelta === 1 ? '' : 's'}` : 'No additional hosts'}</small>
+              <strong>{impactValue}</strong>
+              <small>{impactDetail}</small>
             </div>
           </div>
 

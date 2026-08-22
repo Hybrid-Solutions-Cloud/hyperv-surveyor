@@ -5,13 +5,19 @@
  */
 import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
 import { normalizeProjectPayload } from './project'
+import type { EngagementMode, ManagementDecision } from './journey'
 
 export interface Scenario {
+  engagementMode?: EngagementMode | null
+  managementDecision?: ManagementDecision
   cfg: ClusterConfig
   tiers: Record<TierId, TierPolicy>
   vms?: Vm[]
   customerName?: string
   inventoryOmitted?: number
+  existingCapacityCfg?: ClusterConfig
+  existingCapacityTiers?: Record<TierId, TierPolicy>
+  existingCapacityNodes?: number
 }
 
 const MAX_VMS_IN_URL = 60
@@ -31,11 +37,16 @@ function decode<T>(s: string): T | null {
 
 export function toUrl(scn: Scenario, route = '/results'): string {
   const payload: Scenario = {
+    engagementMode: scn.engagementMode,
+    managementDecision: scn.managementDecision,
     cfg: scn.cfg,
     tiers: scn.tiers,
     customerName: scn.customerName,
     vms: scn.vms && scn.vms.length <= MAX_VMS_IN_URL ? scn.vms : undefined,
     inventoryOmitted: scn.vms && scn.vms.length > MAX_VMS_IN_URL ? scn.vms.length : undefined,
+    existingCapacityCfg: scn.existingCapacityCfg,
+    existingCapacityTiers: scn.existingCapacityTiers,
+    existingCapacityNodes: scn.existingCapacityNodes,
   }
   const current = new URL(window.location.href)
   current.searchParams.set('s', encode(payload))
@@ -58,11 +69,16 @@ function normalizeShared(value: Scenario | null): Scenario | null {
   try {
     const payload = normalizeProjectPayload({ ...value })
     return {
+      engagementMode: payload.engagementMode,
+      managementDecision: payload.managementDecision,
       cfg: payload.cfg,
       tiers: payload.tiers,
       vms: payload.vms,
       customerName: payload.customerName,
       inventoryOmitted: typeof value.inventoryOmitted === 'number' ? Math.max(0, value.inventoryOmitted) : undefined,
+      existingCapacityCfg: payload.existingCapacityCfg,
+      existingCapacityTiers: payload.existingCapacityTiers,
+      existingCapacityNodes: payload.existingCapacityNodes,
     }
   } catch {
     return null

@@ -26,6 +26,7 @@ export interface PlannedCluster {
   vms: Vm[]
   result: SizingResult
   sourceClusters: string[]
+  managementVmCount: number
 }
 
 export interface MultiClusterPlan {
@@ -66,21 +67,28 @@ function planPool(
   cfg: ClusterConfig,
   tiers: Record<TierId, TierPolicy>,
   inputs: PlacementInputs,
+  fixedManagementVms: Vm[] = [],
 ): { clusters: PlannedCluster[]; feasible: boolean } {
-  if (vms.length === 0) return { clusters: [], feasible: true }
+  if (vms.length === 0 && fixedManagementVms.length === 0) return { clusters: [], feasible: true }
   const units = placementUnits(vms, inputs.preserveSourceClusters)
   let last: PlannedCluster[] = []
-  const ceiling = Math.min(inputs.maxClusters, units.length)
+  const ceiling = Math.min(inputs.maxClusters, Math.max(1, units.length))
   for (let count = 1; count <= ceiling; count += 1) {
     const bins = distribute(units, count)
-    const candidate = bins.map((bin, index): PlannedCluster => ({
-      id: `${purpose.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index + 1}`,
-      name: `${purpose} ${index + 1}`,
-      purpose,
-      vms: bin,
-      result: solveForward(cfg, bin, tiers),
-      sourceClusters: [...new Set(bin.map((vm) => vm.sourceCluster).filter((value): value is string => !!value))],
-    }))
+    if (bins.length === 0) bins.push([])
+    const candidate = bins.map((bin, index): PlannedCluster => {
+      const management = index === 0 ? fixedManagementVms : []
+      const plannedVms = [...bin, ...management]
+      return {
+        id: `${purpose.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index + 1}`,
+        name: `${purpose} ${index + 1}`,
+        purpose,
+        vms: plannedVms,
+        result: solveForward(cfg, plannedVms, tiers),
+        sourceClusters: [...new Set(bin.map((vm) => vm.sourceCluster).filter((value): value is string => !!value))],
+        managementVmCount: management.length,
+      }
+    })
     last = candidate
     const fits = candidate.every((cluster) => cluster.result.feasible
       && cluster.result.nodes <= inputs.maxNodesPerCluster
@@ -95,6 +103,7 @@ export function planMultipleClusters(
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
   requested: Partial<PlacementInputs> = {},
+  fixedManagementVms: Vm[] = [],
 ): MultiClusterPlan {
   const inputs = { ...DEFAULT_PLACEMENT_INPUTS, ...requested }
   const included = vms.filter((vm) => vm.include)
@@ -104,7 +113,8 @@ export function planMultipleClusters(
         { purpose: 'General cluster', vms: included.filter((vm) => vm.tier !== 'database') },
       ]
     : [{ purpose: 'Workload cluster', vms: included }]
-  const planned = pools.map((pool) => planPool(pool.purpose, pool.vms, cfg, tiers, inputs))
+  const managementPoolIndex = pools.findIndex((pool) => pool.purpose !== 'Database cluster')
+  const planned = pools.map((pool, index) => planPool(pool.purpose, pool.vms, cfg, tiers, inputs, index === managementPoolIndex || managementPoolIndex < 0 && index === 0 ? fixedManagementVms : []))
   const clusters = planned.flatMap((pool) => pool.clusters)
   const warnings: string[] = []
   if (inputs.preserveSourceClusters && included.some((vm) => !vm.sourceCluster)) warnings.push('VMs without a source-cluster value are treated as independent placement units.')

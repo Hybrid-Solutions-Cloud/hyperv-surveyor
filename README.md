@@ -7,6 +7,10 @@ It sizes SAN, Storage Spaces Direct, and hybrid cluster designs, identifies the 
 layout, distributes workloads across target clusters, assesses migration readiness, and connects the technical
 design to management, networking, disaster recovery, and licensing decisions.
 
+The landing page offers four guided planning paths: size a new platform from workloads, assess hardware already owned,
+fit a workload estate to existing hardware, or design only the management solution. Every platform path converges on
+the same optional management-plane checkpoint, implementation plan, report, and saved-project workflow.
+
 All workload processing happens in the browser. The application has no backend, telemetry, or inventory upload.
 
 ## Run locally
@@ -28,6 +32,8 @@ that can be opened directly for offline and disconnected use.
 
 ## Application areas
 
+- Journey-based planning with new-platform, existing-capacity, fit-and-gap, and management-only starting points
+- Workload-to-hardware fit assessment with explicit CPU, memory, S2D, and SAN deficits plus same-spec expansion guidance
 - Workload inventory with RVTools import, measured-performance attachment, confidence scoring, bulk review, and manual entry
 - Hardware, resilience, storage, and tier assumptions
 - Forward comparison across SAN, S2D, MAP, and hybrid designs

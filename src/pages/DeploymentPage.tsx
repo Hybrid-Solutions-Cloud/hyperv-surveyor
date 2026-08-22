@@ -7,15 +7,33 @@ import { assessMigrationReadiness } from '../engine/readiness'
 import { designNetwork } from '../engine/networkDesign'
 import { designDisasterRecovery } from '../engine/drDesign'
 import { useSurveyorStore } from '../state/store'
+import { JourneyBar } from '../components/JourneyBar'
+import { deploymentComponentsToVms, deploymentInputsFromStack, normalizeManagementDeploymentInputs, planManagementDeployment } from '../engine/managementDeployment'
+import { solveForward } from '../engine/solve'
 
 export default function DeploymentPage() {
   const store = useSurveyorStore()
   const options = useMemo(() => compareArchitectures(store.cfg, store.vms, store.tiers), [store.cfg, store.vms, store.tiers])
   const chosen = options.find((option) => option.key === store.chosenKey) ?? options[0]
-  const readiness = useMemo(() => assessMigrationReadiness(store.vms, chosen.cfg), [store.vms, chosen.cfg])
-  const clusters = useMemo(() => planMultipleClusters(chosen.cfg, store.vms, store.tiers, store.placementInputs), [chosen.cfg, store.vms, store.tiers, store.placementInputs])
-  const network = useMemo(() => designNetwork(chosen.cfg, clusters.totalNodes, store.networkDesignInputs), [chosen.cfg, clusters.totalNodes, store.networkDesignInputs])
-  const dr = useMemo(() => designDisasterRecovery(store.vms, chosen.result, store.drDesignInputs), [store.vms, chosen.result, store.drDesignInputs])
+  const usesExistingHardware = store.engagementMode === 'existing-capacity' || store.engagementMode === 'fit-gap'
+  const managementOnly = store.engagementMode === 'management-only'
+  const platformCfg = usesExistingHardware ? store.existingCapacityCfg : chosen.cfg
+  const platformTiers = usesExistingHardware ? store.existingCapacityTiers : store.tiers
+  const platformNodes = usesExistingHardware ? store.existingCapacityNodes : chosen.result.nodes
+  const defaultManagementInputs = deploymentInputsFromStack(platformNodes <= 4 ? ['classic', 'wac-admin'] : ['scvmm', 'wac-admin'], platformNodes, store.vms.filter((vm) => vm.include).length)
+  const managementInputs = normalizeManagementDeploymentInputs(store.managementDeploymentInputs ?? defaultManagementInputs)
+  const managementPlan = useMemo(() => planManagementDeployment(managementInputs), [managementInputs])
+  const managementVms = useMemo(() => deploymentComponentsToVms(managementPlan.components), [managementPlan.components])
+  const embeddedManagementVms = store.managementDecision === 'design' && store.includeManagementInSizing && managementInputs.managementPlacement === 'workload-cluster' ? managementVms : []
+  const readiness = useMemo(() => assessMigrationReadiness(store.vms, platformCfg), [store.vms, platformCfg])
+  const clusters = useMemo(() => planMultipleClusters(platformCfg, store.vms, platformTiers, store.placementInputs, embeddedManagementVms), [platformCfg, store.vms, platformTiers, store.placementInputs, embeddedManagementVms])
+  const dedicatedManagement = store.managementDecision === 'design' && managementInputs.managementPlacement === 'dedicated-management-cluster' && managementVms.length > 0
+    ? solveForward(platformCfg, managementVms, platformTiers)
+    : null
+  const networkNodeCount = (usesExistingHardware ? platformNodes : clusters.totalNodes) + (dedicatedManagement?.feasible ? dedicatedManagement.nodes : 0)
+  const network = useMemo(() => designNetwork(platformCfg, networkNodeCount, store.networkDesignInputs), [platformCfg, networkNodeCount, store.networkDesignInputs])
+  const platformSizing = useMemo(() => solveForward(platformCfg, store.vms, platformTiers), [platformCfg, store.vms, platformTiers])
+  const dr = useMemo(() => designDisasterRecovery(store.vms, platformSizing, store.drDesignInputs), [store.vms, platformSizing, store.drDesignInputs])
   const setPlacement = (patch: Partial<typeof store.placementInputs>) => store.setPlacementInputs({ ...store.placementInputs, ...patch })
   const setNetwork = (patch: Partial<typeof store.networkDesignInputs>) => store.setNetworkDesignInputs({ ...store.networkDesignInputs, ...patch })
   const setDr = (patch: Partial<typeof store.drDesignInputs>) => store.setDrDesignInputs({ ...store.drDesignInputs, ...patch })
@@ -23,11 +41,18 @@ export default function DeploymentPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Step 5"
+        eyebrow="Implementation planning"
         title="Implementation plan"
         description="Turn the selected sizing result into target clusters, migration readiness, host networking, and disaster-recovery requirements."
       />
-      {store.vms.filter((vm) => vm.include).length === 0 ? <div className="panel"><h2>Add workloads first</h2><p className="muted">Import or enter workloads before building the implementation plan.</p></div> : <div className="stack">
+      <JourneyBar detail="The implementation plan uses the hardware and workload model selected by the current planning path." />
+      {managementOnly ? <div className="stack">
+        <section className="panel">
+          <h2>Management-only implementation</h2>
+          <p className="muted">The management bill of materials is available without a workload design. Add a platform path later if host placement, network ports, workload fit, or disaster recovery must also be calculated.</p>
+          <div className="grid cards"><div className="card"><div className="k">Management instances</div><div className="v">{managementPlan.totalInstances}</div></div><div className="card"><div className="k">Management vCPU</div><div className="v">{managementPlan.totalVCpu}</div></div><div className="card"><div className="k">Management memory</div><div className="v">{managementPlan.totalRamGiB}<span style={{ fontSize: 15 }}> GiB</span></div></div><div className="card"><div className="k">Management disk</div><div className="v">{managementPlan.totalDiskGiB}<span style={{ fontSize: 15 }}> GiB</span></div></div></div>
+        </section>
+      </div> : store.vms.filter((vm) => vm.include).length === 0 ? <div className="panel"><h2>Add workloads first</h2><p className="muted">Import or enter workloads before building the implementation plan.</p></div> : <div className="stack">
         <section className="panel">
           <h2><Boxes size={18} /> Multi-cluster placement</h2>
           <div className="form-grid two-column">
@@ -45,10 +70,13 @@ export default function DeploymentPage() {
             {clusters.feasible ? `${clusters.totalWorkloadNodes} nodes carry workload after each cluster's failure reserve.` : clusters.warnings.join(' ')}
           </div>
           <div className="scroll" style={{ maxHeight: 'none' }}>
-            <table><thead><tr><th>Target cluster</th><th>Purpose</th><th className="num">VMs</th><th className="num">Nodes</th><th>Constraint</th><th>Source clusters</th><th>Confidence</th></tr></thead>
-              <tbody>{clusters.clusters.map((cluster) => <tr key={cluster.id}><td><strong>{cluster.name}</strong></td><td>{cluster.purpose}</td><td className="num">{cluster.vms.length.toLocaleString()}</td><td className="num">{cluster.result.feasible ? cluster.result.nodes : 'Review'}</td><td><span className={`pill ${cluster.result.feasible ? 'info' : 'err'}`}>{cluster.result.binding}</span></td><td>{cluster.sourceClusters.join(', ') || 'Mixed / not provided'}</td><td>{cluster.result.performanceAssessment.confidence.replace('-', ' ')} · {cluster.result.performanceAssessment.score}/100</td></tr>)}</tbody>
+            <table><thead><tr><th>Target cluster</th><th>Purpose</th><th className="num">Workload VMs</th><th className="num">Management VMs</th><th className="num">Nodes</th><th>Constraint</th><th>Source clusters</th><th>Confidence</th></tr></thead>
+              <tbody>{clusters.clusters.map((cluster) => <tr key={cluster.id}><td><strong>{cluster.name}</strong></td><td>{cluster.purpose}</td><td className="num">{(cluster.vms.length - cluster.managementVmCount).toLocaleString()}</td><td className="num">{cluster.managementVmCount || '—'}</td><td className="num">{cluster.result.feasible ? cluster.result.nodes : 'Review'}</td><td><span className={`pill ${cluster.result.feasible ? 'info' : 'err'}`}>{cluster.result.binding}</span></td><td>{cluster.sourceClusters.join(', ') || 'Mixed / not provided'}</td><td>{cluster.result.performanceAssessment.confidence.replace('-', ' ')} · {cluster.result.performanceAssessment.score}/100</td></tr>)}</tbody>
             </table>
           </div>
+          {embeddedManagementVms.length > 0 && <div className="note ok"><strong>Management VMs placed with workloads</strong>{embeddedManagementVms.length} management instances are kept together on the first non-database workload cluster and included in that cluster's node calculation.</div>}
+          {dedicatedManagement && <div className={`note ${dedicatedManagement.feasible ? 'ok' : 'err'}`}><strong>Dedicated management cluster</strong>{dedicatedManagement.feasible ? `${dedicatedManagement.nodes} nodes of the selected specification are required for ${managementVms.length} management instances, including the configured failure reserve.` : dedicatedManagement.bindingExplanation}</div>}
+          {store.managementDecision === 'design' && managementInputs.managementPlacement === 'external-fabric' && <div className="note"><strong>External management fabric</strong>The management BOM is retained, but its VMs and nodes are excluded from this platform placement plan.</div>}
           {clusters.warnings.map((warning) => <div className="note warn" key={warning}>{warning}</div>)}
         </section>
 

@@ -16,6 +16,15 @@ describe('implementation planning', () => {
     expect(plan.clusters.every((cluster) => cluster.vms.length <= 5)).toBe(true)
   })
 
+  it('places fixed management VMs together on one workload cluster and includes their demand', () => {
+    const workloads = Array.from({ length: 4 }, (_, index) => vm({ name: `APP${index}` }))
+    const management = [vm({ name: 'VMM01', tier: 'infrastructure' }), vm({ name: 'SQL01', tier: 'infrastructure' })]
+    const plan = planMultipleClusters(makeConfig({ architecture: 'san' }), workloads, DEFAULT_TIERS, { targetVmsPerCluster: 10 }, management)
+    expect(plan.clusters.reduce((sum, cluster) => sum + cluster.managementVmCount, 0)).toBe(2)
+    expect(plan.clusters.filter((cluster) => cluster.managementVmCount > 0)).toHaveLength(1)
+    expect(plan.clusters[0].vms).toHaveLength(6)
+  })
+
   it('flags conversion and processor-vendor readiness exceptions', () => {
     const cfg = makeConfig({ node: { cpuVendor: 'amd' } })
     const readiness = assessMigrationReadiness([vm({ hasRdm: true, sourceCpuVendor: 'intel', firmware: 'bios', snapshotCount: 2 })], cfg)

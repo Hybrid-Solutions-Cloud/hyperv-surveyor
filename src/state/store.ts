@@ -8,8 +8,11 @@ import { surveyorStorage } from './persistence'
 import { DEFAULT_PLACEMENT_INPUTS, type PlacementInputs } from '../engine/deploymentPlanning'
 import { DEFAULT_NETWORK_INPUTS, type NetworkDesignInputs } from '../engine/networkDesign'
 import { DEFAULT_DR_INPUTS, type DrDesignInputs } from '../engine/drDesign'
+import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMode, type ManagementDecision } from './journey'
 
 export interface SurveyorState {
+  engagementMode: EngagementMode | null
+  managementDecision: ManagementDecision
   customerName: string
   vms: Vm[]
   cfg: ClusterConfig
@@ -27,6 +30,8 @@ export interface SurveyorState {
   drDesignInputs: DrDesignInputs
   reportMetadata: ReportMetadata
   dataSources: ProjectDataSource[]
+  setEngagementMode: (mode: EngagementMode | null) => void
+  setManagementDecision: (decision: ManagementDecision) => void
   setCustomerName: (name: string) => void
   setVms: (vms: Vm[]) => void
   setCfg: (cfg: ClusterConfig) => void
@@ -48,17 +53,24 @@ export interface SurveyorState {
   addDataSource: (source: Omit<ProjectDataSource, 'id' | 'importedAt'>) => void
   resetExistingCapacity: () => void
   loadScenario: (scenario: {
+    engagementMode?: EngagementMode | null
+    managementDecision?: ManagementDecision
     customerName?: string
     vms?: Vm[]
     cfg: ClusterConfig
     tiers: Record<TierId, TierPolicy>
     inventoryOmitted?: number
+    existingCapacityCfg?: ClusterConfig
+    existingCapacityTiers?: Record<TierId, TierPolicy>
+    existingCapacityNodes?: number
   }) => void
   loadDemo: () => void
   resetScenario: () => void
 }
 
 const defaults = () => ({
+  engagementMode: null as EngagementMode | null,
+  managementDecision: 'unassessed' as ManagementDecision,
   customerName: '',
   vms: [] as Vm[],
   cfg: structuredClone(DEFAULT_CONFIG),
@@ -80,6 +92,8 @@ const defaults = () => ({
 
 function payloadFromState(state: SurveyorState): ProjectPayload {
   return {
+    engagementMode: state.engagementMode,
+    managementDecision: state.managementDecision,
     customerName: state.customerName,
     vms: structuredClone(state.vms),
     cfg: structuredClone(state.cfg),
@@ -102,6 +116,8 @@ export const useSurveyorStore = create<SurveyorState>()(
   persist(
     (set) => ({
       ...defaults(),
+      setEngagementMode: (engagementMode) => set({ engagementMode }),
+      setManagementDecision: (managementDecision) => set({ managementDecision }),
       setCustomerName: (customerName) => set({ customerName }),
       setVms: (vms) => set({ vms }),
       setCfg: (cfg) => set({ cfg }),
@@ -137,25 +153,32 @@ export const useSurveyorStore = create<SurveyorState>()(
         existingCapacityTiers: defaultTiers(),
         existingCapacityNodes: 8,
       }),
-      loadScenario: (scenario) => set({
+      loadScenario: (scenario) => set((state) => ({
+        engagementMode: normalizeEngagementMode(scenario.engagementMode, scenario.vms && scenario.vms.length > 0 ? 'new-platform' : null),
+        managementDecision: normalizeManagementDecision(scenario.managementDecision),
         customerName: scenario.customerName ?? '',
         vms: scenario.vms ?? [],
         cfg: normalizeConfig(scenario.cfg),
         tiers: normalizeTiers(scenario.tiers),
         sharedInventoryOmitted: scenario.inventoryOmitted ?? null,
-      }),
+        existingCapacityCfg: scenario.existingCapacityCfg ? normalizeConfig(scenario.existingCapacityCfg) : state.existingCapacityCfg,
+        existingCapacityTiers: scenario.existingCapacityTiers ? normalizeTiers(scenario.existingCapacityTiers) : state.existingCapacityTiers,
+        existingCapacityNodes: typeof scenario.existingCapacityNodes === 'number' ? Math.max(1, scenario.existingCapacityNodes) : state.existingCapacityNodes,
+      })),
       loadDemo: () => set({ vms: demoFleet() }),
       resetScenario: () => set(defaults()),
     }),
     {
       name: 'hyperv-surveyor-state',
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => surveyorStorage),
       migrate: (persisted) => {
         const value = persisted as Partial<SurveyorState>
         return {
           ...defaults(),
           ...value,
+          engagementMode: normalizeEngagementMode(value.engagementMode, Array.isArray(value.vms) && value.vms.length > 0 ? 'new-platform' : null),
+          managementDecision: value.managementDecision === undefined && value.managementDeploymentInputs ? 'design' : normalizeManagementDecision(value.managementDecision),
           cfg: normalizeConfig(value.cfg),
           tiers: normalizeTiers(value.tiers),
           existingCapacityCfg: normalizeConfig(value.existingCapacityCfg),
@@ -164,6 +187,8 @@ export const useSurveyorStore = create<SurveyorState>()(
         } as SurveyorState
       },
       partialize: (state) => ({
+        engagementMode: state.engagementMode,
+        managementDecision: state.managementDecision,
         customerName: state.customerName,
         cfg: state.cfg,
         tiers: state.tiers,

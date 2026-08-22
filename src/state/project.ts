@@ -4,9 +4,10 @@ import type { ManagementDeploymentInputs } from '../engine/managementDeployment'
 import { DEFAULT_PLACEMENT_INPUTS, type PlacementInputs } from '../engine/deploymentPlanning'
 import { DEFAULT_NETWORK_INPUTS, type NetworkDesignInputs } from '../engine/networkDesign'
 import { DEFAULT_DR_INPUTS, type DrDesignInputs } from '../engine/drDesign'
+import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMode, type ManagementDecision } from './journey'
 
-export const PROJECT_SCHEMA_VERSION = 3 as const
-export const ENGINE_VERSION = '1.1.0'
+export const PROJECT_SCHEMA_VERSION = 4 as const
+export const ENGINE_VERSION = '1.2.0'
 
 export interface ReportMetadata {
   author: string
@@ -33,6 +34,8 @@ export interface ProjectDataSource {
 }
 
 export interface ProjectPayload {
+  engagementMode: EngagementMode | null
+  managementDecision: ManagementDecision
   customerName: string
   vms: Vm[]
   cfg: ClusterConfig
@@ -109,6 +112,8 @@ export function normalizeProjectPayload(value: unknown): ProjectPayload {
   if (!record(value)) throw new Error('The project payload is missing or invalid.')
   const vms = Array.isArray(value.vms) ? value.vms.map(normalizeVm).filter((vm): vm is Vm => vm !== null) : []
   return {
+    engagementMode: normalizeEngagementMode(value.engagementMode, vms.length > 0 ? 'new-platform' : null),
+    managementDecision: value.managementDecision === undefined && record(value.managementDeploymentInputs) ? 'design' : normalizeManagementDecision(value.managementDecision),
     customerName: typeof value.customerName === 'string' ? value.customerName : '',
     vms,
     cfg: normalizeConfig(value.cfg),

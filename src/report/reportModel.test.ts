@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { reportToHtml, reportToJson, reportToMarkdown, reportToPdfBlob, reportToWordBlob } from './exportReport'
-import { buildSolutionReport, defaultReportSelection } from './reportModel'
+import { buildSolutionReport, defaultReportSelection, type SolutionReportInputs } from './reportModel'
 import { DEFAULT_CONFIG, defaultTiers, newVm } from '../state/defaults'
 import type { ManagementDeploymentInputs } from '../engine/managementDeployment'
 
@@ -21,7 +21,7 @@ const management: ManagementDeploymentInputs = {
   includeIdentityServices: false,
 }
 
-function sampleReport(chosenKey = 'san') {
+function sampleReport(chosenKey = 'san', overrides: Partial<SolutionReportInputs> = {}) {
   const cfg = structuredClone(DEFAULT_CONFIG)
   cfg.annualGrowthPct = 0.1
   cfg.growthHorizonYears = 3
@@ -38,6 +38,7 @@ function sampleReport(chosenKey = 'san') {
     managementDeploymentInputs: management,
     includeManagementInSizing: true,
     generatedAt: '2026-08-20T12:00:00.000Z',
+    ...overrides,
   })
 }
 
@@ -48,7 +49,7 @@ describe('solution report', () => {
     const componentRows = managementSection.tables[0].rows
 
     expect(report.customerName).toBe('Contoso')
-    expect(report.sections).toHaveLength(15)
+    expect(report.sections).toHaveLength(16)
     expect(componentRows.some((row) => row[0] === 'SCOM management server')).toBe(true)
     expect(componentRows.some((row) => row[0] === 'Azure Arc resource bridge appliance')).toBe(true)
     expect(componentRows.some((row) => row[0] === 'Shared SQL Server for VMM and SCOM databases')).toBe(true)
@@ -139,6 +140,23 @@ describe('solution report', () => {
 
     expect(memoryReserve.value).toContain('Greater of')
     expect(memoryReserve.detail).toContain('not added together')
+  })
+
+  it('uses a focused default report for management-only engagements', () => {
+    const selection = defaultReportSelection('management-only')
+    expect(Object.entries(selection).filter(([, included]) => included).map(([id]) => id)).toEqual(['executive', 'management', 'sources'])
+  })
+
+  it('does not invent platform sizing in a management-only report', () => {
+    const report = sampleReport('san', { engagementMode: 'management-only', managementDecision: 'design' })
+    const nodes = report.sections.find((section) => section.id === 'nodes')!
+    const deployment = report.sections.find((section) => section.id === 'deployment')!
+    const network = report.sections.find((section) => section.id === 'network')!
+
+    expect(report.selectedArchitecture).toBe('Management-only scope')
+    expect(nodes.metrics).toEqual([{ label: 'Platform node sizing', value: 'Not assessed' }])
+    expect(deployment.metrics.find((metric) => metric.label === 'Platform placement')?.value).toBe('Not assessed')
+    expect(network.metrics).toEqual([{ label: 'Host network design', value: 'Not assessed' }])
   })
 
   it('creates real Word and PDF file payloads', async () => {
