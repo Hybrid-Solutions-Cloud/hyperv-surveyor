@@ -172,6 +172,22 @@ function RecommendationPanel({
 }) {
   const recommendation = recommendManagementPlane(answers)
   const answered = Object.values(answers).filter((answer) => answer !== undefined).length
+  const statusLabel = recommendation.status === 'ready'
+    ? 'Current recommendation'
+    : recommendation.status === 'conflict'
+      ? 'Requirements conflict'
+      : 'Decision in progress'
+  const StatusIcon = recommendation.status === 'ready'
+    ? Check
+    : recommendation.status === 'conflict'
+      ? AlertTriangle
+      : Route
+  const remainingQuestions = recommendation.unansweredDecisionIds
+    .map((id) => {
+      const index = DECISION_QUESTIONS.findIndex((question) => question.id === id)
+      return { index, question: DECISION_QUESTIONS[index] }
+    })
+    .filter((item) => item.index >= 0)
 
   return (
     <div className="advisor-layout">
@@ -226,8 +242,8 @@ function RecommendationPanel({
       </section>
 
       <aside className="recommendation-column">
-        <section className="recommendation-card">
-          <div className="recommendation-kicker"><Check size={16} /> Current recommendation</div>
+        <section className={`recommendation-card ${recommendation.status}`}>
+          <div className="recommendation-kicker"><StatusIcon size={16} /> {statusLabel}</div>
           <h2>{recommendation.headline}</h2>
 
           {recommendation.stack.length > 0 && (
@@ -255,6 +271,39 @@ function RecommendationPanel({
               )}
             </div>
           )}
+
+          <div className="candidate-groups">
+            <div className="candidate-group">
+              <span>{recommendation.status === 'ready' ? 'Eligible components' : 'Still available'}</span>
+              <div className="candidate-pills">
+                {recommendation.eligible.map((id) => (
+                  <b key={id}>{MANAGEMENT_PLANES.find((plane) => plane.id === id)!.shortName}</b>
+                ))}
+              </div>
+            </div>
+
+            {recommendation.excluded.length > 0 && (
+              <div className="candidate-group excluded">
+                <span>Excluded by current answers</span>
+                {recommendation.excluded.map((item) => (
+                  <div className="candidate-exclusion" key={item.id}>
+                    <b>{MANAGEMENT_PLANES.find((plane) => plane.id === item.id)!.shortName}</b>
+                    <small>{item.reason}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {remainingQuestions.length > 0 && recommendation.status !== 'conflict' && (
+              <div className="candidate-group remaining-gates">
+                <span>Needed to finalize ({remainingQuestions.length})</span>
+                {remainingQuestions.slice(0, 4).map((item) => (
+                  <small key={item.question.id}>Question {item.index + 1}: {item.question.question}</small>
+                ))}
+                {remainingQuestions.length > 4 && <small>+ {remainingQuestions.length - 4} more decision gates</small>}
+              </div>
+            )}
+          </div>
 
           <ul className="reason-list">
             {recommendation.rationale.map((reason) => <li key={reason}>{reason}</li>)}

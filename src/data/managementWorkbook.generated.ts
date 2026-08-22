@@ -9,7 +9,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "airGap",
       "question": "Must the management plane operate without persistent outbound connectivity to Azure?",
-      "ifYes": "Exclude Arc-enabled SCVMM. Use SCVMM, Classic Hyper-V tools, and Windows Admin Center without an Azure-dependent control layer.",
+      "ifYes": "Exclude only Arc-enabled SCVMM. Classic Hyper-V tools, SCVMM without Arc, WAC Administration Mode, and WAC Virtualization Mode remain available unless another requirement rules them out.",
       "ifNo": "Arc remains eligible, but add it only when an Azure control-plane requirement exists.",
       "why": "Azure Arc-enabled SCVMM requires an Arc resource bridge with ongoing outbound HTTPS connectivity, external DNS resolution, and an Azure subscription. This is an architectural constraint, not a preference.",
       "sources": [
@@ -72,10 +72,10 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "id": "clusterCreation",
-      "question": "Must operators create and validate new Hyper-V clusters from hosts after Windows Server, firmware, drivers, and base connectivity are already installed?",
-      "ifYes": "WAC Administration Mode and WAC Virtualization Mode can create a cluster from prepared Windows Server hosts. Prefer vMode when Preview is accepted and no documented vMode gap conflicts with the design; otherwise use aMode.",
+      "question": "Must operators create and validate new Hyper-V clusters after Windows Server is already installed on the hosts?",
+      "ifYes": "Prepared-host cluster creation is available through Classic Failover Cluster Manager or PowerShell, SCVMM, WAC Administration Mode, and WAC Virtualization Mode. This answer does not select a management plane by itself.",
       "ifNo": "Prepared-host cluster creation does not influence the management-plane choice.",
-      "why": "WAC can install required Windows features, apply updates and restarts, configure host networking, validate the configuration, and create the cluster. This is cluster deployment from prepared hosts—not BMC/PXE operating-system deployment.",
+      "why": "WAC Administration Mode can install required features and create a cluster from servers with Windows already installed. The current vMode Preview can create a cluster from standalone hosts during onboarding, but those Windows Server 2025 Datacenter hosts must already meet its documented role, domain, networking, and resource prerequisites. Neither WAC mode performs BMC/PXE operating-system deployment.",
       "sources": [
         {
           "label": "WAC create a failover cluster",
@@ -84,23 +84,31 @@ export const MANAGEMENT_WORKBOOK = {
         {
           "label": "WAC vMode add resources",
           "url": "https://learn.microsoft.com/en-us/windows-server/manage/windows-admin-center/add-virtualization-mode-resources"
+        },
+        {
+          "label": "VMM create a cluster from standalone hosts",
+          "url": "https://learn.microsoft.com/en-us/system-center/vmm/hyper-v-standalone?view=sc-vmm-2025"
         }
       ]
     },
     {
       "id": "pureIntegration",
       "question": "Do you require array-aware integration with Pure Storage for classification, placement, or rapid provisioning?",
-      "ifYes": "Use SCVMM's SMI-S integration path and validate the exact Purity, provider, and SCVMM versions. Keep WAC as a complementary day-two tool where supported.",
+      "ifYes": "Use SCVMM's SMI-S storage-provider path and validate the exact Purity, SMI-S, and SCVMM versions. Either WAC mode can remain a complementary day-two tool where its own requirements are met.",
       "ifNo": "The storage vendor does not force the management-plane selection.",
       "why": "Pure documents SMI-S integration with SCVMM for capacity visibility, LUN creation, and VM deployment. Do not assume every Pure workflow or WAC extension is supported in every WAC mode or release without a current compatibility check.",
       "sources": [
+        {
+          "label": "VMM storage-provider integration",
+          "url": "https://learn.microsoft.com/en-us/system-center/vmm/manage-storage?view=sc-vmm-2025"
+        },
         {
           "label": "Pure Storage Microsoft integration",
           "url": "https://www.purestorage.com/content/dam/pdf/en/white-papers/wp-microsoft-exchange-unleashed.pdf"
         },
         {
           "label": "Pure FlashArray SMI-S API",
-          "url": "https://code.purestorage.com/swagger/redoc/fa2.6-api-reference.html"
+          "url": "https://code.purestorage.com/swagger/redoc/fa2.8-api-reference.html"
         }
       ]
     },
@@ -137,8 +145,8 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "migrationConstraints",
       "question": "Does the migration require near-zero downtime, include vSAN-source VMs, or fall outside SCVMM's supported vSphere versions?",
-      "ifYes": "Do not rely on SCVMM V2V alone. Select and pilot a compatible third-party migration method.",
-      "ifNo": "SCVMM offline V2V can remain a candidate after a representative pilot.",
+      "ifYes": "When VMware migration is in scope, do not rely on SCVMM V2V alone. Select and pilot a compatible third-party migration method.",
+      "ifNo": "When VMware migration is in scope, SCVMM offline V2V can remain a candidate after a representative pilot.",
       "why": "SCVMM conversion requires the source VM to be powered off, does not support VMware VMs residing on vSAN, and is limited to documented ESXi and vCenter versions.",
       "sources": [
         {
@@ -154,8 +162,8 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "largeFabric",
       "question": "Do you need centralized inventory and governed operations across more than 50 hosts, multiple clusters, or multiple sites?",
-      "ifYes": "Use SCVMM for a GA production baseline. Evaluate WAC vMode only when its support status and current capability gaps are acceptable.",
-      "ifNo": "Classic tools with WAC Administration Mode remain viable unless another requirement drives SCVMM.",
+      "ifYes": "Prefer WAC vMode when Preview and its current capability gaps are explicitly acceptable. Otherwise use SCVMM as the GA centralized fabric and keep WAC aMode as the day-two interface; aMode alone is not the large-fabric answer.",
+      "ifNo": "Scale alone does not require SCVMM or force aMode. Select the fabric and WAC mode from the capability, supportability, and HA requirements.",
       "why": "Microsoft characterizes WAC Administration Mode as typically suited to 1-50 hosts. WAC vMode targets up to 1,000 hosts and 25,000 VMs, but it is currently Preview; scale is more than host count alone.",
       "sources": [
         {
@@ -171,7 +179,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "wacSoftwareDefinedFabric",
       "question": "Must the selected WAC mode provide production management of Storage Spaces Direct, hyperconverged storage, or software-defined networking at go-live?",
-      "ifYes": "Use WAC Administration Mode while those vMode fabric capabilities remain unavailable or incomplete.",
+      "ifYes": "Exclude WAC vMode as the required production fabric interface while those capabilities remain unavailable or incomplete. Use WAC aMode for supported day-two operations and SCVMM when centralized fabric orchestration is required.",
       "ifNo": "This documented vMode gap does not block selecting the future-facing vMode experience.",
       "why": "Microsoft currently labels vMode Preview and documents software-defined storage and networking as unavailable, with storage and network host profiles not yet available. Reverify this gate as vMode evolves.",
       "sources": [
@@ -184,7 +192,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "smallEdge",
       "question": "Is this a small dedicated stack where simpler operations matter more than tenant and fabric-management features?",
-      "ifYes": "Prefer Classic Hyper-V tools with WAC Administration Mode unless a required capability still justifies SCVMM.",
+      "ifYes": "Prefer a Classic Hyper-V foundation unless a hard requirement still justifies SCVMM. Prefer WAC vMode when its Preview, HA, and capability gates are accepted; otherwise use WAC aMode.",
       "ifNo": "Do not select SCVMM based on footprint alone; continue evaluating the actual operating requirements.",
       "why": "A small footprint is a weighting factor, not a licensing verdict. Bare-metal provisioning, quotas, array integration, or optimization can still justify SCVMM on a small cluster; model cost separately.",
       "sources": []
@@ -222,7 +230,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "managementHa",
       "question": "Must the management plane meet a defined HA, RTO/RPO, or site-recovery SLA?",
-      "ifYes": "Design availability separately for the management service, its database, shared content, certificates, backups, and site recovery; include the additional instances in sizing.",
+      "ifYes": "Exclude WAC vMode until Microsoft documents a suitable vMode HA design. For SCVMM, design the clustered management service, HA SQL database, and HA library independently. WAC aMode has a documented failover-cluster deployment; size every selected component and its recovery path.",
       "ifNo": "A documented standalone deployment may be acceptable if the recovery procedure meets the business requirement.",
       "why": "Product selection alone does not create end-to-end HA. VMM, SQL, WAC, SCOM, and Arc components have different availability patterns and failure domains.",
       "sources": [
@@ -238,10 +246,10 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "id": "monitoring",
-      "question": "Do you require centralized health, alerting, performance, reporting, or management packs across the environment?",
-      "ifYes": "Include SCOM 2025 unless an existing monitoring platform satisfies the requirement. The deployment designer will add and size the SCOM components.",
-      "ifNo": "Keep the existing monitoring platform or explicitly accept that monitoring is outside this solution.",
-      "why": "Monitoring is a separate solution decision from fabric management. SCOM introduces management servers, operational and warehouse databases, reporting dependencies, agents, and its own HA and capacity requirements.",
+      "question": "Should this solution include SCOM 2025 as its centralized monitoring platform?",
+      "ifYes": "Include SCOM 2025 and size its management servers, operational database, data warehouse, reporting dependencies, agents, and HA design in the deployment section.",
+      "ifNo": "Keep the existing monitoring platform or explicitly document monitoring as outside this solution; do not add SCOM automatically.",
+      "why": "A generic need for monitoring does not prove that SCOM is the chosen product. This question makes the product decision explicit because SCOM is a separate solution with its own servers, databases, availability, and lifecycle.",
       "sources": [
         {
           "label": "SCOM 2025 system requirements",
@@ -256,10 +264,23 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "automation",
       "question": "Must the platform integrate with service catalogs, CI/CD, or infrastructure-as-code through supported APIs?",
-      "ifYes": "Validate each required workflow against PowerShell, REST, ARM, and identity boundaries before selecting the stack.",
+      "ifYes": "Map each required workflow to a documented interface before selecting the stack. Hyper-V and SCVMM expose PowerShell; Arc-enabled SCVMM adds Azure REST, CLI, PowerShell, SDK, Terraform, Bicep, and ARM surfaces. Do not assume WAC provides a supported general-purpose automation API.",
       "ifNo": "Operator UI and standard administrative scripting may be sufficient.",
       "why": "An API checkbox is not enough: provisioning, networking, storage, approvals, secrets, rollback, and tenant isolation must all be covered by the chosen automation path.",
-      "sources": []
+      "sources": [
+        {
+          "label": "Arc-enabled SCVMM automation surfaces",
+          "url": "https://learn.microsoft.com/en-us/azure/azure-arc/system-center-virtual-machine-manager/overview"
+        },
+        {
+          "label": "Arc-enabled SCVMM REST API",
+          "url": "https://learn.microsoft.com/en-us/rest/api/azure-arc-scvmm/"
+        },
+        {
+          "label": "Hyper-V PowerShell",
+          "url": "https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/powershell"
+        }
+      ]
     },
     {
       "id": "operationsOwnership",

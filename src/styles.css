@@ -367,11 +367,23 @@ tr.infeasible td { opacity: 0.48; }
 .binary-choice .selected.no { color: #fff; background: #53697b; }
 .recommendation-column { position: sticky; top: 20px; }
 .recommendation-card { padding: 23px; color: #fff; background: linear-gradient(145deg, var(--navy-900), #10435d); border-radius: 12px; box-shadow: var(--shadow); }
+.recommendation-card.conflict { background: linear-gradient(145deg, #4b2915, #79401f); }
 .recommendation-kicker { display: flex; align-items: center; gap: 7px; color: #8cdeea; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
+.recommendation-card.conflict .recommendation-kicker { color: #ffd39a; }
 .recommendation-card h2 { margin: 14px 0 17px; font-size: 21px; line-height: 1.25; letter-spacing: -0.025em; }
 .stack-flow { display: grid; gap: 7px; margin: 14px 0 18px; }
 .stack-node { display: flex; align-items: center; justify-content: space-between; padding: 9px 11px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.11); border-radius: 7px; }
 .stack-node span { color: #91acbd; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+.candidate-groups { display: grid; gap: 10px; margin: 15px 0 18px; }
+.candidate-group { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.12); }
+.candidate-group > span { color: #91acbd; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+.candidate-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+.candidate-pills b, .candidate-exclusion > b { padding: 4px 7px; color: #d9f8f2; background: rgba(24, 178, 149, 0.16); border: 1px solid rgba(94, 223, 194, 0.24); border-radius: 99px; font-size: 9px; }
+.candidate-group.excluded { gap: 7px; }
+.candidate-exclusion { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px; align-items: start; }
+.candidate-exclusion > b { color: #ffd5c2; background: rgba(211, 93, 47, 0.18); border-color: rgba(255, 172, 135, 0.24); text-decoration: line-through; }
+.candidate-exclusion small, .remaining-gates small { color: #bdcdd7; font-size: 9px; line-height: 1.4; }
+.remaining-gates small { display: block; }
 .reason-list { margin: 0; padding-left: 18px; color: #c4d5df; font-size: 11px; }
 .reason-list li + li { margin-top: 7px; }
 .caution-panel h2 { display: flex; align-items: center; gap: 7px; color: var(--warn); }
