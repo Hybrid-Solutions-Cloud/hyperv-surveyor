@@ -252,7 +252,8 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
           <strong>Every number on this panel is a TOOL assumption</strong>
           Microsoft publishes no vCPU:pCore ratio. The WS2025 maximums table says outright:
           "Virtual processors per logical processor — No ratio imposed by Hyper-V." Microsoft also
-          imposes no VMs-per-CSV limit.
+          imposes no VMs-per-CSV limit. The recovery-unit settings below are design targets: they
+          control operational grouping and volume size, not a Hyper-V platform maximum.
         </div>
         <div className="scroll" style={{ maxHeight: 380 }}>
           <table>
@@ -261,8 +262,8 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
                 <th>Tier</th>
                 <th className="num">vCPU:pCore</th>
                 <th className="num">Right-size</th>
-                <th className="num">Max VMs/CSV</th>
-                <th className="num">Blast radius TiB</th>
+                <th className="num">Target max VMs / recovery unit</th>
+                <th className="num">Max recovery-unit size (TiB)</th>
                 <th>Storage</th>
                 {cfg.architecture === 'hybrid' && <th>Hybrid placement</th>}
               </tr>

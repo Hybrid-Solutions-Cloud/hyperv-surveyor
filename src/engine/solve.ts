@@ -102,8 +102,12 @@ function solveForwardAtGrowthFactor(
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
   growthFactor: number,
+  plannedVmCounts?: Record<TierId, number>,
 ): SizingResult {
   const demand = computeDemand(vms, tiers, growthFactor, cfg)
+  if (plannedVmCounts) {
+    for (const id of TIER_IDS) demand.byTier[id].plannedVms = plannedVmCounts[id]
+  }
   const coresPerHost = usableCoresPerHost(cfg.node, cfg)
   const ramPerHost = usableRamPerHost(cfg.node, cfg)
   const spare = cfg.spareNodes
@@ -317,7 +321,19 @@ export function forecastGrowth(
         networkMbpsP95: vm.performance.networkMbpsP95 === undefined ? undefined : vm.performance.networkMbpsP95 * demandFactor,
       } : undefined,
     }))
-    const result = solveForwardAtGrowthFactor(cfg, [...growingVms, ...fixedVms], tiers, 1)
+    const plannedVmCounts = {} as Record<TierId, number>
+    for (const id of TIER_IDS) {
+      const growingCount = workloadVms.filter((vm) => vm.include && vm.tier === id).length
+      const fixedCount = fixedVms.filter((vm) => vm.include && vm.tier === id).length
+      plannedVmCounts[id] = Math.ceil((growingCount * demandFactor) + fixedCount)
+    }
+    const result = solveForwardAtGrowthFactor(
+      cfg,
+      [...growingVms, ...fixedVms],
+      tiers,
+      1,
+      plannedVmCounts,
+    )
     const nodes = result.feasible ? result.nodes : null
     const additionalNodes = nodes === null
       ? null

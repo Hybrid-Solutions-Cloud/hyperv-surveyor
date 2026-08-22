@@ -8,7 +8,7 @@ const rules = [
   ['MS', 'Capacity reserve is one drive per server, capped at four drives across the pool.'],
   ['MS', 'Cache contributes no usable capacity and requires host memory for pool metadata.'],
   ['MS-REC', 'CSV count should distribute ownership evenly across the nodes.'],
-  ['TOOL', 'vCPU-to-core ratios, host reserves, right-sizing factors, and recovery blast-radius limits are editable assumptions.'],
+  ['TOOL', 'vCPU-to-core ratios, host reserves, right-sizing factors, maximum recovery-unit size, and target VMs per recovery unit are editable assumptions.'],
 ] as const
 
 type MethodSection = 'method' | 'limits'

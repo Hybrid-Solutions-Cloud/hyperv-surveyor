@@ -57,7 +57,7 @@ export function usableRamPerHost(node: NodeSpec, cfg: ClusterConfig): number {
   return Math.max(0, node.ramGiB - reserve)
 }
 
-const emptyTier = () => ({ pCores: 0, ramGiB: 0, vms: 0, storageGiB: 0 })
+const emptyTier = () => ({ pCores: 0, ramGiB: 0, vms: 0, plannedVms: 0, storageGiB: 0 })
 
 /** Aggregate workload demand, applying per-tier oversubscription and right-sizing. */
 export function computeDemand(
@@ -101,6 +101,9 @@ export function computeDemand(
   let requiredPCores = 0
   let requiredRamGiB = 0
   for (const id of TIER_IDS) {
+    // Growth is modelled across the current workload mix. Keep the imported count visible,
+    // but use an equivalent grown VM count for recovery-unit grouping.
+    byTier[id].plannedVms = Math.ceil(byTier[id].vms * growthFactor)
     byTier[id].pCores *= growthFactor
     byTier[id].ramGiB *= growthFactor
     byTier[id].storageGiB *= growthFactor

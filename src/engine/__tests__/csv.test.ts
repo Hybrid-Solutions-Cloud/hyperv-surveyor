@@ -15,7 +15,7 @@ describe('roundUpToMultiple', () => {
   })
 })
 
-describe('[MS] max CSV size caps', () => {
+describe('[MS] maximum recovery-unit size caps', () => {
   it('honours the 64 TiB recommendation as the outer bound', () => {
     const t = { ...general, blastRadiusTiB: 999 }
     expect(maxCsvSizeTiB(t, 'rct')).toBe(LIMITS.MAX_CSV_SIZE_TIB)
@@ -24,13 +24,13 @@ describe('[MS] max CSV size caps', () => {
     const t = { ...general, blastRadiusTiB: 999 }
     expect(maxCsvSizeTiB(t, 'vss-volsnap')).toBe(LIMITS.VSS_CSV_LIMIT_TIB)
   })
-  it('blast radius can bind tighter than either Microsoft cap', () => {
+  it('the editable recovery-unit size can bind tighter than either Microsoft cap', () => {
     const t = { ...general, blastRadiusTiB: 4 }
     expect(maxCsvSizeTiB(t, 'rct')).toBe(4)
   })
 })
 
-describe('CSV planning — the three drivers', () => {
+describe('CSV planning — the controlling rules', () => {
   it('capacity-bound when the tier is large and VMs are few', () => {
     const p = planTierCsvs({
       tier: 'general', policy: { ...general, blastRadiusTiB: 32, maxVmsPerCsv: 1000 },
@@ -39,13 +39,15 @@ describe('CSV planning — the three drivers', () => {
     expect(p.driver).toBe('capacity')
   })
 
-  it('blast-radius-bound when VMs are many and capacity is small', () => {
+  it('VM-recovery-grouping-bound when VMs are many and capacity is small', () => {
     const p = planTierCsvs({
       tier: 'database', policy: database,
-      capacityTiB: 120, vmCount: 40, nodes: 8, backup: 'rct', domain: 'san',
+      capacityTiB: 8, vmCount: 40, nodes: 8, backup: 'rct', domain: 'san',
     })!
-    // capacity: ceil(120/8)=15 ... blast: ceil(40/5)=8
-    expect(p.count).toBe(15)
+    expect(p.countByCapacity).toBe(1)
+    expect(p.countByVmLimit).toBe(8)
+    expect(p.count).toBe(8)
+    expect(p.driver).toBe('vm-count')
   })
 
   it('does not multiply the cluster-wide node-count target into every tier', () => {
@@ -56,7 +58,7 @@ describe('CSV planning — the three drivers', () => {
     expect(p.count).toBe(1)
   })
 
-  it('keeps a tier plan at the capacity or blast-radius requirement', () => {
+  it('keeps a tier plan at the larger size or VM-grouping requirement', () => {
     const p = planTierCsvs({
       tier: 'general', policy: { ...general, blastRadiusTiB: 32, maxVmsPerCsv: 25 },
       capacityTiB: 480, vmCount: 320, nodes: 12, backup: 'rct', domain: 's2d',
@@ -68,10 +70,10 @@ describe('CSV planning — the three drivers', () => {
     const demand = {
       requiredPCores: 1, requiredRamGiB: 1, totalVCpu: 1, vmCount: 2,
       byTier: {
-        general: { pCores: 1, ramGiB: 1, vms: 1, storageGiB: 100 },
-        database: { pCores: 1, ramGiB: 1, vms: 1, storageGiB: 100 },
-        vdi: { pCores: 0, ramGiB: 0, vms: 0, storageGiB: 0 },
-        infrastructure: { pCores: 0, ramGiB: 0, vms: 0, storageGiB: 0 },
+        general: { pCores: 1, ramGiB: 1, vms: 1, plannedVms: 1, storageGiB: 100 },
+        database: { pCores: 1, ramGiB: 1, vms: 1, plannedVms: 1, storageGiB: 100 },
+        vdi: { pCores: 0, ramGiB: 0, vms: 0, plannedVms: 0, storageGiB: 0 },
+        infrastructure: { pCores: 0, ramGiB: 0, vms: 0, plannedVms: 0, storageGiB: 0 },
       },
     }
     const plans = planCsvs(makeConfig({ architecture: 's2d' }), demand, DEFAULT_TIERS, 8)
@@ -103,15 +105,18 @@ describe('CSV planning — the three drivers', () => {
 })
 
 describe('worked example from the spec — 400 VMs, 8-node SAN', () => {
-  it('database tier is blast-radius-bound, not capacity-bound', () => {
+  it('shows both calculations and selects the larger one', () => {
     const p = planTierCsvs({
       tier: 'database', policy: database,
       capacityTiB: 120, vmCount: 40, nodes: 8, backup: 'rct', domain: 'san',
     })!
     const byCapacity = Math.ceil(120 / Math.min(64, database.blastRadiusTiB))
     const byBlast = Math.ceil(40 / database.maxVmsPerCsv)
+    expect(p.countByCapacity).toBe(byCapacity)
+    expect(p.countByVmLimit).toBe(byBlast)
+    expect(p.driver).toBe('capacity')
     expect(byBlast).toBe(8)
-    expect(p.count).toBeGreaterThanOrEqual(byCapacity)
+    expect(p.count).toBe(byCapacity)
     expect(p.vmsPerCsv).toBeLessThanOrEqual(database.maxVmsPerCsv)
   })
 })

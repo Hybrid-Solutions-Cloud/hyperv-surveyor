@@ -3,6 +3,7 @@ import { ArrowRight } from 'lucide-react'
 import { ConfigPanel } from '../components/ConfigPanel'
 import { JourneyBar } from '../components/JourneyBar'
 import { PageHeader } from '../components/Shared'
+import { WorkflowNav } from '../components/WorkflowNav'
 import { useSurveyorStore } from '../state/store'
 
 export default function ConfigurationPage() {
@@ -18,6 +19,10 @@ export default function ConfigurationPage() {
       />
       <JourneyBar detail="These are proposed-design assumptions and remain separate from the existing-hardware profile." />
       <ConfigPanel cfg={cfg} setCfg={setCfg} tiers={tiers} setTiers={setTiers} />
+      <WorkflowNav
+        previous={{ to: '/workloads', label: 'Workload inventory' }}
+        next={[{ to: '/results', label: 'Calculate designs', description: 'Compare SAN, S2D, and hybrid options using these assumptions.' }]}
+      />
     </>
   )
 }

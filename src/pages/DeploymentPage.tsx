@@ -10,6 +10,7 @@ import { useSurveyorStore } from '../state/store'
 import { JourneyBar } from '../components/JourneyBar'
 import { deploymentComponentsToVms, deploymentInputsFromStack, normalizeManagementDeploymentInputs, planManagementDeployment } from '../engine/managementDeployment'
 import { solveForward } from '../engine/solve'
+import { WorkflowNav } from '../components/WorkflowNav'
 
 export default function DeploymentPage() {
   const store = useSurveyorStore()
@@ -136,6 +137,10 @@ export default function DeploymentPage() {
           {dr.findings.map((finding) => <div className={`note ${finding.severity === 'error' ? 'err' : finding.severity === 'warning' ? 'warn' : ''}`} key={finding.message}>{finding.message}</div>)}
         </section>
       </div>}
+      <WorkflowNav
+        previous={{ to: '/management-plane', label: 'Management Plane Advisor' }}
+        next={[{ to: '/report', label: 'Solution report', description: 'Review, select, and export the complete solution record.' }]}
+      />
     </>
   )
 }

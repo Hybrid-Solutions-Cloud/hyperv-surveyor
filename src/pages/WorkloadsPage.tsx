@@ -3,6 +3,7 @@ import { ArrowRight } from 'lucide-react'
 import { WorkloadPanel } from '../components/WorkloadPanel'
 import { JourneyBar } from '../components/JourneyBar'
 import { PageHeader } from '../components/Shared'
+import { WorkflowNav } from '../components/WorkflowNav'
 import { useSurveyorStore } from '../state/store'
 
 export default function WorkloadsPage() {
@@ -28,6 +29,10 @@ export default function WorkloadsPage() {
       />
       <JourneyBar detail={engagementMode === 'fit-gap' ? 'Workloads and existing hardware remain independent inputs until the fit calculation.' : undefined} />
       <WorkloadPanel vms={vms} setVms={setVms} tiers={tiers} onDataSource={addDataSource} />
+      <WorkflowNav
+        previous={{ to: '/', label: 'Choose planning path' }}
+        next={[{ to: next.to, label: next.label.replace('Continue to ', ''), description }]}
+      />
     </>
   )
 }

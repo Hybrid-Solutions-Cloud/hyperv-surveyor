@@ -18,6 +18,7 @@ import {
 } from '../report/reportModel'
 import { useSurveyorStore } from '../state/store'
 import { JourneyBar } from '../components/JourneyBar'
+import { WorkflowNav } from '../components/WorkflowNav'
 
 export default function ReportPage() {
   const {
@@ -190,6 +191,7 @@ export default function ReportPage() {
           ))}
         </div>
       </div>
+      <WorkflowNav previous={{ to: '/deployment', label: 'Implementation plan' }} />
     </>
   )
 }

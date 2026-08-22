@@ -95,9 +95,9 @@ export interface TierPolicy {
   storageTier: StorageTier
   /** Storage domain used by this tier when the selected architecture is hybrid. */
   hybridPlacement: HybridPlacement
-  /** [TOOL] — Microsoft imposes no VMs-per-CSV limit. */
+  /** [TOOL] target for recovery grouping — Microsoft imposes no VMs-per-CSV limit. */
   maxVmsPerCsv: number
-  /** [TOOL] — recovery blast radius, in TiB, for one CSV/LUN. */
+  /** [TOOL] maximum logical size of one recovery unit, in TiB. */
   blastRadiusTiB: number
 }
 
@@ -168,7 +168,15 @@ export interface ComputeDemand {
   requiredRamGiB: number
   totalVCpu: number
   vmCount: number
-  byTier: Record<TierId, { pCores: number; ramGiB: number; vms: number; storageGiB: number }>
+  byTier: Record<TierId, {
+    pCores: number
+    ramGiB: number
+    /** VMs present in the source inventory. */
+    vms: number
+    /** Equivalent VM count after the selected workload-growth factor. */
+    plannedVms: number
+    storageGiB: number
+  }>
 }
 
 export interface CapacityResult {
@@ -187,8 +195,13 @@ export interface CsvPlan {
   count: number
   sizeTiB: number
   totalTiB: number
+  plannedVms: number
   vmsPerCsv: number
-  driver: 'capacity' | 'blast-radius' | 'node-count'
+  maxSizeTiB: number
+  countByCapacity: number
+  countByVmLimit: number
+  maxVmsPerCsv: number
+  driver: 'capacity' | 'vm-count' | 'both' | 'node-count'
   roundedUpFrom: number
   filesystem: 'ReFS' | 'NTFS'
 }

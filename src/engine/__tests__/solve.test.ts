@@ -24,6 +24,9 @@ describe('compute demand', () => {
     const b = computeDemand([vm({ vCpu: 8, ramGiB: 32, storageGiB: 100 })], tiers, 1.25)
     expect(b.requiredPCores / a.requiredPCores).toBeCloseTo(1.25, 5)
     expect(b.requiredRamGiB / a.requiredRamGiB).toBeCloseTo(1.25, 5)
+    expect(a.byTier.general.vms).toBe(1)
+    expect(b.byTier.general.vms).toBe(1)
+    expect(b.byTier.general.plannedVms).toBe(2)
   })
   it('right-sizing factor below 1 reduces demand', () => {
     const t = makeTiers({ general: { rightSizingFactor: 0.6 } })
@@ -273,6 +276,8 @@ describe('capacity growth planning', () => {
     const forecast = forecastGrowth(cfg, [vm({ vCpu: 4 })], tiers, [vm({ vCpu: 4, tier: 'infrastructure' })])
     expect(forecast.points[0].result.demand.totalVCpu).toBe(8)
     expect(forecast.points[1].result.demand.totalVCpu).toBe(12)
+    expect(forecast.points[1].result.demand.byTier.general.plannedVms).toBe(2)
+    expect(forecast.points[1].result.demand.byTier.infrastructure.plannedVms).toBe(1)
   })
 
   it('grows measured storage performance demand with the workload forecast', () => {

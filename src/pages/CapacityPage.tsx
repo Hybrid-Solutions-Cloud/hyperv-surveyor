@@ -7,6 +7,7 @@ import { ManagementCheckpoint } from '../components/ManagementCheckpoint'
 import { ArrowRight, Download } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { exportExistingCapacity } from '../io/exportXlsx'
+import { WorkflowNav } from '../components/WorkflowNav'
 
 export default function CapacityPage() {
   const {
@@ -49,6 +50,12 @@ export default function CapacityPage() {
         vms={vms}
       />
       <ManagementCheckpoint context={fitGap ? 'fit-gap' : 'existing-capacity'} />
+      <WorkflowNav
+        previous={{ to: fitGap ? '/workloads' : '/', label: fitGap ? 'Workload inventory' : 'Choose planning path' }}
+        next={fitGap && included === 0
+          ? [{ to: '/workloads', label: 'Add workload evidence', description: 'A workload inventory is required to calculate fit and gap.' }]
+          : [{ to: '/management-plane', label: 'Management Plane Advisor', description: 'Use this hardware context to design the management solution.' }]}
+      />
     </>
   )
 }

@@ -13,7 +13,7 @@
  *
  * ALGORITHM (per tier, per storage domain)
  *   max_csv_size = MIN(64 TiB [MS-REC], 10 TiB if VSS-volsnap [MS], blast_radius [TOOL])
- *   per_tier_count = MAX(ceil(capacity/max_size), ceil(vms/max_vms_per_csv))
+ *   per_tier_count = MAX(ceil(capacity/max_size), ceil(planned_vms/max_vms_per_csv))
  *   total S2D volumes = at least node_count and rounded to a node-count multiple [MS-REC]
  *   error if total across all tiers > 64                 [MS-REC]
  */
@@ -58,7 +58,9 @@ export function planTierCsvs(a: PlanArgs): CsvPlan | null {
   const rawCount = Math.max(byCapacity, byBlast)
   const count = rawCount
 
-  let driver: CsvPlan['driver'] = byCapacity >= byBlast ? 'capacity' : 'blast-radius'
+  const driver: CsvPlan['driver'] = byCapacity === byBlast
+    ? 'both'
+    : byCapacity > byBlast ? 'capacity' : 'vm-count'
 
   return {
     tier: a.tier,
@@ -67,7 +69,12 @@ export function planTierCsvs(a: PlanArgs): CsvPlan | null {
     count,
     sizeTiB: Math.ceil((a.capacityTiB / count) * 10) / 10,
     totalTiB: a.capacityTiB,
+    plannedVms: a.vmCount,
     vmsPerCsv: Math.ceil(a.vmCount / count),
+    maxSizeTiB: maxSize,
+    countByCapacity: byCapacity,
+    countByVmLimit: byBlast,
+    maxVmsPerCsv: a.policy.maxVmsPerCsv,
     driver,
     roundedUpFrom: rawCount,
     // [MS] In a hybrid cluster SAN CSVs must be NTFS - ReFS is not supported on SAN-backed
@@ -96,13 +103,13 @@ export function planCsvs(
 
     if (cfg.architecture === 'san') {
       const p = planTierCsvs({
-        tier: id, policy, capacityTiB, vmCount: t.vms,
+        tier: id, policy, capacityTiB, vmCount: t.plannedVms,
         nodes, backup: cfg.backupMethod, domain: 'san',
       })
       if (p) plans.push(p)
     } else if (cfg.architecture === 's2d') {
       const p = planTierCsvs({
-        tier: id, policy, capacityTiB, vmCount: t.vms,
+        tier: id, policy, capacityTiB, vmCount: t.plannedVms,
         nodes, backup: cfg.backupMethod, domain: 's2d',
       })
       if (p) plans.push(p)
@@ -114,7 +121,7 @@ export function planCsvs(
         const p = planTierCsvs({
           tier: id, policy,
           capacityTiB: capacityTiB * s2dShare,
-          vmCount: Math.max(1, Math.round(t.vms * s2dShare)),
+          vmCount: Math.max(1, Math.round(t.plannedVms * s2dShare)),
           nodes, backup: cfg.backupMethod, domain: 's2d',
         })
         if (p) plans.push(p)
@@ -123,7 +130,7 @@ export function planCsvs(
         const p = planTierCsvs({
           tier: id, policy,
           capacityTiB: capacityTiB * sanShare,
-          vmCount: Math.max(1, Math.round(t.vms * sanShare)),
+          vmCount: Math.max(1, Math.round(t.plannedVms * sanShare)),
           nodes, backup: cfg.backupMethod, domain: 'san',
         })
         if (p) plans.push(p)
@@ -141,10 +148,9 @@ export function planCsvs(
     const extra = target - current
     if (extra > 0) {
       const targetPlan = [...s2dPlans].sort((a, b) => b.totalTiB - a.totalTiB)[0]
-      const estimatedVms = targetPlan.vmsPerCsv * targetPlan.count
       targetPlan.count += extra
       targetPlan.sizeTiB = Math.ceil((targetPlan.totalTiB / targetPlan.count) * 10) / 10
-      targetPlan.vmsPerCsv = Math.ceil(estimatedVms / targetPlan.count)
+      targetPlan.vmsPerCsv = Math.ceil(targetPlan.plannedVms / targetPlan.count)
       targetPlan.driver = 'node-count'
     }
   }

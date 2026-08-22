@@ -156,7 +156,7 @@ export function validateDesign(
   const totalCsvs = csvPlans.reduce((n, p) => n + p.count, 0)
   if (totalCsvs > LIMITS.MAX_CSVS_PER_CLUSTER) {
     f.push(warn('CSV_COUNT',
-      `${totalCsvs} CSVs exceeds the recommended maximum of ${LIMITS.MAX_CSVS_PER_CLUSTER} per cluster. Raise CSV size, raise the blast radius, or split the cluster.`,
+      `${totalCsvs} logical storage objects exceeds the recommended maximum of ${LIMITS.MAX_CSVS_PER_CLUSTER} per cluster. Increase the recovery-unit size or target VMs per recovery unit, or split the cluster.`,
       'MS-REC', SRC.planVolumes))
   }
   for (const p of csvPlans) {

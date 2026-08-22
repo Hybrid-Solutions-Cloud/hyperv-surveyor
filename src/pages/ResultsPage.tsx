@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import { useSurveyorStore } from '../state/store'
 import { JourneyBar } from '../components/JourneyBar'
 import { ManagementCheckpoint } from '../components/ManagementCheckpoint'
+import { WorkflowNav } from '../components/WorkflowNav'
 
 export default function ResultsPage() {
   const { cfg, vms, tiers, chosenKey, setChosenKey, sharedInventoryOmitted } = useSurveyorStore()
@@ -38,6 +39,12 @@ export default function ResultsPage() {
       />
       )}
       {vms.some((vm) => vm.include) && !(sharedInventoryOmitted !== null && vms.length === 0) && <ManagementCheckpoint context="new-platform" />}
+      <WorkflowNav
+        previous={{ to: '/configuration', label: 'Hardware and assumptions' }}
+        next={vms.some((vm) => vm.include) && !(sharedInventoryOmitted !== null && vms.length === 0)
+          ? [{ to: '/management-plane', label: 'Management Plane Advisor', description: 'Turn the selected platform into a management recommendation and deployment BOM.' }]
+          : [{ to: '/workloads', label: 'Workload inventory', description: 'Add workload evidence before continuing the design.' }]}
+      />
     </>
   )
 }

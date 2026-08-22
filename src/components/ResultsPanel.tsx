@@ -15,9 +15,10 @@ interface Props {
 }
 
 const driverLabel: Record<string, string> = {
-  capacity: 'capacity',
-  'blast-radius': 'blast radius',
-  'node-count': 'node count',
+  capacity: 'volume-size requirement',
+  'vm-count': 'VM recovery grouping',
+  both: 'both requirements',
+  'node-count': 'S2D node ownership',
 }
 
 export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onExport }: Props) {
@@ -227,50 +228,69 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
       </div>
 
       <div className="panel">
-        <h2>CSV / LUN layout</h2>
+        <h2>{chosen.cfg.architecture === 'san'
+          ? 'SAN CSV / LUN layout'
+          : chosen.cfg.architecture === 's2d'
+            ? 'S2D volume / CSV layout'
+            : 'Hybrid storage volume layout'}</h2>
         <p className="small muted" style={{ marginTop: -6 }}>
-          Each tier is driven by capacity and recovery blast radius. Across S2D, the total is then raised to at least one volume per node and a
-          whole node-count multiple so coordinator ownership distributes evenly. On SAN the LUN <em>is</em> the
-          restore unit, because an array snapshot covers the whole volume; that is why blast radius often binds
-          before capacity does.
+          This is a logical workload-volume plan, not a physical disk or RAID layout. For SAN, one presented LUN becomes one CSV.
+          For S2D, the object is an S2D volume/CSV and no SAN LUN exists. The recommendation takes the larger of the
+          volume-size calculation and the VM recovery-grouping calculation. S2D totals are then raised to at least one
+          volume per node and a whole node-count multiple for balanced ownership.
         </p>
-        <table>
-          <thead>
-            <tr>
-              <th>Tier</th>
-              <th>Domain</th>
-              <th>FS</th>
-              <th className="num">CSVs</th>
-              <th className="num">Size each</th>
-              <th className="num">Total</th>
-              <th className="num">VMs / CSV</th>
-              <th>Driver</th>
-            </tr>
-          </thead>
-          <tbody>
-            {r.csvPlans.map((p, i) => (
-              <tr key={i}>
-                <td><strong>{tiers[p.tier].label}</strong></td>
-                <td><span className={`pill ${p.domain === 's2d' ? 'ok' : 'info'}`}>{p.domain.toUpperCase()}</span></td>
-                <td className="mono">{p.filesystem}</td>
-                <td className="num"><strong>{p.count}</strong>
-                  {p.count !== p.roundedUpFrom && (
-                    <div className="small muted nowrap">up from {p.roundedUpFrom}</div>
-                  )}
-                </td>
-                <td className="num mono">{fmt1(p.sizeTiB)} TiB</td>
-                <td className="num mono">{fmt1(p.totalTiB)} TiB</td>
-                <td className="num">{p.vmsPerCsv}</td>
-                <td><span className={`pill ${p.driver === 'blast-radius' ? 'warn' : 'info'}`}>{driverLabel[p.driver]}</span></td>
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Tier</th>
+                <th>Storage object</th>
+                <th>Planned demand</th>
+                <th>Count calculation</th>
+                <th>Recommended layout</th>
+                <th>Controlling rule</th>
               </tr>
-            ))}
-            <tr>
-              <td colSpan={3}><strong>Total</strong></td>
-              <td className="num"><strong>{r.totalCsvs}</strong></td>
-              <td colSpan={4} className="small muted">Recommended maximum is 64 per cluster</td>
-            </tr>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {r.csvPlans.map((p, i) => (
+                <tr key={i}>
+                  <td><strong>{tiers[p.tier].label}</strong></td>
+                  <td>
+                    <span className={`pill ${p.domain === 's2d' ? 'ok' : 'info'}`}>
+                      {p.domain === 'san' ? 'SAN CSV / LUN' : 'S2D volume / CSV'}
+                    </span>
+                    <div className="small muted mono" style={{ marginTop: 4 }}>{p.filesystem}</div>
+                  </td>
+                  <td className="nowrap">
+                    <strong className="mono">{fmt1(p.totalTiB)} TiB</strong>
+                    <div className="small muted">{p.plannedVms.toLocaleString()} planned VMs</div>
+                  </td>
+                  <td className="nowrap">
+                    <div>By size: <span className="mono">ceil({fmt1(p.totalTiB)} / {fmt1(p.maxSizeTiB)}) = {p.countByCapacity}</span></div>
+                    <div className="small muted">By VM grouping: <span className="mono">ceil({p.plannedVms} / {p.maxVmsPerCsv}) = {p.countByVmLimit}</span></div>
+                  </td>
+                  <td className="nowrap">
+                    <strong>{p.count} × <span className="mono">{fmt1(p.sizeTiB)} TiB</span></strong>
+                    <div className="small muted">Up to {p.vmsPerCsv} planned VMs each</div>
+                    {p.count !== p.roundedUpFrom && (
+                      <div className="small muted">S2D-balanced from {p.roundedUpFrom} to {p.count}</div>
+                    )}
+                  </td>
+                  <td><span className={`pill ${p.driver === 'vm-count' || p.driver === 'both' ? 'warn' : 'info'}`}>{driverLabel[p.driver]}</span></td>
+                </tr>
+              ))}
+              <tr>
+                <td colSpan={4}><strong>Total logical storage objects</strong></td>
+                <td><strong>{r.totalCsvs}</strong></td>
+                <td className="small muted">A result above 64 generates a design warning.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="small muted" style={{ marginTop: 8 }}>
+          Recovery-unit size and target VMs per recovery unit are editable TOOL assumptions. Workload growth increases
+          both logical capacity and the equivalent planned VM count; imported inventory counts remain unchanged elsewhere.
+        </p>
       </div>
 
       <div className="panel">

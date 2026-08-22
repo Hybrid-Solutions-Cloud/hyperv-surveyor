@@ -39,7 +39,7 @@ that can be opened directly for offline and disconnected use.
 - Forward comparison across SAN, S2D, MAP, and hybrid designs
 - Independent existing-hardware workspace with editable compute, SAN/S2D storage, reserves, workload policies, headroom, and reverse sizing
 - Correctness-gated SAN, S2D, and hybrid feasibility with explicit per-tier hybrid placement and domain-specific storage headroom
-- CSV/LUN layout and validation findings, with S2D ownership targets applied across the storage domain instead of multiplied into every tier
+- Transparent logical-volume planning that shows count-by-size and count-by-VM-grouping math, maps SAN LUNs 1:1 to CSVs, and applies S2D ownership targets once across the storage domain
 - Multi-cluster workload placement, source-cluster grouping, database isolation, and migration-readiness findings
 - Host network intent, RDMA/DCB validation, switch-port planning, and backup/disaster-recovery bandwidth estimates
 - Management Plane Advisor with 16 fact-checked qualifying questions, source links, a workload-aware deployment BOM, SCOM monitoring topology and retention sizing, Arc connectivity and guest-service scope, HA and capacity impact, the complete 85-row capability matrix, VMware translation, field guidance, sourced caveats, 36-SKU reference, and editable cost model

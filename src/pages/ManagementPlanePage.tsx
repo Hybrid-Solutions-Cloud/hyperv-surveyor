@@ -46,12 +46,13 @@ import {
 import { MANAGEMENT_WORKBOOK } from '../data/managementWorkbook.generated'
 import type { TierId, TierPolicy, Vm } from '../engine/types'
 import { JourneyBar } from '../components/JourneyBar'
+import { WorkflowNav } from '../components/WorkflowNav'
 
 type AdvisorTab = 'recommend' | 'deploy' | 'compare' | 'cost' | 'vmware' | 'field' | 'sources'
 export default function ManagementPlanePage() {
   const [tab, setTab] = useState<AdvisorTab>('recommend')
   const [answers, setAnswers] = useState<AdvisorAnswers>({})
-  const { cfg, vms, tiers, chosenKey, managementDeploymentInputs, engagementMode, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes } = useSurveyorStore()
+  const { cfg, vms, tiers, chosenKey, managementDeploymentInputs, engagementMode, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, setManagementDecision } = useSurveyorStore()
   const options = useMemo(() => compareArchitectures(cfg, vms, tiers), [cfg, vms, tiers])
   const chosen = options.find((option) => option.key === chosenKey) ?? options[0]
   const includedVms = vms.filter((vm) => vm.include).length
@@ -120,6 +121,26 @@ export default function ManagementPlanePage() {
           initialManagementInputs={managementDeploymentInputs}
         />
       )}
+      <WorkflowNav
+        previous={{
+          to: managementOnly ? '/' : usesExistingHardware ? '/capacity' : '/results',
+          label: managementOnly ? 'Choose planning path' : usesExistingHardware ? 'Existing-hardware outcome' : 'New-platform results',
+        }}
+        next={[
+          {
+            to: '/deployment',
+            label: 'Implementation plan',
+            description: 'Carry the management design into placement, networking, migration, backup, and disaster recovery.',
+            onClick: () => setManagementDecision('design'),
+          },
+          {
+            to: '/report',
+            label: 'Solution report',
+            description: 'Build the selectable report and export it to HTML, Word, PDF, Markdown, or JSON.',
+            onClick: () => setManagementDecision('design'),
+          },
+        ]}
+      />
     </>
   )
 }

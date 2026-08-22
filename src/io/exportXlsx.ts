@@ -112,22 +112,26 @@ export function exportDesign(
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(growthRows), 'Growth Plan')
 
   // ---- CSV plan ------------------------------------------------------------
+  const storagePlanTitle = cfg.architecture === 'san'
+    ? 'SAN CSV / LUN LAYOUT PLAN'
+    : cfg.architecture === 's2d' ? 'S2D VOLUME / CSV LAYOUT PLAN' : 'HYBRID STORAGE VOLUME LAYOUT PLAN'
   const csv: any[][] = [
-    ['CSV / LUN LAYOUT PLAN'],
-    ['CSV count is driven by the LARGEST of: capacity, recovery blast radius, and node count —'],
-    ['then rounded UP to a whole multiple of node count so coordinator ownership distributes evenly.'],
+    [storagePlanTitle],
+    ['This is a logical workload-volume plan, not a physical disk or RAID layout. A SAN LUN maps 1:1 to a CSV; an S2D volume/CSV has no SAN LUN.'],
+    ['Each row takes the larger of its volume-size count and VM recovery-grouping count. S2D totals are then balanced across the node count.'],
     [],
-    ['Tier', 'Storage tier', 'Domain', 'Filesystem', 'CSV count', 'Size each (TiB)',
-      'Total (TiB)', 'VMs per CSV', 'Driver', 'Count before rounding'],
+    ['Tier', 'Storage tier', 'Storage object', 'Filesystem', 'Planned storage (TiB)', 'Planned VMs',
+      'Max recovery-unit size (TiB)', 'Count by size', 'Target max VMs / recovery unit',
+      'Count by VM grouping', 'Base count', 'Final count', 'Size each (TiB)', 'VMs each', 'Controlling rule'],
   ]
   for (const p of chosen.result.csvPlans) {
-    csv.push([p.tier, p.storageTier, p.domain.toUpperCase(), p.filesystem, p.count,
-      r1(p.sizeTiB), r1(p.totalTiB), p.vmsPerCsv, p.driver, p.roundedUpFrom])
+    csv.push([p.tier, p.storageTier, p.domain === 'san' ? 'SAN CSV / LUN' : 'S2D volume / CSV', p.filesystem,
+      r1(p.totalTiB), p.plannedVms, r1(p.maxSizeTiB), p.countByCapacity, p.maxVmsPerCsv,
+      p.countByVmLimit, p.roundedUpFrom, p.count, r1(p.sizeTiB), p.vmsPerCsv, p.driver])
   }
-  csv.push([], ['Total CSVs', chosen.result.totalCsvs], ['Recommended maximum', 64],
-    [], ['NOTE: Microsoft imposes NO limit on VMs per CSV. The VMs-per-CSV figures come from the'],
-    ['blast-radius settings, which are a TOOL assumption, not vendor guidance. On SAN the LUN is'],
-    ['the restore unit — an array snapshot covers the whole volume — so blast radius is the real driver.'])
+  csv.push([], ['Total logical storage objects', chosen.result.totalCsvs], ['Count above 64', 'Generates a design warning'],
+    [], ['NOTE: Microsoft imposes NO limit on VMs per CSV. Recovery-unit size and target VMs per recovery unit are editable TOOL assumptions.'],
+    ['Workload growth increases logical capacity and equivalent planned VM count. The imported inventory count remains unchanged.'])
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(csv), 'CSV Plan')
 
   // ---- Findings ------------------------------------------------------------
@@ -149,7 +153,7 @@ export function exportDesign(
     ['the WS2025 maximums table states "Virtual processors per logical processor: No ratio imposed by Hyper-V."'],
     [],
     ['Tier', 'vCPU:pCore', 'Right-sizing factor', 'Dynamic Memory policy', 'Storage tier', 'Hybrid placement',
-      'Max VMs per CSV', 'Blast radius (TiB)', 'VMs', 'pCores', 'RAM (GiB)', 'Storage (TiB)'],
+      'Target max VMs / recovery unit', 'Max recovery-unit size (TiB)', 'VMs', 'pCores', 'RAM (GiB)', 'Storage (TiB)'],
   ]
   for (const id of TIER_IDS) {
     const t = tiers[id]
