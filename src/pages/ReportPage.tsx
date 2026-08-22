@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CheckSquare, FileCode2, FileDown, FileText, Globe2, Printer, Square, SlidersHorizontal } from 'lucide-react'
+import { CheckSquare, FileCode2, FileDown, FileText, Globe2, Lightbulb, Printer, Square, SlidersHorizontal } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/Shared'
 import {
@@ -45,6 +45,8 @@ export default function ReportPage() {
   const [generatedAt] = useState(() => new Date().toISOString())
   const [exporting, setExporting] = useState<'word' | null>(null)
   const [exportError, setExportError] = useState('')
+  const [includeDecisionReasoning, setIncludeDecisionReasoning] = useState(false)
+  const outputOptions = { includeDecisionReasoning }
   const report = useMemo(() => buildSolutionReport({
     engagementMode,
     managementDecision,
@@ -65,7 +67,7 @@ export default function ReportPage() {
     existingCapacityNodes,
     generatedAt,
   }), [engagementMode, managementDecision, cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, placementInputs, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, tiers, vms])
-  const visibleSections = selectedReportSections(report, selection)
+  const visibleSections = selectedReportSections(report, selection, outputOptions)
   const selectedCount = Object.values(selection).filter(Boolean).length
 
   const toggleSection = (id: ReportSectionId) => setSelection((current) => ({ ...current, [id]: !current[id] }))
@@ -73,7 +75,7 @@ export default function ReportPage() {
     setExportError('')
     setExporting('word')
     try {
-      await downloadWordReport(report, selection)
+      await downloadWordReport(report, selection, outputOptions)
     } catch (error) {
       setExportError(error instanceof Error ? error.message : 'Word export failed. Please try again.')
     } finally {
@@ -113,6 +115,17 @@ export default function ReportPage() {
             ))}
           </div>
 
+          <div className="report-detail-options">
+            <strong>Detail level</strong>
+            <label>
+              <input type="checkbox" checked={includeDecisionReasoning} onChange={(event) => setIncludeDecisionReasoning(event.target.checked)} />
+              <span>
+                <b><Lightbulb size={14} /> Decision reasoning and explanations</b>
+                <small>Add why a result follows from the inputs, whether it was selected or calculated, and the main tradeoff or validation item.</small>
+              </span>
+            </label>
+          </div>
+
           <div className="report-management-status">
             <strong>Management selection</strong>
             <span>{managementDecision === 'design' ? (managementDeploymentInputs ? 'Using your saved deployment choices' : 'Using the advisor baseline') : managementDecision === 'existing' ? 'Existing management solution recorded' : managementDecision === 'deferred' ? 'Decision intentionally deferred' : 'Management plane not assessed'}</span>
@@ -124,11 +137,11 @@ export default function ReportPage() {
             <span>{selectedCount} of {REPORT_SECTION_DEFINITIONS.length} included</span>
           </div>
           <div className="report-export-grid">
-            <button type="button" disabled={selectedCount === 0} onClick={() => downloadMarkdownReport(report, selection)}><FileText size={16} /><span>Markdown<small>.md</small></span></button>
-            <button type="button" disabled={selectedCount === 0} onClick={() => downloadJsonReport(report, selection)}><FileCode2 size={16} /><span>Structured data<small>.json</small></span></button>
+            <button type="button" disabled={selectedCount === 0} onClick={() => downloadMarkdownReport(report, selection, outputOptions)}><FileText size={16} /><span>Markdown<small>.md</small></span></button>
+            <button type="button" disabled={selectedCount === 0} onClick={() => downloadJsonReport(report, selection, outputOptions)}><FileCode2 size={16} /><span>Structured data<small>.json</small></span></button>
             <button type="button" disabled={selectedCount === 0 || exporting === 'word'} onClick={exportWord}><FileDown size={16} /><span>{exporting === 'word' ? 'Building…' : 'Microsoft Word'}<small>.docx</small></span></button>
-            <button type="button" disabled={selectedCount === 0} onClick={() => downloadPdfReport(report, selection)}><Printer size={16} /><span>PDF document<small>.pdf</small></span></button>
-            <button type="button" disabled={selectedCount === 0} onClick={() => downloadHtmlReport(report, selection)}><Globe2 size={16} /><span>Interactive HTML<small>.html · offline</small></span></button>
+            <button type="button" disabled={selectedCount === 0} onClick={() => downloadPdfReport(report, selection, outputOptions)}><Printer size={16} /><span>PDF document<small>.pdf</small></span></button>
+            <button type="button" disabled={selectedCount === 0} onClick={() => downloadHtmlReport(report, selection, outputOptions)}><Globe2 size={16} /><span>Interactive HTML<small>.html · offline</small></span></button>
           </div>
 
           <details className="rate-card-details">
@@ -170,6 +183,19 @@ export default function ReportPage() {
                       <span>{metric.label}</span>
                       <strong>{metric.value}</strong>
                       {metric.detail && <small>{metric.detail}</small>}
+                    </article>
+                  ))}
+                </div>
+              )}
+              {section.reasoning.length > 0 && (
+                <div className="report-reasoning">
+                  <h3><Lightbulb size={16} /> Decision reasoning and explanations</h3>
+                  {section.reasoning.map((item) => (
+                    <article key={`${section.id}-${item.decision}`}>
+                      <span>{item.basis}</span>
+                      <strong>{item.decision}</strong>
+                      <p>{item.explanation}</p>
+                      {item.tradeoff && <small><b>Tradeoff / validation:</b> {item.tradeoff}</small>}
                     </article>
                   ))}
                 </div>

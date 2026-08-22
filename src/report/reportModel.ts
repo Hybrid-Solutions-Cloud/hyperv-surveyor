@@ -40,6 +40,14 @@ export const REPORT_SECTION_DEFINITIONS = [
 export type ReportSectionId = typeof REPORT_SECTION_DEFINITIONS[number]['id']
 export type ReportSelection = Record<ReportSectionId, boolean>
 
+export interface ReportOutputOptions {
+  includeDecisionReasoning: boolean
+}
+
+export const DEFAULT_REPORT_OUTPUT_OPTIONS: ReportOutputOptions = {
+  includeDecisionReasoning: false,
+}
+
 export interface ReportMetric {
   label: string
   value: string
@@ -52,17 +60,25 @@ export interface ReportTable {
   rows: string[][]
 }
 
+export interface ReportReasoningItem {
+  decision: string
+  basis: 'User-selected' | 'Calculated' | 'Derived from inputs' | 'Validation requirement'
+  explanation: string
+  tradeoff?: string
+}
+
 export interface ReportSection {
   id: ReportSectionId
   title: string
   paragraphs: string[]
   metrics: ReportMetric[]
+  reasoning: ReportReasoningItem[]
   bullets: string[]
   tables: ReportTable[]
 }
 
 export interface SolutionReport {
-  schemaVersion: 2
+  schemaVersion: 3
   title: string
   customerName: string
   generatedAt: string
@@ -277,6 +293,13 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       : managementDecision === 'deferred'
         ? 'Decision deferred'
         : 'Not assessed'
+  const placementInputs = input.placementInputs ?? DEFAULT_PLACEMENT_INPUTS
+  const networkInputs = input.networkDesignInputs ?? DEFAULT_NETWORK_INPUTS
+  const recoveryInputs = input.drDesignInputs ?? DEFAULT_DR_INPUTS
+  const architectureAlternatives = options
+    .filter((option) => option.key !== chosen.key)
+    .map((option) => `${option.label}: ${option.result.feasible ? `${option.result.nodes} nodes` : 'not feasible'}`)
+    .join('; ')
 
   const sections: ReportSection[] = [
     {
@@ -294,6 +317,31 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Management decision', value: managementDecisionLabel },
         { label: 'Management VMs', value: managementDecision === 'design' ? number(managementPlan.totalInstances) : 'Not calculated', detail: managementConsumesPlatform ? 'Included in workload-cluster sizing' : 'Separate from workload-cluster sizing' },
       ],
+      reasoning: [
+        {
+          decision: `Use the ${ENGAGEMENT_LABELS[engagementMode]} planning path`,
+          basis: 'User-selected',
+          explanation: engagementMode === 'new-platform'
+            ? 'The project is solving forward from workload demand to a proposed hardware platform.'
+            : engagementMode === 'existing-capacity'
+              ? 'The project is documenting what the entered estate can host without asserting a new hardware recommendation.'
+              : engagementMode === 'fit-gap'
+                ? 'The project compares the supplied workload inventory with the entered existing estate so gaps and same-spec expansion can be calculated.'
+                : 'The project scope is limited to the management plane, so workload-platform hardware is intentionally not inferred.',
+          tradeoff: 'Changing the planning path changes which conclusions are valid; a management-only or existing-capacity report must not be read as a greenfield hardware recommendation.',
+        },
+        {
+          decision: managementDecisionLabel,
+          basis: 'User-selected',
+          explanation: managementDecision === 'design'
+            ? `The saved management topology produces ${managementPlan.totalInstances} component instances and is included as an explicit solution workstream.`
+            : managementDecision === 'existing'
+              ? 'The report records that a management solution already exists but does not claim that its topology or capacity was validated.'
+              : managementDecision === 'deferred'
+                ? 'The management decision remains open by design and should be closed before implementation approval.'
+                : 'No management assessment was completed, which is different from selecting no management solution.',
+        },
+      ],
       bullets: [
         ...(metadata.decisionNotes ? [`Decision / sign-off: ${metadata.decisionNotes}`] : []),
         ...(finalSizing.feasible ? [] : finalSizing.findings.filter((finding) => finding.severity === 'error').map((finding) => finding.message)),
@@ -309,6 +357,36 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         ...(engagementMode === 'management-only' ? [] : [storageProtectionMetric(platformCfg)]),
         { label: 'Failure reserve', value: engagementMode === 'management-only' ? 'Not assessed' : `N+${platformCfg.spareNodes}` },
         { label: 'Binding constraint', value: engagementMode === 'management-only' ? 'Not assessed' : finalSizing.binding },
+      ],
+      reasoning: engagementMode === 'management-only' ? [] : [
+        {
+          decision: `Use ${selectedPlatformLabel}`,
+          basis: 'User-selected',
+          explanation: `This is the architecture selected in Sizing Results. Surveyor validates its feasibility and calculates its node count, but it does not silently choose the architecture on the user's behalf. The selected result is ${finalSizing.feasible ? `feasible at ${finalSizing.nodes} nodes` : 'not currently feasible'} and is ${finalSizing.binding}-bound.`,
+          tradeoff: architectureAlternatives ? `Other modeled outcomes were ${architectureAlternatives}. Node count is only one decision factor; storage ownership, operations, supportability, recovery, and cost still require review.` : undefined,
+        },
+        {
+          decision: platformCfg.architecture === 'san'
+            ? 'Use external SAN protection semantics'
+            : platformCfg.architecture === 'hybrid'
+              ? 'Apply protection separately to S2D and SAN data'
+              : `Use ${RESILIENCY[platformCfg.resiliency].label}`,
+          basis: 'Derived from inputs',
+          explanation: platformCfg.architecture === 'san'
+            ? 'The selected architecture stores workload data on the external array. Surveyor models effective SAN capacity but does not apply an S2D mirror or parity setting to SAN data.'
+            : platformCfg.architecture === 'hybrid'
+              ? `The ${RESILIENCY[platformCfg.resiliency].label} setting applies only to S2D-hosted data; SAN protection remains array-managed.`
+              : `The selected S2D resiliency controls usable-capacity efficiency and local fault tolerance for S2D-hosted data.`,
+          tradeoff: platformCfg.architecture === 'san' || platformCfg.architecture === 'hybrid'
+            ? 'Array RAID, snapshots, replication, and failure-domain behavior must be confirmed in the storage design because they are not inferred here.'
+            : 'More protective S2D layouts consume more raw capacity; the final design must also satisfy the platform minimum-node rules.',
+        },
+        {
+          decision: `Reserve N+${platformCfg.spareNodes} host capacity`,
+          basis: 'User-selected',
+          explanation: `${platformCfg.spareNodes} node${platformCfg.spareNodes === 1 ? '' : 's'} are withheld from normal workload capacity so the design can absorb the selected host-failure reserve. The solver sizes workload demand first and includes this reserve in the total node count.`,
+          tradeoff: 'This is a capacity reserve, not a complete availability design; storage, network, witness, backup, and management-plane failure domains are evaluated separately.',
+        },
       ],
       bullets: [],
       tables: engagementMode === 'new-platform' ? [{
@@ -344,6 +422,22 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Licensable cores', value: number(finalSizing.totalLicensableCores) },
         { label: 'Growth strategy', value: growthForecast.plan.strategy === 'build-now' ? 'Build forecast capacity now' : 'Phase nodes with growth' },
         { label: 'Annual growth', value: `${number(growthForecast.plan.annualGrowthPct * 100, 1)}% for ${growthForecast.plan.horizonYears} years` },
+      ],
+      reasoning: engagementMode === 'management-only' ? [] : [
+        {
+          decision: finalSizing.feasible ? `Build ${finalSizing.nodes} total nodes` : 'Revise the node design before approval',
+          basis: 'Calculated',
+          explanation: `CPU alone requires ${Number.isFinite(finalSizing.nodesIfCpuOnly) ? number(finalSizing.nodesIfCpuOnly) : 'more than the supported ceiling'} nodes, memory alone requires ${Number.isFinite(finalSizing.nodesIfMemoryOnly) ? number(finalSizing.nodesIfMemoryOnly) : 'more than the supported ceiling'}, and storage alone requires ${Number.isFinite(finalSizing.nodesIfStorageOnly) ? number(finalSizing.nodesIfStorageOnly) : 'more than the supported ceiling'}. The controlling result is ${finalSizing.binding}; the total includes ${platformCfg.spareNodes} reserve node${platformCfg.spareNodes === 1 ? '' : 's'}.`,
+          tradeoff: `Changing a nonbinding resource may not reduce node count. To reduce a ${finalSizing.binding}-bound result, change the demand or usable capacity that actually controls that constraint and rerun the model.`,
+        },
+        {
+          decision: growthForecast.plan.strategy === 'build-now'
+            ? `Build for the Year ${growthForecast.plan.horizonYears} forecast now`
+            : 'Phase node additions as demand grows',
+          basis: 'User-selected',
+          explanation: `The forecast compounds workload demand by ${number(growthForecast.plan.annualGrowthPct * 100, 1)}% annually for ${growthForecast.plan.horizonYears} years. ${growthForecast.plan.strategy === 'build-now' ? 'The terminal forecast point controls the initial build.' : 'Today controls the initial build and later timeline rows identify when additional nodes are required.'}`,
+          tradeoff: 'The growth rate is a planning assumption, not measured demand. Reforecast at least annually and before large workload onboarding events.',
+        },
       ],
       bullets: [],
       tables: engagementMode === 'management-only' ? [] : [
@@ -412,6 +506,18 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Same-spec nodes required', value: fitGap.requiredNodesAtSameSpec === null ? 'Not resolved' : number(fitGap.requiredNodesAtSameSpec) },
         { label: 'Additional nodes', value: fitGap.additionalNodes === null ? 'Cannot resolve with nodes alone' : number(fitGap.additionalNodes) },
       ],
+      reasoning: engagementMode === 'management-only' ? [] : [
+        {
+          decision: fitGap.fits === null ? 'Do not assert workload fit' : fitGap.fits ? 'The included workloads fit the entered estate' : 'The included workloads do not fit the entered estate',
+          basis: fitGap.fits === null ? 'Validation requirement' : 'Calculated',
+          explanation: fitGap.fits === null
+            ? 'A hardware envelope was entered, but there is not enough included workload evidence to make an inventory-specific fit decision.'
+            : `The fit test compares workload demand with ${existingNodes} entered nodes after host reserves and failure capacity. The current deficits are ${number(fitGap.deficits.physicalCores, 1)} physical cores, ${number(fitGap.deficits.ramGiB, 1)} GiB memory, ${number(fitGap.deficits.s2dTiB, 1)} TiB S2D, and ${number(fitGap.deficits.sanTiB, 1)} TiB SAN.`,
+          tradeoff: fitGap.additionalNodes === null
+            ? 'A storage or hard platform constraint cannot be solved by adding identical nodes alone; revise that constraint directly.'
+            : `At the entered node specification, the model requires ${fitGap.requiredNodesAtSameSpec ?? 'an unresolved number of'} total nodes, or ${fitGap.additionalNodes} additional nodes beyond the current estate.`,
+        },
+      ],
       bullets: engagementMode === 'management-only' ? [] : fitGap.recommendations,
       tables: engagementMode === 'management-only' ? [] : [{
         title: 'Current resource gaps',
@@ -442,6 +548,34 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Placement status', value: placementPlan.feasible ? 'Feasible' : 'Needs revision' },
         { label: 'Embedded management VMs', value: number(placementPlan.clusters.reduce((sum, cluster) => sum + cluster.managementVmCount, 0)) },
         { label: 'Dedicated management nodes', value: dedicatedManagementSizing ? dedicatedManagementSizing.feasible ? number(dedicatedManagementSizing.nodes) : 'Review required' : 'Not selected' },
+      ],
+      reasoning: engagementMode === 'management-only' ? [
+        {
+          decision: 'Do not infer platform cluster placement',
+          basis: 'Validation requirement',
+          explanation: 'The engagement supplies a management topology but no workload-platform hardware profile, so Surveyor reports management component instances without inventing target cluster counts or host capacity.',
+        },
+      ] : [
+        {
+          decision: placementPlan.feasible
+            ? `Distribute workloads across ${placementPlan.clusters.length} target cluster${placementPlan.clusters.length === 1 ? '' : 's'}`
+            : 'Revise the multi-cluster placement policy',
+          basis: 'Calculated',
+          explanation: `The planner adds clusters until every cluster fits within ${placementInputs.maxNodesPerCluster} nodes and ${placementInputs.targetVmsPerCluster} VMs, up to ${placementInputs.maxClusters} clusters. Database-tier separation is ${placementInputs.separateDatabaseTier ? 'enabled' : 'disabled'} and source-cluster preservation is ${placementInputs.preserveSourceClusters ? 'enabled' : 'disabled'}.`,
+          tradeoff: 'This is deterministic capacity placement, not application-affinity discovery. Validate application dependencies, maintenance domains, licensing, network locality, and operational ownership before assigning individual VMs.',
+        },
+        ...(managementDecision === 'design' ? [{
+          decision: `Place management components on ${managementInputs.managementPlacement.replace(/-/g, ' ')}`,
+          basis: 'User-selected' as const,
+          explanation: managementInputs.managementPlacement === 'workload-cluster'
+            ? 'Management VMs share the target workload platform and are added to its capacity calculation.'
+            : managementInputs.managementPlacement === 'dedicated-management-cluster'
+              ? 'Management VMs are isolated on a separately sized management cluster.'
+              : 'Management VMs remain on an external virtualization fabric and are excluded from target-platform node sizing.',
+          tradeoff: managementInputs.managementPlacement === 'workload-cluster'
+            ? 'Shared placement is simpler but creates a bootstrap and failure-domain dependency that must be covered by recovery procedures.'
+            : 'Separate placement improves isolation but requires independent capacity, lifecycle, backup, and recovery ownership.',
+        }] : []),
       ],
       bullets: engagementMode === 'management-only' ? [] : [
         ...placementPlan.warnings,
@@ -475,6 +609,12 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Consumed storage', value: tib(workloadTotals.storageGiB / 1024) },
         { label: 'Provisioned storage', value: tib(workloadTotals.provisionedGiB / 1024) },
       ],
+      reasoning: [{
+        decision: `Size from ${includedVms.length.toLocaleString()} included workload records`,
+        basis: 'Derived from inputs',
+        explanation: 'Only VMs whose Include flag is enabled contribute to the demand totals, tier summary, placement plan, and detailed inventory. Excluded records remain in the project but do not consume calculated capacity.',
+        tradeoff: 'The Include flag and tier classification are design inputs. Review excluded, auto-classified, template, placeholder, and powered-off records before approval.',
+      }],
       bullets: [],
       tables: [{ title: 'Workloads by tier', headers: ['Tier', 'VMs', 'vCPU', 'Memory', 'Consumed storage'], rows: tierRows }],
     },
@@ -498,6 +638,14 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Storage performance coverage', value: `${number(finalSizing.performanceAssessment.storagePerformanceCoveragePct, 1)}%` },
         { label: '7+ day observation coverage', value: `${number(finalSizing.performanceAssessment.observationCoveragePct, 1)}%` },
       ],
+      reasoning: engagementMode === 'management-only' ? [] : [{
+        decision: finalSizing.performanceAssessment.basis === 'measured-p95' ? 'Use measured P95 sizing with allocation fallback' : 'Use allocation-based sizing',
+        basis: 'User-selected',
+        explanation: finalSizing.performanceAssessment.basis === 'measured-p95'
+          ? `Measured CPU and memory values use the entered ${number(platformCfg.performanceComfortFactor ?? 1.25, 2)}x comfort factor. Missing measurements fall back to tier policy so a VM is never treated as zero demand.`
+          : 'Allocated vCPU and memory are converted through the tier policies because no measured sizing mode was selected. This is intentionally conservative and can overstate demand.',
+        tradeoff: `The calculated confidence is ${finalSizing.performanceAssessment.confidence.replace('-', ' ')} (${finalSizing.performanceAssessment.score}/100). Improve coverage and observation duration before using the result as a procurement ceiling.`,
+      }],
       bullets: engagementMode === 'management-only' ? [] : finalSizing.performanceAssessment.notes,
       tables: input.dataSources?.length ? [{
         title: 'Imported data sources',
@@ -517,6 +665,12 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Blocked', value: number(readiness.blocked) },
         { label: 'Assessed', value: number(readiness.assessed) },
       ],
+      reasoning: engagementMode === 'management-only' ? [] : [{
+        decision: `${readiness.ready} ready, ${readiness.review} requiring review, and ${readiness.blocked} blocked`,
+        basis: 'Derived from inputs',
+        explanation: 'The readiness status is derived from the source metadata present for each included VM and the known target-platform checks. It is an exception screen, not proof that an application is migration-ready.',
+        tradeoff: 'Application-owner approval, dependency discovery, backup verification, a representative migration pilot, and post-migration testing remain required regardless of the calculated status.',
+      }],
       bullets: [],
       tables: engagementMode === 'management-only' ? [] : [{
         title: 'Readiness exceptions',
@@ -546,6 +700,28 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'SAN available capacity', value: tib(finalSizing.sanCapacityTiB) },
         { label: 'Planned logical storage objects', value: number(finalSizing.totalCsvs) },
         { label: 'Performance validation', value: finalSizing.storagePerformance.validated ? 'Validated' : 'Incomplete' },
+      ],
+      reasoning: engagementMode === 'management-only' ? [] : [
+        {
+          decision: `Provide ${tib(finalSizing.requiredStorageTiB)} of modeled workload storage`,
+          basis: 'Calculated',
+          explanation: `Surveyor starts with consumed storage for included workloads, applies the selected immediate headroom and growth strategy, then applies the protection or SAN-efficiency inputs for the active storage domain. The result is ${tib(finalSizing.requiredS2dTiB)} on S2D and ${tib(finalSizing.requiredSanTiB)} on SAN.`,
+          tradeoff: 'Snapshot reserve, backup repositories, replica history, array metadata, and vendor-specific free-space requirements must be confirmed separately unless explicitly represented in the entered usable capacity.',
+        },
+        {
+          decision: `Create ${finalSizing.totalCsvs} logical storage object${finalSizing.totalCsvs === 1 ? '' : 's'}`,
+          basis: 'Calculated',
+          explanation: `Each tier is evaluated against capacity per object, VM recovery grouping, the selected SAN layout mode, and the S2D one-volume-per-node floor where applicable. The table identifies the controlling rule for every tier instead of assigning one CSV per VM or per arbitrary workload group.`,
+          tradeoff: 'This is a starting layout. Override it when backup concurrency, restore blast radius, array limits, application isolation, ownership, or operational standards require a different grouping.',
+        },
+        {
+          decision: finalSizing.storagePerformance.validated ? 'Accept the entered storage performance envelope' : 'Treat storage performance as unvalidated',
+          basis: finalSizing.storagePerformance.validated ? 'Calculated' : 'Validation requirement',
+          explanation: finalSizing.storagePerformance.validated
+            ? 'Measured workload coverage meets the tool threshold and sustainable IOPS and throughput were entered for every active storage domain.'
+            : `Matched workload coverage is ${number(finalSizing.storagePerformance.measuredVmCoveragePct, 1)}%, or one or more active storage domains lacks an entered sustainable IOPS/throughput capability. Capacity feasibility alone therefore does not prove performance feasibility.`,
+          tradeoff: 'Validate peak concurrency, latency, cache behavior, rebuild or resync load, and the exact target configuration with vendor tooling or a proof of concept.',
+        },
       ],
       bullets: [],
       tables: engagementMode === 'management-only' ? [] : [
@@ -592,6 +768,12 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Host switch ports', value: number(network.totalHostPorts) },
         { label: 'RDMA', value: (input.networkDesignInputs ?? DEFAULT_NETWORK_INPUTS).rdmaProtocol.toUpperCase() },
       ],
+      reasoning: engagementMode === 'management-only' ? [] : [{
+        decision: `Use ${networkInputs.adaptersPerNode} × ${networkInputs.adapterSpeedGbps} Gbps host adapters with ${networkInputs.rdmaProtocol.toUpperCase()}`,
+        basis: 'User-selected',
+        explanation: `The entered host profile provides ${number(network.aggregateGbpsPerNode)} Gbps aggregate link rate per node and ${number(network.totalHostPorts)} host-facing switch ports across the design. Management, compute, live migration, and storage intents are separated in the generated plan.`,
+        tradeoff: 'Aggregate link rate is not guaranteed usable throughput. Validate switch redundancy, oversubscription, QoS, VLANs, RDMA configuration, SAN paths, cabling, and failure behavior against the final physical topology.',
+      }],
       bullets: engagementMode === 'management-only' ? [] : network.findings.map((finding) => `${finding.severity.toUpperCase()}: ${finding.message}`),
       tables: engagementMode === 'management-only' ? [] : [{ title: 'Network intents', headers: ['Intent'], rows: network.intentSummary.map((intent) => [intent]) }],
     },
@@ -608,6 +790,20 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Secondary storage', value: tib(recovery.secondaryStorageTiB) },
         { label: 'Estimated burst WAN', value: `${number(recovery.estimatedBurstMbps, 1)} Mbps`, detail: recovery.bandwidthPasses ? 'Within entered WAN capacity' : 'Above entered WAN capacity' },
         { label: 'RPO / RTO', value: `${number((input.drDesignInputs ?? DEFAULT_DR_INPUTS).rpoMinutes, 1)} min / ${number((input.drDesignInputs ?? DEFAULT_DR_INPUTS).rtoHours, 1)} hr` },
+      ],
+      reasoning: engagementMode === 'management-only' ? [] : [
+        {
+          decision: `Use ${recoveryInputs.strategy} for ${number(recoveryInputs.protectedWorkloadPct, 1)}% of workloads`,
+          basis: 'User-selected',
+          explanation: `The selected protection scope covers ${recovery.protectedVms} VMs and ${tib(recovery.protectedStorageTiB)} of modeled storage with a target RPO/RTO of ${number(recoveryInputs.rpoMinutes, 1)} minutes / ${number(recoveryInputs.rtoHours, 1)} hours.`,
+          tradeoff: 'Cluster HA handles local component failures; it does not replace backup, immutable recovery, application consistency, or site-loss protection.',
+        },
+        {
+          decision: recovery.bandwidthPasses ? 'The entered WAN passes the planning estimate' : 'The entered WAN does not pass the planning estimate',
+          basis: 'Calculated',
+          explanation: `The bandwidth estimate applies a ${number(recoveryInputs.dailyChangeRatePct, 1)}% daily change rate and ${number(recoveryInputs.burstFactor, 1)}x burst factor to protected consumed storage, producing ${number(recovery.estimatedBurstMbps, 1)} Mbps against ${number(recoveryInputs.availableWanMbps, 1)} Mbps entered capacity.`,
+          tradeoff: 'This estimate is not measured changed-block telemetry. Measure real write-change patterns and test failover and failback before committing bandwidth or RPO claims.',
+        },
       ],
       bullets: engagementMode === 'management-only' ? [] : recovery.findings.map((finding) => `${finding.severity.toUpperCase()}: ${finding.message}`),
       tables: [],
@@ -635,6 +831,64 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Arc guest scope', value: managementInputs.includeArc ? `${number(managementInputs.arcGuestScopePct, 1)}% of managed VMs` : 'Not applicable' },
         { label: 'SCOM collection', value: managementInputs.monitoring === 'scom' ? `${number(managementInputs.scomDailyDataGiB, 1)} GiB/day · ${managementInputs.scomWarehouseRetentionDays} warehouse days` : 'Not selected' },
       ] : [{ label: 'Management decision', value: managementDecisionLabel }],
+      reasoning: managementDecision === 'design' ? [
+        {
+          decision: managementInputs.foundation === 'scvmm' ? 'Use SCVMM 2025 as the fabric foundation' : 'Use Classic Hyper-V tools as the fabric foundation',
+          basis: 'User-selected',
+          explanation: managementInputs.foundation === 'scvmm'
+            ? 'The saved deployment design selects a centralized VMM fabric and therefore includes VMM management, SQL, library, and supporting components according to the selected availability model.'
+            : 'The saved deployment design uses Hyper-V Manager, Failover Cluster Manager, PowerShell, and RSAT without adding a central VMM fabric service.',
+          tradeoff: managementInputs.foundation === 'scvmm'
+            ? 'SCVMM adds centralized fabric capabilities but also adds licensing, SQL, library, certificate, backup, patching, and upgrade responsibilities.'
+            : 'Classic tools reduce platform overhead but do not supply VMM private clouds, tenant quotas, central templates, array-aware fabric orchestration, or Dynamic Optimization.',
+        },
+        ...(managementInputs.wac !== 'none' ? [{
+          decision: `Add ${managementInputs.wac === 'wac-virtual' ? 'WAC Virtualization Mode' : 'WAC Administration Mode'}`,
+          basis: 'User-selected' as const,
+          explanation: managementInputs.wac === 'wac-virtual'
+            ? 'The selected WAC experience is the stateful, virtualization-focused mode intended for larger fabric operations.'
+            : 'The selected WAC experience provides browser-based day-two administration for individual servers and clusters and complements the fabric foundation.',
+          tradeoff: managementInputs.wac === 'wac-virtual'
+            ? 'vMode is currently Preview and must be revalidated for GA status, HA, certificates, software-defined fabric coverage, and partner integrations before production approval.'
+            : 'aMode is connection-oriented rather than a tenant fabric manager and is typically positioned for smaller-scale direct administration.',
+        }] : []),
+        ...(managementInputs.includeArc ? [{
+          decision: 'Add Azure Arc-enabled SCVMM',
+          basis: 'User-selected' as const,
+          explanation: `Arc projects the SCVMM-managed fabric into Azure and adds the resource bridge plus the selected guest-service scope. The selected connection method is ${managementInputs.arcConnectivity} in ${managementInputs.arcRegion}.`,
+          tradeoff: 'Arc does not replace SCVMM. It requires the underlying VMM fabric, an on-premises resource bridge appliance, Azure identity and subscription ownership, DNS, and ongoing outbound connectivity.',
+        }] : []),
+        ...(managementInputs.monitoring === 'scom' ? [{
+          decision: `Add SCOM 2025 with ${managementInputs.scomHighAvailability ? 'high availability' : 'a standalone management server'}`,
+          basis: 'User-selected' as const,
+          explanation: managementInputs.scomHighAvailability
+            ? `The design adds redundant SCOM management capacity and places its databases ${managementInputs.scomSqlPlacement === 'shared-vmm' && managementInputs.foundation === 'scvmm' ? 'on the shared VMM SQL availability infrastructure' : 'on dedicated SQL infrastructure'}.`
+            : 'The design consolidates SCOM roles for a smaller footprint and relies on documented recovery rather than redundant management servers.',
+          tradeoff: managementInputs.scomSqlPlacement === 'shared-vmm' && managementInputs.foundation === 'scvmm'
+            ? 'Sharing SQL infrastructure reduces VM count but couples VMM and SCOM database maintenance, performance, and failure domains; validate instance isolation, capacity, backup, and supportability.'
+            : 'Dedicated SQL improves isolation but adds VM, licensing, patching, backup, and HA overhead.',
+        }] : []),
+        {
+          decision: `Place management VMs on ${managementInputs.managementPlacement.replace(/-/g, ' ')}`,
+          basis: 'User-selected',
+          explanation: managementInputs.managementPlacement === 'workload-cluster'
+            ? 'The management stack runs with the workloads and is included in workload-platform sizing when that option is enabled.'
+            : managementInputs.managementPlacement === 'dedicated-management-cluster'
+              ? 'The management stack is isolated on its own cluster and sized as a separate capacity domain.'
+              : 'The management stack remains on another virtualization platform and does not consume the proposed workload-cluster capacity.',
+          tradeoff: managementInputs.managementPlacement === 'workload-cluster'
+            ? 'Document cold-start order and recovery access so a workload-cluster outage does not prevent operators from restoring its management services.'
+            : 'Separate placement must have its own availability, capacity, backup, monitoring, and recovery design.',
+        },
+      ] : [{
+        decision: managementDecisionLabel,
+        basis: managementDecision === 'unassessed' ? 'Validation requirement' : 'User-selected',
+        explanation: managementDecision === 'existing'
+          ? 'An existing management solution was recorded, but its topology and fitness were not assessed by this report.'
+          : managementDecision === 'deferred'
+            ? 'The management decision was explicitly deferred and remains an implementation dependency.'
+            : 'No management-plane assessment was completed, so the report cannot explain or size a management topology.',
+      }],
       bullets: managementDecision === 'design' ? [...managementPlan.dependencies.map((item) => `Dependency: ${item}`), ...managementPlan.cautions.map((item) => `Caution: ${item}`)] : [],
       tables: managementDecision === 'design' ? [
         {
@@ -680,6 +934,24 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Sizing evidence', value: finalSizing.performanceAssessment.basis === 'measured-p95' ? `Measured P95 × ${number(platformCfg.performanceComfortFactor ?? 1.25, 2)}` : 'Allocation' },
         { label: 'CPU benchmark factor', value: finalSizing.performanceAssessment.basis === 'measured-p95' ? `${number(platformCfg.cpuPerformanceFactor ?? 1, 2)}x target/source per core` : 'Not applied' },
       ],
+      reasoning: engagementMode === 'management-only' ? [{
+        decision: 'Apply management-component sizing bases only',
+        basis: 'Derived from inputs',
+        explanation: 'No workload-platform design was requested. Each management component therefore carries its own Microsoft requirement, Microsoft recommendation, or visible Surveyor planning basis in the management bill of materials.',
+      }] : [
+        {
+          decision: `Reserve ${number(platformCfg.hostCoreReservePct * 100, 1)}% host CPU and the greater of ${gib(platformCfg.hostRamReserveGiB)} or ${number(platformCfg.hostRamReservePct * 100, 1)}% host memory`,
+          basis: 'User-selected',
+          explanation: 'Host reserves remove capacity before workload demand is placed. For memory, Surveyor uses the larger fixed or percentage value; it does not add them together.',
+          tradeoff: 'These are transparent planning policies rather than universal Microsoft mandates. Validate them against host services, security tooling, backup activity, driver overhead, and operational standards.',
+        },
+        {
+          decision: 'Apply per-tier right-sizing and vCPU:pCore policies',
+          basis: 'User-selected',
+          explanation: 'Each included VM inherits the policy of its assigned workload tier. Those policies translate allocated or fallback demand into required physical CPU, memory behavior, storage placement, and recovery grouping.',
+          tradeoff: 'Auto-classification is only a starting point. Incorrect tier assignment or aggressive right-sizing changes the node result, so application-owner review and measured evidence should override defaults.',
+        },
+      ],
       bullets: [],
       tables: engagementMode === 'management-only' ? [] : [{
         title: 'Tier policies',
@@ -701,6 +973,12 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Warnings', value: number(finalSizing.findings.filter((item) => item.severity === 'warning').length) },
         { label: 'Information', value: number(finalSizing.findings.filter((item) => item.severity === 'info').length) },
       ],
+      reasoning: engagementMode === 'management-only' ? [] : [{
+        decision: finalSizing.findings.some((item) => item.severity === 'error') ? 'Do not approve the design until errors are resolved' : 'No hard validation error blocks the calculated result',
+        basis: 'Validation requirement',
+        explanation: 'Errors represent hard conflicts with the entered configuration or platform rules. Warnings identify risk or missing evidence, while informational findings document guidance and follow-up items.',
+        tradeoff: 'A feasible calculation is not the same as an implementation-ready design. Owners must disposition material warnings and retain evidence for any accepted exception.',
+      }],
       bullets: [],
       tables: engagementMode === 'management-only' ? [] : [{
         headers: ['Severity', 'Basis', 'Finding'],
@@ -712,6 +990,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       title: 'VM inventory',
       paragraphs: [`${includedVms.length.toLocaleString()} included workload records. The detailed inventory is intentionally placed near the end of the report, immediately before sources and methodology.`],
       metrics: [],
+      reasoning: [],
       bullets: [],
       tables: [{
         headers: ['VM', 'Tier', 'vCPU', 'Memory', 'Consumed', 'Provisioned', 'CPU P95', 'Memory P95', 'Source cluster', 'Power state', 'Guest OS'],
@@ -740,6 +1019,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         `Microsoft hard limits and recommendations are identified separately from Surveyor planning profiles. This report was produced by calculation engine ${ENGINE_VERSION}. Commercial terms and product support statements should be reverified before quotation or implementation.`,
       ],
       metrics: [],
+      reasoning: [],
       bullets: [],
       tables: [
         ...(input.dataSources?.length ? [{ title: 'Project data sources', headers: ['Type', 'File', 'Imported', 'Rows'], rows: input.dataSources.map((source) => [source.kind, source.fileName, source.importedAt ? new Date(source.importedAt).toLocaleString() : '', number(source.rows)]) }] : []),
@@ -749,7 +1029,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   ]
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     title: `${input.customerName || 'Hyper-V'} solution report`,
     customerName: input.customerName || 'Untitled design',
     generatedAt: input.generatedAt ?? new Date().toISOString(),
@@ -759,8 +1039,14 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   }
 }
 
-export function selectedReportSections(report: SolutionReport, selection: ReportSelection) {
-  return report.sections.filter((section) => selection[section.id])
+export function selectedReportSections(
+  report: SolutionReport,
+  selection: ReportSelection,
+  options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS,
+) {
+  return report.sections
+    .filter((section) => selection[section.id])
+    .map((section) => options.includeDecisionReasoning ? section : { ...section, reasoning: [] })
 }
 
 export function managementPlaneName(id: PlaneId) {

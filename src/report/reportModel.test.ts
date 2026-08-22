@@ -75,6 +75,33 @@ describe('solution report', () => {
     expect(json.sections.map((section: { id: string }) => section.id)).toEqual(['executive', 'management'])
   })
 
+  it('optionally includes structured decision reasoning in every export model', () => {
+    const report = sampleReport()
+    const selection = Object.fromEntries(Object.keys(defaultReportSelection()).map((id) => [id, id === 'architecture' || id === 'management'])) as ReturnType<typeof defaultReportSelection>
+    const conciseMarkdown = reportToMarkdown(report, selection)
+    const detailedMarkdown = reportToMarkdown(report, selection, { includeDecisionReasoning: true })
+    const conciseJson = JSON.parse(reportToJson(report, selection))
+    const detailedJson = JSON.parse(reportToJson(report, selection, { includeDecisionReasoning: true }))
+    const detailedHtml = reportToHtml(report, selection, { includeDecisionReasoning: true })
+
+    expect(report.schemaVersion).toBe(3)
+    expect(report.sections.find((section) => section.id === 'architecture')?.reasoning.length).toBeGreaterThan(0)
+    expect(report.sections.find((section) => section.id === 'management')?.reasoning.map((item) => item.decision)).toEqual(expect.arrayContaining([
+      'Use SCVMM 2025 as the fabric foundation',
+      'Add Azure Arc-enabled SCVMM',
+      'Add SCOM 2025 with high availability',
+    ]))
+    expect(conciseMarkdown).not.toContain('Decision reasoning and explanations')
+    expect(detailedMarkdown).toContain('### Decision reasoning and explanations')
+    expect(detailedMarkdown).toContain('**Basis:** User-selected')
+    expect(conciseJson.outputOptions.includeDecisionReasoning).toBe(false)
+    expect(conciseJson.sections.every((section: { reasoning: unknown[] }) => section.reasoning.length === 0)).toBe(true)
+    expect(detailedJson.outputOptions.includeDecisionReasoning).toBe(true)
+    expect(detailedJson.sections.every((section: { reasoning: unknown[] }) => section.reasoning.length > 0)).toBe(true)
+    expect(detailedHtml).toContain('<div class="reasoning">')
+    expect(detailedHtml).toContain('Tradeoff / validation:')
+  })
+
   it('places VM inventory immediately above sources and methodology', () => {
     const report = sampleReport()
     const sectionIds = report.sections.map((section) => section.id)
@@ -164,6 +191,8 @@ describe('solution report', () => {
     const selection = Object.fromEntries(Object.keys(defaultReportSelection()).map((id) => [id, id === 'executive'])) as ReturnType<typeof defaultReportSelection>
     const word = await reportToWordBlob(report, selection)
     const pdf = reportToPdfBlob(report, selection)
+    const detailedWord = await reportToWordBlob(report, selection, { includeDecisionReasoning: true })
+    const detailedPdf = reportToPdfBlob(report, selection, { includeDecisionReasoning: true })
     const wordSignature = new Uint8Array(await word.slice(0, 2).arrayBuffer())
     const pdfSignature = new TextDecoder().decode(await pdf.slice(0, 4).arrayBuffer())
 
@@ -171,5 +200,7 @@ describe('solution report', () => {
     expect(pdfSignature).toBe('%PDF')
     expect(word.size).toBeGreaterThan(5_000)
     expect(pdf.size).toBeGreaterThan(1_000)
+    expect(detailedWord.size).toBeGreaterThan(word.size)
+    expect(detailedPdf.size).toBeGreaterThan(pdf.size)
   })
 })

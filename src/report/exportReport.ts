@@ -24,8 +24,8 @@ import {
 } from 'docx'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import type { ReportMetric, ReportSection, ReportSelection, ReportTable, SolutionReport } from './reportModel'
-import { selectedReportSections } from './reportModel'
+import type { ReportMetric, ReportOutputOptions, ReportSection, ReportSelection, ReportTable, SolutionReport } from './reportModel'
+import { DEFAULT_REPORT_OUTPUT_OPTIONS, selectedReportSections } from './reportModel'
 
 const NAVY = '0A2034'
 const NAVY_RGB = [10, 32, 52] as const
@@ -86,8 +86,12 @@ function markdownTable(table: ReportTable) {
   return [table.title ? `### ${table.title}` : '', header, rule, ...rows].filter(Boolean).join('\n')
 }
 
-export function reportToMarkdown(report: SolutionReport, selection: ReportSelection) {
-  const sections = selectedReportSections(report, selection)
+export function reportToMarkdown(
+  report: SolutionReport,
+  selection: ReportSelection,
+  options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS,
+) {
+  const sections = selectedReportSections(report, selection, options)
   const output = [
     `# ${report.title}`,
     '',
@@ -104,6 +108,13 @@ export function reportToMarkdown(report: SolutionReport, selection: ReportSelect
     section.paragraphs.forEach((paragraph) => output.push(paragraph, ''))
     section.metrics.forEach((metric) => output.push(`- **${metric.label}:** ${metric.value}${metric.detail ? ` — ${metric.detail}` : ''}`))
     if (section.metrics.length) output.push('')
+    if (section.reasoning.length) {
+      output.push('### Decision reasoning and explanations', '')
+      section.reasoning.forEach((item) => {
+        output.push(`#### ${item.decision}`, '', `**Basis:** ${item.basis}`, '', item.explanation, '')
+        if (item.tradeoff) output.push(`**Tradeoff / validation:** ${item.tradeoff}`, '')
+      })
+    }
     section.bullets.forEach((bullet) => output.push(`- ${bullet}`))
     if (section.bullets.length) output.push('')
     section.tables.forEach((table) => output.push(markdownTable(table), ''))
@@ -111,11 +122,16 @@ export function reportToMarkdown(report: SolutionReport, selection: ReportSelect
   return output.join('\n').trimEnd() + '\n'
 }
 
-export function reportToJson(report: SolutionReport, selection: ReportSelection) {
+export function reportToJson(
+  report: SolutionReport,
+  selection: ReportSelection,
+  options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS,
+) {
   return JSON.stringify({
     ...report,
+    outputOptions: options,
     includedSectionIds: Object.entries(selection).filter(([, included]) => included).map(([id]) => id),
-    sections: selectedReportSections(report, selection),
+    sections: selectedReportSections(report, selection, options),
   }, null, 2)
 }
 
@@ -276,6 +292,31 @@ function sectionToWord(section: ReportSection, tableWidth: number) {
   if (section.metrics.length) {
     children.push(wordMetricsTable(section.metrics, tableWidth), new Paragraph({ spacing: { after: 60 } }))
   }
+  if (section.reasoning.length) {
+    children.push(new Paragraph({ text: 'Decision reasoning and explanations', heading: HeadingLevel.HEADING_2 }))
+    section.reasoning.forEach((item) => {
+      children.push(
+        new Paragraph({
+          keepNext: true,
+          spacing: { before: 110, after: 45 },
+          border: { left: { style: BorderStyle.SINGLE, size: 10, color: CYAN, space: 8 } },
+          children: [
+            new TextRun({ text: item.decision, bold: true, size: 20, color: NAVY }),
+            new TextRun({ text: `   ${item.basis.toUpperCase()}`, bold: true, size: 13, color: BLUE }),
+          ],
+        }),
+        new Paragraph({ text: item.explanation, keepLines: true, spacing: { after: item.tradeoff ? 45 : 120 } }),
+      )
+      if (item.tradeoff) children.push(new Paragraph({
+        keepLines: true,
+        spacing: { after: 120 },
+        children: [
+          new TextRun({ text: 'Tradeoff / validation: ', bold: true, size: 17, color: MUTED }),
+          new TextRun({ text: item.tradeoff, italics: true, size: 17, color: MUTED }),
+        ],
+      }))
+    })
+  }
   section.bullets.forEach((bullet) => children.push(new Paragraph({
     text: bullet,
     numbering: { reference: 'report-bullets', level: 0 },
@@ -331,8 +372,12 @@ function wordPageProperties(landscape: boolean, nextPage = false) {
   }
 }
 
-export async function reportToWordBlob(report: SolutionReport, selection: ReportSelection) {
-  const sections = selectedReportSections(report, selection)
+export async function reportToWordBlob(
+  report: SolutionReport,
+  selection: ReportSelection,
+  options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS,
+) {
+  const sections = selectedReportSections(report, selection, options)
   const documentFile = new Document({
     creator: 'Hyper-V Surveyor',
     title: report.title,
@@ -593,6 +638,54 @@ function pdfSection(doc: jsPDF, section: ReportSection) {
     y += 3
   }
 
+  if (section.reasoning.length) {
+    ensureSpace(34)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(11)
+    doc.setTextColor(...NAVY_RGB)
+    doc.text('Decision reasoning and explanations', 54, y + 8)
+    y += 22
+    for (const item of section.reasoning) {
+      const contentWidth = doc.internal.pageSize.getWidth() - 132
+      doc.setFontSize(10.5)
+      const decisionLines = doc.splitTextToSize(pdfText(item.decision), contentWidth) as string[]
+      doc.setFontSize(8.5)
+      const explanationLines = doc.splitTextToSize(pdfText(item.explanation), contentWidth) as string[]
+      const tradeoffLines = item.tradeoff
+        ? doc.splitTextToSize(`Tradeoff / validation: ${pdfText(item.tradeoff)}`, contentWidth) as string[]
+        : []
+      const cardHeight = 48 + decisionLines.length * 12 + explanationLines.length * 11 + tradeoffLines.length * 10
+      ensureSpace(cardHeight + 9)
+      const pageWidth = doc.internal.pageSize.getWidth()
+      doc.setFillColor(246, 249, 251)
+      doc.setDrawColor(184, 215, 220)
+      doc.roundedRect(54, y, pageWidth - 108, cardHeight, 4, 4, 'FD')
+      doc.setFillColor(...CYAN_RGB)
+      doc.rect(54, y, 4, cardHeight, 'F')
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7)
+      doc.setTextColor(...BLUE_RGB)
+      doc.text(item.basis.toUpperCase(), 68, y + 15)
+      doc.setFontSize(10.5)
+      doc.setTextColor(...NAVY_RGB)
+      doc.text(decisionLines, 68, y + 31)
+      let cardY = y + 35 + decisionLines.length * 12
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8.5)
+      doc.setTextColor(...TEXT_RGB)
+      doc.text(explanationLines, 68, cardY)
+      cardY += explanationLines.length * 11 + 4
+      if (tradeoffLines.length) {
+        doc.setFont('helvetica', 'italic')
+        doc.setFontSize(8)
+        doc.setTextColor(...MUTED_RGB)
+        doc.text(tradeoffLines, 68, cardY)
+      }
+      y += cardHeight + 9
+    }
+    y += 3
+  }
+
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
   doc.setTextColor(...TEXT_RGB)
@@ -647,8 +740,12 @@ function pdfSection(doc: jsPDF, section: ReportSection) {
   }
 }
 
-export function reportToPdfBlob(report: SolutionReport, selection: ReportSelection) {
-  const sections = selectedReportSections(report, selection)
+export function reportToPdfBlob(
+  report: SolutionReport,
+  selection: ReportSelection,
+  options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS,
+) {
+  const sections = selectedReportSections(report, selection, options)
   const doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait', compress: true })
   doc.setProperties({
     title: report.title,
@@ -734,13 +831,26 @@ function htmlSection(section: ReportSection) {
           <strong>${htmlText(metric.value)}</strong>
           ${metric.detail ? `<small>${htmlText(metric.detail)}</small>` : ''}
         </article>`).join('')}</div>` : ''}
+      ${section.reasoning.length ? `<div class="reasoning">
+        <h3>Decision reasoning and explanations</h3>
+        ${section.reasoning.map((item) => `<article>
+          <span>${htmlText(item.basis)}</span>
+          <strong>${htmlText(item.decision)}</strong>
+          <p>${htmlText(item.explanation)}</p>
+          ${item.tradeoff ? `<small><b>Tradeoff / validation:</b> ${htmlText(item.tradeoff)}</small>` : ''}
+        </article>`).join('')}
+      </div>` : ''}
       ${section.bullets.length ? `<ul>${section.bullets.map((bullet) => `<li>${htmlText(bullet)}</li>`).join('')}</ul>` : ''}
       ${section.tables.map(htmlTable).join('')}
     </section>`
 }
 
-export function reportToHtml(report: SolutionReport, selection: ReportSelection) {
-  const sections = selectedReportSections(report, selection)
+export function reportToHtml(
+  report: SolutionReport,
+  selection: ReportSelection,
+  options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS,
+) {
+  const sections = selectedReportSections(report, selection, options)
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -785,6 +895,14 @@ export function reportToHtml(report: SolutionReport, selection: ReportSelection)
     .metrics span { color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.035em; text-transform:uppercase; }
     .metrics strong { margin:6px 0 4px; color:var(--navy); font-size:19px; line-height:1.2; }
     .metrics small { color:var(--muted); font-size:11px; }
+    .reasoning { display:grid; gap:10px; margin:22px 0; }
+    .reasoning > h3 { margin:0 0 2px; color:var(--navy); font-size:16px; }
+    .reasoning article { padding:14px 16px; background:#f5f9fa; border:1px solid #cfe0e4; border-left:4px solid var(--cyan); border-radius:7px; }
+    .reasoning span, .reasoning strong, .reasoning small { display:block; }
+    .reasoning span { color:var(--blue); font-size:9px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+    .reasoning strong { margin-top:4px; color:var(--navy); font-size:14px; }
+    .reasoning p { margin:7px 0 0; color:#506375; }
+    .reasoning small { margin-top:8px; color:var(--muted); font-size:11px; }
     ul { padding-left:22px; color:#506375; }
     li + li { margin-top:7px; }
     li::marker { color:var(--cyan); }
@@ -865,22 +983,22 @@ export function reportToHtml(report: SolutionReport, selection: ReportSelection)
 </html>`
 }
 
-export function downloadMarkdownReport(report: SolutionReport, selection: ReportSelection) {
-  downloadBlob(new Blob([reportToMarkdown(report, selection)], { type: 'text/markdown;charset=utf-8' }), `${safeFilename(report.customerName)}-solution-report.md`)
+export function downloadMarkdownReport(report: SolutionReport, selection: ReportSelection, options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS) {
+  downloadBlob(new Blob([reportToMarkdown(report, selection, options)], { type: 'text/markdown;charset=utf-8' }), `${safeFilename(report.customerName)}-solution-report.md`)
 }
 
-export function downloadJsonReport(report: SolutionReport, selection: ReportSelection) {
-  downloadBlob(new Blob([reportToJson(report, selection)], { type: 'application/json;charset=utf-8' }), `${safeFilename(report.customerName)}-solution-report.json`)
+export function downloadJsonReport(report: SolutionReport, selection: ReportSelection, options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS) {
+  downloadBlob(new Blob([reportToJson(report, selection, options)], { type: 'application/json;charset=utf-8' }), `${safeFilename(report.customerName)}-solution-report.json`)
 }
 
-export function downloadHtmlReport(report: SolutionReport, selection: ReportSelection) {
-  downloadBlob(new Blob([reportToHtml(report, selection)], { type: 'text/html;charset=utf-8' }), `${safeFilename(report.customerName)}-solution-report.html`)
+export function downloadHtmlReport(report: SolutionReport, selection: ReportSelection, options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS) {
+  downloadBlob(new Blob([reportToHtml(report, selection, options)], { type: 'text/html;charset=utf-8' }), `${safeFilename(report.customerName)}-solution-report.html`)
 }
 
-export async function downloadWordReport(report: SolutionReport, selection: ReportSelection) {
-  downloadBlob(await reportToWordBlob(report, selection), `${safeFilename(report.customerName)}-solution-report.docx`)
+export async function downloadWordReport(report: SolutionReport, selection: ReportSelection, options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS) {
+  downloadBlob(await reportToWordBlob(report, selection, options), `${safeFilename(report.customerName)}-solution-report.docx`)
 }
 
-export function downloadPdfReport(report: SolutionReport, selection: ReportSelection) {
-  downloadBlob(reportToPdfBlob(report, selection), `${safeFilename(report.customerName)}-solution-report.pdf`)
+export function downloadPdfReport(report: SolutionReport, selection: ReportSelection, options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS) {
+  downloadBlob(reportToPdfBlob(report, selection, options), `${safeFilename(report.customerName)}-solution-report.pdf`)
 }
