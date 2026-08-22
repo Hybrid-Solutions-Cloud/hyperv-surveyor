@@ -18,6 +18,8 @@ export const BASE_CONFIG: ClusterConfig = {
   resiliency: 'three-way-mirror',
   nestedMapMirrorPct: 0.1,
   backupMethod: 'rct',
+  sanCsvLayoutMode: 'balanced',
+  sanCustomCsvCount: 8,
   node: BASE_NODE,
   san: { usableTiB: 500, drr: 2.5, thinProvisioningSavings: 0 },
   hybridS2dShare: 0.3,

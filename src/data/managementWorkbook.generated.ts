@@ -3,7 +3,7 @@
 
 export const MANAGEMENT_WORKBOOK = {
   "generatedFrom": "HyperV_Management_Plane_Comparison.xlsx",
-  "decisionQuestionsVerified": "2026-08-20",
+  "decisionQuestionsVerified": "2026-08-22",
   "decisionQuestionsBasis": "Fact-checked decision overlay for the Management Plane Advisor. The supplied workbook remains the source for the broader capability, commercial, and evidence libraries.",
   "decisionQuestions": [
     {
@@ -25,14 +25,18 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "id": "bareMetal",
-      "question": "Must the solution discover and provision Hyper-V hosts from bare metal through BMC and PXE/WDS?",
-      "ifYes": "Use SCVMM as the fabric foundation. It is the only management plane in this comparison with that complete workflow.",
-      "ifNo": "Bare-metal provisioning does not determine the management plane.",
-      "why": "VMM can discover physical machines through supported BMC protocols, deploy an operating system through PXE/WDS, apply physical computer profiles, and bring the hosts under management.",
+      "question": "Must the solution install Windows Server onto unprovisioned hardware and create Hyper-V hosts or clusters through BMC plus PXE/WDS?",
+      "ifYes": "Use SCVMM as the fabric foundation. Neither WAC Administration Mode nor WAC Virtualization Mode performs this bare-metal operating-system deployment.",
+      "ifNo": "Bare-metal OS provisioning does not determine the management plane. WAC can still create a cluster from prepared Windows Server hosts; answer the prepared-host cluster question separately.",
+      "why": "VMM can discover physical machines through supported BMC protocols, deploy an operating system through PXE/WDS, apply physical-computer profiles, install the Hyper-V and clustering roles, and create the cluster. WAC cluster workflows start from servers on which Windows Server is already installed.",
       "sources": [
         {
           "label": "VMM bare-metal provisioning",
           "url": "https://learn.microsoft.com/en-us/system-center/vmm/hyper-v-bare-metal?view=sc-vmm-2025"
+        },
+        {
+          "label": "WAC create a failover cluster",
+          "url": "https://learn.microsoft.com/en-us/windows-server/failover-clustering/create-failover-cluster"
         }
       ]
     },
@@ -52,9 +56,9 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "delegatedPortal",
       "question": "Must operators or tenants manage on-premises VMs through Azure portal or ARM with Azure RBAC?",
-      "ifYes": "Use Arc-enabled SCVMM over an SCVMM fabric, subject to the connectivity and Azure-readiness answers.",
+      "ifYes": "Use the Arc-enabled SCVMM stack: SCVMM remains the required underlying fabric and Azure Arc becomes the primary operator or tenant VM surface. Do not add WAC to the recommendation unless a separate requirement justifies it.",
       "ifNo": "Do not add Arc solely because the organization already uses Azure.",
-      "why": "Arc-enabled SCVMM projects VMM-managed resources into Azure for RBAC and VM lifecycle operations. It is an additive control layer and requires both SCVMM and a separate Arc resource bridge appliance VM.",
+      "why": "Arc-enabled SCVMM projects VMM-managed resources into Azure for Azure RBAC and supported VM lifecycle operations. It does not replace the underlying SCVMM fabric; it adds an Azure control surface and a separate Arc resource bridge appliance VM.",
       "sources": [
         {
           "label": "Arc resource bridge overview",
@@ -63,6 +67,23 @@ export const MANAGEMENT_WORKBOOK = {
         {
           "label": "Arc-enabled SCVMM support matrix",
           "url": "https://learn.microsoft.com/en-us/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager"
+        }
+      ]
+    },
+    {
+      "id": "clusterCreation",
+      "question": "Must operators create and validate new Hyper-V clusters from hosts after Windows Server, firmware, drivers, and base connectivity are already installed?",
+      "ifYes": "WAC Administration Mode and WAC Virtualization Mode can create a cluster from prepared Windows Server hosts. Prefer vMode when Preview is accepted and no documented vMode gap conflicts with the design; otherwise use aMode.",
+      "ifNo": "Prepared-host cluster creation does not influence the management-plane choice.",
+      "why": "WAC can install required Windows features, apply updates and restarts, configure host networking, validate the configuration, and create the cluster. This is cluster deployment from prepared hosts—not BMC/PXE operating-system deployment.",
+      "sources": [
+        {
+          "label": "WAC create a failover cluster",
+          "url": "https://learn.microsoft.com/en-us/windows-server/failover-clustering/create-failover-cluster"
+        },
+        {
+          "label": "WAC vMode add resources",
+          "url": "https://learn.microsoft.com/en-us/windows-server/manage/windows-admin-center/add-virtualization-mode-resources"
         }
       ]
     },
@@ -144,6 +165,19 @@ export const MANAGEMENT_WORKBOOK = {
         {
           "label": "VMM scale limits",
           "url": "https://learn.microsoft.com/en-us/system-center/vmm/system-requirements?view=sc-vmm-2025"
+        }
+      ]
+    },
+    {
+      "id": "wacSoftwareDefinedFabric",
+      "question": "Must the selected WAC mode provide production management of Storage Spaces Direct, hyperconverged storage, or software-defined networking at go-live?",
+      "ifYes": "Use WAC Administration Mode while those vMode fabric capabilities remain unavailable or incomplete.",
+      "ifNo": "This documented vMode gap does not block selecting the future-facing vMode experience.",
+      "why": "Microsoft currently labels vMode Preview and documents software-defined storage and networking as unavailable, with storage and network host profiles not yet available. Reverify this gate as vMode evolves.",
+      "sources": [
+        {
+          "label": "WAC Virtualization Mode overview",
+          "url": "https://learn.microsoft.com/en-us/windows-server/manage/windows-admin-center/virtualization-mode-overview"
         }
       ]
     },

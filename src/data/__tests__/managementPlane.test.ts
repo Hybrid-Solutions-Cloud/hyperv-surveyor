@@ -11,6 +11,13 @@ describe('management-plane recommendations', () => {
     expect(result.headline).toContain('vMode')
   })
 
+  it('prefers vMode even for a smaller estate when its support gates line up', () => {
+    const result = recommendManagementPlane({ gaRequired: false, managementHa: false, largeFabric: false, wacSoftwareDefinedFabric: false })
+
+    expect(result.stack).toEqual(['classic', 'wac-virtual'])
+    expect(result.rationale.some((reason) => reason.includes('preferred over aMode'))).toBe(true)
+  })
+
   it('uses SCVMM and aMode for a large production fabric that requires GA components', () => {
     const result = recommendManagementPlane({ gaRequired: true, largeFabric: true })
 
@@ -45,9 +52,35 @@ describe('management-plane recommendations', () => {
     const eligible = recommendManagementPlane({ delegatedPortal: true, azureReady: true, airGap: false })
     const blocked = recommendManagementPlane({ delegatedPortal: true, azureReady: false })
 
-    expect(eligible.stack).toContain('arc-scvmm')
-    expect(blocked.stack).not.toContain('arc-scvmm')
+    expect(eligible.stack).toEqual(['scvmm', 'arc-scvmm'])
+    expect(eligible.stack).not.toContain('wac-admin')
+    expect(eligible.stack).not.toContain('wac-virtual')
+    expect(blocked.stack).toEqual(['scvmm'])
     expect(blocked.cautions.some((caution) => caution.includes('blocked'))).toBe(true)
+  })
+
+  it('shows Arc immediately for question 4 unless a readiness answer explicitly blocks it', () => {
+    const result = recommendManagementPlane({ delegatedPortal: true })
+
+    expect(result.stack).toEqual(['scvmm', 'arc-scvmm'])
+    expect(result.cautions.some((caution) => caution.includes('Confirm Azure subscription ownership'))).toBe(true)
+  })
+
+  it('distinguishes SCVMM bare-metal OS provisioning from WAC prepared-host cluster creation', () => {
+    const bareMetal = recommendManagementPlane({ bareMetal: true })
+    const preparedHosts = recommendManagementPlane({ clusterCreation: true })
+
+    expect(bareMetal.stack).toContain('scvmm')
+    expect(bareMetal.rationale.some((reason) => reason.includes('install Windows Server'))).toBe(true)
+    expect(preparedHosts.stack).not.toContain('scvmm')
+    expect(preparedHosts.rationale.some((reason) => reason.includes('prepared Windows Server hosts'))).toBe(true)
+  })
+
+  it('falls back to aMode when software-defined fabric management is required', () => {
+    const result = recommendManagementPlane({ gaRequired: false, managementHa: false, wacSoftwareDefinedFabric: true })
+
+    expect(result.stack).toContain('wac-admin')
+    expect(result.stack).not.toContain('wac-virtual')
   })
 
   it('recommends SCOM and carries the HA answer into deployment guidance', () => {

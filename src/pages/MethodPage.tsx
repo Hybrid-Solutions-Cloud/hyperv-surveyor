@@ -7,7 +7,7 @@ const rules = [
   ['MS', 'S2D clusters use a 2–16-node envelope; hybrid designs inherit the S2D ceiling.'],
   ['MS', 'Capacity reserve is one drive per server, capped at four drives across the pool.'],
   ['MS', 'Cache contributes no usable capacity and requires host memory for pool metadata.'],
-  ['MS-REC', 'CSV count should distribute ownership evenly across the nodes.'],
+  ['MS-REC', 'Create at least one CSV per node; CSV ownership is automatically distributed across cluster nodes.'],
   ['TOOL', 'vCPU-to-core ratios, host reserves, right-sizing factors, maximum recovery-unit size, and target VMs per recovery unit are editable assumptions.'],
 ] as const
 

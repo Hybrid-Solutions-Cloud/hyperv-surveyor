@@ -236,7 +236,13 @@ function RecommendationPanel({
                 const plane = MANAGEMENT_PLANES.find((item) => item.id === id)!
                 return (
                   <div className="stack-node" key={id}>
-                    <span>{index === 0 ? 'Foundation' : id === 'arc-scvmm' ? 'Azure layer' : 'Day two'}</span>
+                    <span>{id === 'scvmm'
+                      ? answers.bareMetal ? 'Bare-metal + fabric' : 'Fabric'
+                      : id === 'arc-scvmm'
+                        ? 'Azure VM control surface'
+                        : answers.clusterCreation
+                          ? 'Prepared-host cluster + day two'
+                          : index === 0 ? 'Foundation' : 'Day two'}</span>
                     <strong>{plane.shortName}</strong>
                   </div>
                 )
@@ -265,9 +271,10 @@ function RecommendationPanel({
         <section className="panel">
           <h2>Important framing</h2>
           <p className="small">
-            Use WAC Administration Mode for the supported production baseline. Evaluate vMode only
-            where Preview status and current capability gaps are acceptable, and treat Arc as an additive layer over SCVMM.
-            This advisor recommends a stack rather than forcing one winner.
+            Prefer WAC vMode when Preview is explicitly accepted and no selected requirement hits a
+            documented capability gap; use aMode as the production fallback. WAC creates clusters from
+            prepared hosts but does not install the host OS. Arc-enabled SCVMM is a focused two-layer stack:
+            SCVMM remains the fabric and Arc supplies the Azure control surface.
           </p>
         </section>
       </aside>

@@ -357,7 +357,7 @@ with a restore.
 | Rule | Value | Tag |
 |---|---|---|
 | Minimum CSVs | **≥ 1 per node** — distributes coordinator ownership | [MS-REC] |
-| Count shape | **Total CSVs should be a whole multiple of node count** — otherwise ownership distributes unevenly and performance is inconsistent | [MS-REC] |
+| Ownership distribution | CSV ownership is automatically distributed; create **at least one CSV per node** | [MS-REC] |
 | Maximum CSVs | **64 per cluster** | [MS-REC] |
 | Maximum CSV size | **64 TB** | [MS-REC] |
 | VSS/volsnap-based backup | **Limit to 10 TB** | [MS] |
@@ -382,32 +382,30 @@ rather than consolidating onto one large volume. CSV maps 1:1 to a FlashArray vo
 the array, so the driver is different: resiliency tiering (mirror vs parity), rebuild time, and
 ownership distribution.
 
-The engine therefore takes a **blast-radius input per tier [TOOL]** — maximum VMs and maximum TB an
-SE is willing to have inside one restore unit — and treats it as a first-class constraint alongside
-capacity.
+The engine therefore takes a **recovery-unit input per tier [TOOL]** — maximum VMs and maximum TiB
+an SE is willing to have inside one restore unit. For SAN, these values are advisory in Balanced and
+Custom modes and enforced in Granular recovery mode. For S2D, they remain applied design targets.
 
 ### 5.3 The algorithm
 
-Run **per tier, per storage domain**:
+Run **per tier, per storage domain**. SAN Balanced is the default:
 
 ```
-max_csv_size = MIN(
-    64 TB,                                    # [MS-REC] hard recommendation
-    10 TB  if backup_method == VSS_volsnap,   # [MS]
-    blast_radius_tb                           # [TOOL] SE input
+hard_max_size = MIN(64 TB, 10 TB if backup_method == VSS_volsnap)
+hard_floor    = SUM(ceil(tier_capacity / hard_max_size))
+balanced_san_total = MAX(hard_floor, node_count)               # SAN-only cluster
+
+granular_tier_count = MAX(
+    ceil(tier_capacity / MIN(hard_max_size, recovery_unit_tb)),
+    ceil(tier_vm_count / max_vms_per_recovery_unit)
 )
 
-count_by_capacity = ceil(tier_capacity / max_csv_size)
-count_by_blast    = ceil(tier_vm_count / max_vms_per_csv)     # [TOOL]
-count_by_nodes    = node_count                                 # [MS-REC] ≥1 per node
-
-csv_count = MAX(count_by_capacity, count_by_blast, count_by_nodes)
-csv_count = round_up_to_multiple_of(csv_count, node_count)     # [MS-REC]
+custom_san_total = MAX(requested_total, hard_floor)
 
 if total_csvs_across_all_tiers > 64:          # [MS-REC]
     → raise CSV size, raise blast radius, or split the cluster. Do not silently exceed.
 
-csv_size = round_up(tier_capacity / csv_count, 1 TB)
+csv_size = round_up(tier_capacity / assigned_tier_count, 0.1 TiB)
 ```
 
 ### 5.4 Defaults
@@ -431,27 +429,27 @@ See §9.
 400 VMs, 90% General Server / 10% Database. General tier 320 VMs / 480 TB. Database tier 40 VMs /
 120 TB. Backup is Hyper-V RCT (not VSS-volsnap), so the 10 TB cap does not apply.
 
-**SAN, 8 nodes:**
+**SAN, 8 nodes:** Balanced operations recommends 8 CSV/LUNs when the hard capacity floor is no
+larger. The tier allocation is capacity-weighted. Granular recovery remains visible as follows:
 
 | Tier | Driver | Count | Size |
 |---|---|---|---|
-| General | capacity 480/32 = 15; blast 320/25 = 13; nodes 8 → max 15 → round to 16 | **16 CSVs** | 30 TB each |
-| Database | capacity 120/32 = 4; blast 40/5 = 8; nodes 8 → max 8 | **8 CSVs** | 15 TB each |
-| | | **24 total** | Under 64 ✓ |
+| General | recovery capacity 480/16 = 30; VM grouping 320/25 = 13 | **30 CSVs** | 16 TB each |
+| Database | recovery capacity 120/8 = 15; VM grouping 40/5 = 8 | **15 CSVs** | 8 TB each |
+| | | **45 total** | Under 64 ✓ |
 
-Database is **blast-radius-bound**, not capacity-bound — 8 LUNs where capacity alone would have said
-4. That is the tool earning its keep: a 4-LUN design would put 10 database VMs in each restore unit.
+The granular alternative is intentionally much larger because its 16 TiB and 8 TiB recovery sizes
+are tool assumptions. Select it only when those recovery boundaries are operational requirements.
 
 **S2D, 12 nodes, mirror-accelerated parity for General and three-way mirror for Database:**
 
 | Tier | Driver | Count | Size |
 |---|---|---|---|
-| General | capacity 15; blast 13; nodes 12 → max 15 → round to **24** (multiple of 12) | **24 volumes** | 20 TB each |
-| Database | capacity 4; blast 8; nodes 12 → max 12 | **12 volumes** | 10 TB each |
-| | | **36 total** | Under 64 ✓ |
+| General | recovery capacity 30; VM grouping 13 | **30 volumes** | 16 TB each |
+| Database | recovery capacity 15; VM grouping 8 | **15 volumes** | 8 TB each |
+| | | **45 total** | Under 64 ✓ |
 
-The multiple-of-node-count rule pushes General from 15 to 24. The tool should show that jump and its
-reason, because an SE will otherwise assume it is a bug.
+The S2D total already exceeds the 12-node floor, so no additional ownership volumes are added.
 
 ---
 
@@ -518,7 +516,7 @@ The engine emits, at minimum:
 - Dynamic Memory + multi-NUMA VM → **error [MS]**, mutually exclusive
 - Total CSVs > 64 → **warning [MS-REC]**
 - Any CSV > 64 TB, or > 10 TB with VSS backup → **warning [MS]**
-- CSV count not a multiple of node count → **warning [MS-REC]**
+- CSV count below one per node → **warning [MS-REC]**
 - Hybrid: reminder that SAN CSVs must be NTFS and must never enter the S2D pool
 - LBFO teaming selected → **error [MS]**, unsupported for vSwitch since WS2022. SET only
 - SET team above 8 adapters → **error [MS]**

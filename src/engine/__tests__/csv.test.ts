@@ -119,4 +119,45 @@ describe('worked example from the spec — 400 VMs, 8-node SAN', () => {
     expect(p.count).toBe(byCapacity)
     expect(p.vmsPerCsv).toBeLessThanOrEqual(database.maxVmsPerCsv)
   })
+
+  it('defaults a 14-node Pure SAN design to 14 balanced CSV/LUNs instead of enforcing every tier grouping target', () => {
+    const demand = mixedSanDemand()
+    const plans = planCsvs(makeConfig({ architecture: 'san', sanCsvLayoutMode: 'balanced' }), demand, DEFAULT_TIERS, 14)
+    const total = plans.reduce((sum, plan) => sum + plan.count, 0)
+    const granularAlternative = plans.reduce((sum, plan) => sum + plan.granularAdvisoryCount, 0)
+
+    expect(total).toBe(14)
+    expect(granularAlternative).toBeGreaterThan(total)
+    expect(plans.every((plan) => !plan.recoveryGroupingApplied)).toBe(true)
+  })
+
+  it('can explicitly enforce the more granular per-tier recovery targets', () => {
+    const plans = planCsvs(makeConfig({ architecture: 'san', sanCsvLayoutMode: 'granular' }), mixedSanDemand(), DEFAULT_TIERS, 14)
+
+    expect(plans.reduce((sum, plan) => sum + plan.count, 0)).toBeGreaterThan(14)
+    expect(plans.every((plan) => plan.recoveryGroupingApplied)).toBe(true)
+  })
+
+  it('honors a custom SAN total unless hard capacity limits require more', () => {
+    const requested = planCsvs(makeConfig({ architecture: 'san', sanCsvLayoutMode: 'custom', sanCustomCsvCount: 10 }), mixedSanDemand(), DEFAULT_TIERS, 14)
+    const belowFloor = planCsvs(makeConfig({ architecture: 'san', sanCsvLayoutMode: 'custom', sanCustomCsvCount: 3 }), mixedSanDemand(), DEFAULT_TIERS, 14)
+
+    expect(requested.reduce((sum, plan) => sum + plan.count, 0)).toBe(10)
+    expect(belowFloor.reduce((sum, plan) => sum + plan.count, 0)).toBe(5)
+  })
 })
+
+function mixedSanDemand() {
+  return {
+    requiredPCores: 500,
+    requiredRamGiB: 10_000,
+    totalVCpu: 2_000,
+    vmCount: 420,
+    byTier: {
+      general: { pCores: 350, ramGiB: 7_000, vms: 300, plannedVms: 300, storageGiB: 100 * 1024 },
+      database: { pCores: 100, ramGiB: 2_000, vms: 60, plannedVms: 60, storageGiB: 30 * 1024 },
+      vdi: { pCores: 30, ramGiB: 600, vms: 40, plannedVms: 40, storageGiB: 10 * 1024 },
+      infrastructure: { pCores: 20, ramGiB: 400, vms: 20, plannedVms: 20, storageGiB: 5 * 1024 },
+    },
+  }
+}

@@ -19,6 +19,8 @@ const driverLabel: Record<string, string> = {
   'vm-count': 'VM recovery grouping',
   both: 'both requirements',
   'node-count': 'S2D node ownership',
+  'operational-balance': 'operational balance',
+  'custom-target': 'custom target',
 }
 
 export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onExport }: Props) {
@@ -37,6 +39,9 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
 
   const spare = r.nodes - r.workloadNodes
   const growth = forecastGrowth(chosen.cfg, vms, tiers)
+  const sanPlans = r.csvPlans.filter(plan => plan.domain === 'san')
+  const sanCsvCount = sanPlans.reduce((sum, plan) => sum + plan.count, 0)
+  const granularSanAlternative = sanPlans.reduce((sum, plan) => sum + plan.granularAdvisoryCount, 0)
   const actionFor = (point: GrowthForecastPoint, index: number) => {
     if (!point.result.feasible) {
       if (point.result.sanCapacityTiB !== null && point.result.requiredSanTiB > point.result.sanCapacityTiB) {
@@ -235,10 +240,16 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
             : 'Hybrid storage volume layout'}</h2>
         <p className="small muted" style={{ marginTop: -6 }}>
           This is a logical workload-volume plan, not a physical disk or RAID layout. For SAN, one presented LUN becomes one CSV.
-          For S2D, the object is an S2D volume/CSV and no SAN LUN exists. The recommendation takes the larger of the
-          volume-size calculation and the VM recovery-grouping calculation. S2D totals are then raised to at least one
-          volume per node and a whole node-count multiple for balanced ownership.
+          For S2D, the object is an S2D volume/CSV and no SAN LUN exists. S2D enforces the tier recovery targets and
+          a cluster-wide minimum of one volume per node. SAN behavior follows the selected layout mode.
         </p>
+        {sanPlans.length > 0 && !sanPlans[0].recoveryGroupingApplied && (
+          <div className="note">
+            <strong>{sanPlans[0].layoutMode === 'custom' ? 'Custom SAN layout' : 'Recommended operational SAN layout'}: {sanCsvCount} CSV/LUNs</strong>
+            The editable per-tier recovery targets would produce <strong>{granularSanAlternative}</strong> CSV/LUNs.
+            They are shown as an optional granular-recovery alternative and are not silently enforced in this mode.
+          </div>
+        )}
         <div className="scroll">
           <table>
             <thead>
@@ -266,14 +277,15 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
                     <div className="small muted">{p.plannedVms.toLocaleString()} planned VMs</div>
                   </td>
                   <td className="nowrap">
-                    <div>By size: <span className="mono">ceil({fmt1(p.totalTiB)} / {fmt1(p.maxSizeTiB)}) = {p.countByCapacity}</span></div>
-                    <div className="small muted">By VM grouping: <span className="mono">ceil({p.plannedVms} / {p.maxVmsPerCsv}) = {p.countByVmLimit}</span></div>
+                    <div>By {p.recoveryGroupingApplied ? 'recovery size' : 'hard size cap'}: <span className="mono">ceil({fmt1(p.totalTiB)} / {fmt1(p.maxSizeTiB)}) = {p.countByCapacity}</span></div>
+                    <div className="small muted">By VM grouping{p.recoveryGroupingApplied ? '' : ' (advisory)'}: <span className="mono">ceil({p.plannedVms} / {p.maxVmsPerCsv}) = {p.countByVmLimit}</span></div>
+                    {!p.recoveryGroupingApplied && <div className="small muted">Granular tier alternative: {p.granularAdvisoryCount}</div>}
                   </td>
                   <td className="nowrap">
                     <strong>{p.count} × <span className="mono">{fmt1(p.sizeTiB)} TiB</span></strong>
                     <div className="small muted">Up to {p.vmsPerCsv} planned VMs each</div>
                     {p.count !== p.roundedUpFrom && (
-                      <div className="small muted">S2D-balanced from {p.roundedUpFrom} to {p.count}</div>
+                      <div className="small muted">{p.layoutMode === 's2d' ? 'Node-balanced' : p.layoutMode === 'custom' ? 'Custom target' : 'Operationally balanced'} from {p.roundedUpFrom} to {p.count}</div>
                     )}
                   </td>
                   <td><span className={`pill ${p.driver === 'vm-count' || p.driver === 'both' ? 'warn' : 'info'}`}>{driverLabel[p.driver]}</span></td>
@@ -290,6 +302,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
         <p className="small muted" style={{ marginTop: 8 }}>
           Recovery-unit size and target VMs per recovery unit are editable TOOL assumptions. Workload growth increases
           both logical capacity and the equivalent planned VM count; imported inventory counts remain unchanged elsewhere.
+          In SAN Balanced and Custom modes those assumptions are advisory; select Granular recovery to enforce them.
         </p>
       </div>
 

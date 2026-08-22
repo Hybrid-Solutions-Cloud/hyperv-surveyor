@@ -11,11 +11,13 @@
  *   S2D  — the volume is the RESILIENCY unit. Restore granularity comes from the backup product,
  *          so the drivers are resiliency tiering, rebuild time, and ownership distribution.
  *
- * ALGORITHM (per tier, per storage domain)
- *   max_csv_size = MIN(64 TiB [MS-REC], 10 TiB if VSS-volsnap [MS], blast_radius [TOOL])
- *   per_tier_count = MAX(ceil(capacity/max_size), ceil(planned_vms/max_vms_per_csv))
- *   total S2D volumes = at least node_count and rounded to a node-count multiple [MS-REC]
- *   error if total across all tiers > 64                 [MS-REC]
+ * SAN defaults to an operationally balanced plan: at least one CSV/LUN per node for a
+ * SAN-only cluster, then only enough additional LUNs to satisfy the platform/backup size cap.
+ * The editable recovery-size and VMs-per-recovery-unit targets remain visible as a more
+ * granular alternative. Operators can enforce that alternative or enter a custom total.
+ *
+ * S2D continues to enforce the per-tier recovery targets and then applies the documented
+ * minimum of one volume per node. Microsoft recommends no maximum VM count per CSV.
  */
 import { LIMITS, TIER_IDS } from './rules'
 import { giBToTiB } from './compute'
@@ -24,6 +26,7 @@ import type {
   ClusterConfig,
   ComputeDemand,
   CsvPlan,
+  SanCsvLayoutMode,
   TierId,
   TierPolicy,
 } from './types'
@@ -34,7 +37,12 @@ export function roundUpToMultiple(value: number, multiple: number): number {
 }
 
 export function maxCsvSizeTiB(policy: TierPolicy, backup: BackupMethod): number {
-  const caps = [LIMITS.MAX_CSV_SIZE_TIB, policy.blastRadiusTiB]
+  return Math.min(hardMaxCsvSizeTiB(backup), policy.blastRadiusTiB)
+}
+
+/** Platform/backup cap without the editable tool recovery target. */
+export function hardMaxCsvSizeTiB(backup: BackupMethod): number {
+  const caps: number[] = [LIMITS.MAX_CSV_SIZE_TIB]
   if (backup === 'vss-volsnap') caps.push(LIMITS.VSS_CSV_LIMIT_TIB)
   return Math.min(...caps)
 }
@@ -47,20 +55,30 @@ interface PlanArgs {
   nodes: number
   backup: BackupMethod
   domain: 's2d' | 'san'
+  layoutMode?: SanCsvLayoutMode | 's2d'
 }
 
 export function planTierCsvs(a: PlanArgs): CsvPlan | null {
   if (a.capacityTiB <= 0 || a.vmCount <= 0) return null
 
-  const maxSize = maxCsvSizeTiB(a.policy, a.backup)
-  const byCapacity = Math.ceil(a.capacityTiB / maxSize)
+  const layoutMode = a.layoutMode ?? (a.domain === 's2d' ? 's2d' : 'granular')
+  const recoveryMaxSize = maxCsvSizeTiB(a.policy, a.backup)
+  const hardMaxSize = hardMaxCsvSizeTiB(a.backup)
+  const recoveryCountByCapacity = Math.ceil(a.capacityTiB / recoveryMaxSize)
+  const hardCountByCapacity = Math.ceil(a.capacityTiB / hardMaxSize)
   const byBlast = Math.ceil(a.vmCount / a.policy.maxVmsPerCsv)
-  const rawCount = Math.max(byCapacity, byBlast)
+  const granularAdvisoryCount = Math.max(recoveryCountByCapacity, byBlast)
+  const recoveryGroupingApplied = layoutMode === 'granular' || layoutMode === 's2d'
+  const byCapacity = recoveryGroupingApplied ? recoveryCountByCapacity : hardCountByCapacity
+  const maxSize = recoveryGroupingApplied ? recoveryMaxSize : hardMaxSize
+  const rawCount = recoveryGroupingApplied ? granularAdvisoryCount : hardCountByCapacity
   const count = rawCount
 
-  const driver: CsvPlan['driver'] = byCapacity === byBlast
-    ? 'both'
-    : byCapacity > byBlast ? 'capacity' : 'vm-count'
+  const driver: CsvPlan['driver'] = !recoveryGroupingApplied
+    ? 'capacity'
+    : byCapacity === byBlast
+      ? 'both'
+      : byCapacity > byBlast ? 'capacity' : 'vm-count'
 
   return {
     tier: a.tier,
@@ -75,6 +93,9 @@ export function planTierCsvs(a: PlanArgs): CsvPlan | null {
     countByCapacity: byCapacity,
     countByVmLimit: byBlast,
     maxVmsPerCsv: a.policy.maxVmsPerCsv,
+    granularAdvisoryCount,
+    recoveryGroupingApplied,
+    layoutMode,
     driver,
     roundedUpFrom: rawCount,
     // [MS] In a hybrid cluster SAN CSVs must be NTFS - ReFS is not supported on SAN-backed
@@ -94,6 +115,7 @@ export function planCsvs(
   nodes: number,
 ): CsvPlan[] {
   const plans: CsvPlan[] = []
+  const sanLayoutMode = cfg.sanCsvLayoutMode ?? 'balanced'
 
   for (const id of TIER_IDS) {
     const t = demand.byTier[id]
@@ -104,7 +126,7 @@ export function planCsvs(
     if (cfg.architecture === 'san') {
       const p = planTierCsvs({
         tier: id, policy, capacityTiB, vmCount: t.plannedVms,
-        nodes, backup: cfg.backupMethod, domain: 'san',
+        nodes, backup: cfg.backupMethod, domain: 'san', layoutMode: sanLayoutMode,
       })
       if (p) plans.push(p)
     } else if (cfg.architecture === 's2d') {
@@ -131,30 +153,56 @@ export function planCsvs(
           tier: id, policy,
           capacityTiB: capacityTiB * sanShare,
           vmCount: Math.max(1, Math.round(t.plannedVms * sanShare)),
-          nodes, backup: cfg.backupMethod, domain: 'san',
+          nodes, backup: cfg.backupMethod, domain: 'san', layoutMode: sanLayoutMode,
         })
         if (p) plans.push(p)
       }
     }
   }
 
-  // Microsoft recommends at least one S2D volume per node and a total volume count that is
-  // a multiple of node count for even coordinator ownership. Apply that once across the S2D
-  // domain, not independently to every workload tier.
+  // Microsoft recommends at least one S2D volume per node. Apply the floor once across the
+  // S2D domain, not independently to every workload tier. CSV ownership automatically
+  // distributes across nodes; an exact node-count multiple is useful but not a published limit.
   const s2dPlans = plans.filter((plan) => plan.domain === 's2d')
   if (s2dPlans.length > 0 && nodes > 0) {
     const current = s2dPlans.reduce((sum, plan) => sum + plan.count, 0)
-    const target = roundUpToMultiple(Math.max(current, nodes), nodes)
-    const extra = target - current
-    if (extra > 0) {
-      const targetPlan = [...s2dPlans].sort((a, b) => b.totalTiB - a.totalTiB)[0]
-      targetPlan.count += extra
-      targetPlan.sizeTiB = Math.ceil((targetPlan.totalTiB / targetPlan.count) * 10) / 10
-      targetPlan.vmsPerCsv = Math.ceil(targetPlan.plannedVms / targetPlan.count)
-      targetPlan.driver = 'node-count'
+    distributeAdditionalVolumes(s2dPlans, Math.max(current, nodes), 'node-count')
+  }
+
+  // For a SAN-only cluster, balanced mode starts at one CSV/LUN per node. In hybrid mode,
+  // the S2D domain already supplies the cluster-wide node ownership floor, so SAN starts at
+  // its capacity/backup floor. Custom mode intentionally allows a lower-than-node target;
+  // validation flags the operational tradeoff without overriding the user's choice.
+  const sanPlans = plans.filter((plan) => plan.domain === 'san')
+  if (sanPlans.length > 0) {
+    const current = sanPlans.reduce((sum, plan) => sum + plan.count, 0)
+    if (sanLayoutMode === 'balanced') {
+      const nodeFloor = cfg.architecture === 'san' ? nodes : 0
+      distributeAdditionalVolumes(sanPlans, Math.max(current, nodeFloor), 'operational-balance')
+    } else if (sanLayoutMode === 'custom') {
+      const requested = Math.max(1, Math.round(cfg.sanCustomCsvCount ?? nodes))
+      distributeAdditionalVolumes(sanPlans, Math.max(current, requested), 'custom-target')
     }
   }
   return plans
+}
+
+function distributeAdditionalVolumes(
+  plans: CsvPlan[],
+  targetTotal: number,
+  driver: 'node-count' | 'operational-balance' | 'custom-target',
+): void {
+  let current = plans.reduce((sum, plan) => sum + plan.count, 0)
+  while (current < targetTotal) {
+    // Add the next object to the tier with the largest current average object. Repeating this
+    // produces a capacity-proportional layout while retaining distinct workload tiers.
+    const target = [...plans].sort((a, b) => (b.totalTiB / b.count) - (a.totalTiB / a.count))[0]
+    target.count += 1
+    target.sizeTiB = Math.ceil((target.totalTiB / target.count) * 10) / 10
+    target.vmsPerCsv = Math.ceil(target.plannedVms / target.count)
+    target.driver = driver
+    current += 1
+  }
 }
 
 export function totalCsvCount(plans: CsvPlan[]): number {

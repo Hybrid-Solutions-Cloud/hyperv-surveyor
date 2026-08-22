@@ -172,10 +172,28 @@ export function validateDesign(
     }
   }
   const s2dCsvs = csvPlans.filter((plan) => plan.domain === 's2d').reduce((sum, plan) => sum + plan.count, 0)
-  if (s2dCsvs > 0 && (s2dCsvs < nodes || s2dCsvs % nodes !== 0)) {
-    f.push(warn('CSV_MULTIPLE',
-      `The S2D domain has ${s2dCsvs} volumes across ${nodes} nodes. Plan at least one volume per node and use a total that is a node-count multiple for even coordinator ownership.`,
+  if (s2dCsvs > 0 && s2dCsvs < nodes) {
+    f.push(warn('CSV_NODE_FLOOR',
+      `The S2D domain has ${s2dCsvs} volumes across ${nodes} nodes. Plan at least one volume per node so coordinator ownership can distribute across the cluster.`,
       'MS-REC', SRC.planVolumes))
+  }
+  const sanPlans = csvPlans.filter((plan) => plan.domain === 'san')
+  const sanCsvs = sanPlans.reduce((sum, plan) => sum + plan.count, 0)
+  const granularSanAlternative = sanPlans.reduce((sum, plan) => sum + plan.granularAdvisoryCount, 0)
+  if (cfg.architecture === 'san' && (cfg.sanCsvLayoutMode ?? 'balanced') === 'custom' && sanCsvs < nodes) {
+    f.push(warn('SAN_CUSTOM_NODE_FLOOR',
+      `The custom SAN target produces ${sanCsvs} CSV/LUNs across ${nodes} nodes. Microsoft recommends at least one CSV per node; keep the override only with a documented operational reason.`,
+      'MS-REC', SRC.csv))
+  }
+  if ((cfg.sanCsvLayoutMode ?? 'balanced') === 'custom' && sanCsvs > Math.max(1, Math.round(cfg.sanCustomCsvCount ?? 1))) {
+    f.push(warn('SAN_CUSTOM_RAISED',
+      `The requested SAN total was raised to ${sanCsvs} CSV/LUNs because the capacity and backup size limits require more storage objects.`,
+      'MS', SRC.csv))
+  }
+  if (sanPlans.length > 0 && !(sanPlans[0].recoveryGroupingApplied) && granularSanAlternative > sanCsvs) {
+    f.push(info('SAN_GRANULAR_ALTERNATIVE',
+      `The selected SAN layout uses ${sanCsvs} CSV/LUNs. Enforcing the editable tier recovery targets would use ${granularSanAlternative}; that alternative remains available in Node Specifications.`,
+      'TOOL'))
   }
 
   // ---- Hybrid-specific -----------------------------------------------------

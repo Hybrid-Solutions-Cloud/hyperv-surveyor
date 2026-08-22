@@ -182,6 +182,26 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
         {usesSan && (
           <>
             <h3>SAN — Pure / Everpure FlashArray</h3>
+            <Field label="SAN CSV / LUN layout" hint="One presented SAN LUN maps 1:1 to one CSV. Microsoft recommends at least one CSV per node and imposes no VM-per-CSV maximum.">
+              <select value={cfg.sanCsvLayoutMode ?? 'balanced'} onChange={e => set({ sanCsvLayoutMode: e.target.value as ClusterConfig['sanCsvLayoutMode'] })}>
+                <option value="balanced">Balanced operations — recommended</option>
+                <option value="granular">Granular recovery — enforce tier targets</option>
+                <option value="custom">Custom SAN CSV / LUN total</option>
+              </select>
+            </Field>
+            {(cfg.sanCsvLayoutMode ?? 'balanced') === 'custom' && (
+              <Field label="Requested SAN CSV / LUN total" hint="The engine honors this cluster-wide target unless the 64 TiB platform recommendation or 10 TiB VSS/volsnap limit requires more.">
+                <NumberInput value={cfg.sanCustomCsvCount ?? 1} min={1} max={128} step={1} onChange={n => set({ sanCustomCsvCount: Math.max(1, Math.round(n)) })} />
+              </Field>
+            )}
+            <div className="note">
+              <strong>{(cfg.sanCsvLayoutMode ?? 'balanced') === 'balanced' ? 'Balanced operations is the default' : (cfg.sanCsvLayoutMode ?? 'balanced') === 'granular' ? 'Tier recovery targets are enforced' : 'Your requested total controls the layout'}</strong>
+              {(cfg.sanCsvLayoutMode ?? 'balanced') === 'balanced'
+                ? 'The design starts at one SAN CSV/LUN per node, distributes capacity across workload tiers, and adds LUNs only when a size or backup limit requires them. Tier recovery targets remain visible as an optional granular alternative.'
+                : (cfg.sanCsvLayoutMode ?? 'balanced') === 'granular'
+                  ? 'Every tier’s editable recovery-unit size and target VM count can add SAN CSV/LUNs. This intentionally creates more, smaller recovery units.'
+                  : 'The requested total is distributed by tier capacity. A hard size or backup limit can raise the final count, and a below-node target generates a design warning.'}
+            </div>
             <Field label="Array USABLE capacity (TiB)" hint="Usable, never 'effective'. Effective already has DRR baked in — multiplying it again double-counts.">
               <NumberInput value={cfg.san.usableTiB} min={1} onChange={n => setSan({ usableTiB: n })} />
             </Field>
@@ -253,7 +273,8 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
           Microsoft publishes no vCPU:pCore ratio. The WS2025 maximums table says outright:
           "Virtual processors per logical processor — No ratio imposed by Hyper-V." Microsoft also
           imposes no VMs-per-CSV limit. The recovery-unit settings below are design targets: they
-          control operational grouping and volume size, not a Hyper-V platform maximum.
+          control operational grouping and volume size, not a Hyper-V platform maximum. For SAN,
+          they are advisory in Balanced or Custom mode and enforced only in Granular recovery mode.
         </div>
         <div className="scroll" style={{ maxHeight: 380 }}>
           <table>

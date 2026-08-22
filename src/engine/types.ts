@@ -28,6 +28,9 @@ export type Resiliency =
 
 export type BackupMethod = 'rct' | 'vss-volsnap'
 
+/** How externally shared SAN CSV/LUN counts are selected. */
+export type SanCsvLayoutMode = 'balanced' | 'granular' | 'custom'
+
 export type StorageTier = 'performance' | 'capacity'
 
 export type HybridPlacement = 's2d' | 'san' | 'split'
@@ -137,6 +140,10 @@ export interface ClusterConfig {
   /** Fraction of a nested-MAP volume that is mirror. Only used for nested-map. */
   nestedMapMirrorPct: 0.1 | 0.2 | 0.3
   backupMethod: BackupMethod
+  /** SAN only. Balanced is the operational default; granular enforces tier recovery targets. */
+  sanCsvLayoutMode: SanCsvLayoutMode
+  /** Requested cluster-wide SAN CSV/LUN total when sanCsvLayoutMode is custom. */
+  sanCustomCsvCount: number
   /** Quorum witness selected for the cluster design. */
   witnessType?: WitnessType
   node: NodeSpec
@@ -201,7 +208,12 @@ export interface CsvPlan {
   countByCapacity: number
   countByVmLimit: number
   maxVmsPerCsv: number
-  driver: 'capacity' | 'vm-count' | 'both' | 'node-count'
+  /** Count that would result if the editable per-tier recovery targets were enforced. */
+  granularAdvisoryCount: number
+  /** True when the editable recovery-unit size and VM grouping targets control this plan. */
+  recoveryGroupingApplied: boolean
+  layoutMode: SanCsvLayoutMode | 's2d'
+  driver: 'capacity' | 'vm-count' | 'both' | 'node-count' | 'operational-balance' | 'custom-target'
   roundedUpFrom: number
   filesystem: 'ReFS' | 'NTFS'
 }

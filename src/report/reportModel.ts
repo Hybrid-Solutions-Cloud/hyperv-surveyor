@@ -531,7 +531,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         'Platform storage capacity, protection, performance, and CSV/LUN layout were not assessed.',
       ] : [
         'Capacity values use consumed workload storage after the selected immediate-headroom and growth strategy, followed by the configured resiliency or SAN efficiency assumptions.',
-        'The storage-object plan is logical: a SAN row represents a 1:1 CSV/LUN, while an S2D row represents an S2D volume/CSV with no SAN LUN. Its count is the larger of the volume-size requirement and VM recovery-grouping requirement; S2D then applies cluster-wide node-ownership balancing.',
+        `The storage-object plan is logical: a SAN row represents a 1:1 CSV/LUN, while an S2D row represents an S2D volume/CSV with no SAN LUN. SAN layout mode is ${platformCfg.sanCsvLayoutMode ?? 'balanced'}; Balanced and Custom treat editable tier recovery targets as an alternative, while Granular enforces them. S2D applies its recovery targets and the cluster-wide one-volume-per-node floor.`,
         finalSizing.storagePerformance.validated
           ? `Storage performance is validated against the entered sustainable IOPS and throughput capabilities with ${number(finalSizing.storagePerformance.measuredVmCoveragePct, 1)}% VM coverage.`
           : `Storage performance is not fully validated. Matched IOPS/throughput coverage is ${number(finalSizing.storagePerformance.measuredVmCoveragePct, 1)}%; enter sustainable capabilities for each active domain and validate peak concurrency before approval.`,
@@ -565,15 +565,16 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
           title: platformCfg.architecture === 'san'
             ? 'SAN CSV / LUN plan'
             : platformCfg.architecture === 's2d' ? 'S2D volume / CSV plan' : 'Hybrid storage volume plan',
-          headers: ['Tier', 'Storage object', 'Planned demand', 'Count by size', 'Count by VM grouping', 'Recommended layout', 'Controlling rule'],
+          headers: ['Tier', 'Storage object', 'Planned demand', 'Count by size', 'VM grouping', 'Granular alternative', 'Recommended layout', 'Controlling rule'],
           rows: finalSizing.csvPlans.map((plan) => [
             platformTiers[plan.tier].label,
             `${plan.domain === 'san' ? 'SAN CSV / LUN' : 'S2D volume / CSV'} (${plan.filesystem})`,
             `${tib(plan.totalTiB)} / ${number(plan.plannedVms)} planned VMs`,
             `ceil(${number(plan.totalTiB, 1)} / ${number(plan.maxSizeTiB, 1)}) = ${number(plan.countByCapacity)}`,
-            `ceil(${number(plan.plannedVms)} / ${number(plan.maxVmsPerCsv)}) = ${number(plan.countByVmLimit)}`,
+            `ceil(${number(plan.plannedVms)} / ${number(plan.maxVmsPerCsv)}) = ${number(plan.countByVmLimit)}${plan.recoveryGroupingApplied ? '' : ' (advisory)'}`,
+            number(plan.granularAdvisoryCount),
             `${number(plan.count)} × ${tib(plan.sizeTiB)}; up to ${number(plan.vmsPerCsv)} VMs each`,
-            plan.driver === 'node-count' ? 'S2D node ownership' : plan.driver === 'vm-count' ? 'VM recovery grouping' : plan.driver === 'both' ? 'Both requirements' : 'Volume-size requirement',
+            plan.driver === 'node-count' ? 'S2D node ownership' : plan.driver === 'operational-balance' ? 'Operational balance' : plan.driver === 'custom-target' ? 'Custom target' : plan.driver === 'vm-count' ? 'VM recovery grouping' : plan.driver === 'both' ? 'Both requirements' : 'Volume-size requirement',
           ]),
         },
       ],

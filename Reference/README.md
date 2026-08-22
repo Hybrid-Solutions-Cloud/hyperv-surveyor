@@ -102,7 +102,7 @@ change its source URL too — or delete the source and retag it `TOOL`.
   unsupported, cache contributes zero usable capacity.
 - **S2D pool metadata needs 4 GiB host RAM per TB of cache per server.** Routinely forgotten,
   worth tens of GiB per node.
-- **≥1 CSV per node, total a whole multiple of node count**, ≤64 CSVs per cluster, ≤64 TiB each,
+- **≥1 CSV per node** so ownership can distribute across the cluster, ≤64 CSVs per cluster, ≤64 TiB each,
   ≤10 TiB when backup is VSS/volsnap.
 - **A 2-node cluster requires a witness.** 3–4 should have one; 5+ gains nothing.
 - **Windows Server 2025 changed NUMA behaviour** — a VM needing more virtual cores than one NUMA
@@ -131,16 +131,12 @@ recovery granularity, and it differs fundamentally by storage type:
 - **S2D — the volume is the *resiliency* unit.** Restore granularity comes from the backup product,
   so the drivers are resiliency tiering, rebuild time, and ownership distribution.
 
-```
-max_csv_size = MIN(64 TiB [MS-REC], 10 TiB if VSS-volsnap [MS], blast_radius [TOOL])
-count        = MAX(ceil(capacity/max_size), ceil(vms/max_vms_per_csv), node_count)
-count        = round_up_to_multiple_of(count, node_count)     [MS-REC]
-error if total across all tiers > 64                          [MS-REC]
-```
-
-Each plan reports which of the three drivers won. In the demo fleet the database tier comes out
-**blast-radius-bound, not capacity-bound** — capacity alone would have put 10 database VMs in one
-restore unit.
+SAN defaults to **Balanced operations**: apply the 64 TiB platform recommendation (or 10 TiB
+VSS/volsnap limit), start a SAN-only cluster at one CSV/LUN per node, and distribute the total by
+tier capacity. The per-tier recovery size and VM-grouping values are shown as a **Granular recovery
+alternative** because they are tool assumptions, not vendor limits. Operators can enforce that
+alternative or enter a custom SAN total; a hard capacity/backup floor can still raise the custom
+count. S2D enforces the recovery targets and a cluster-wide minimum of one volume per node.
 
 ---
 

@@ -10,6 +10,8 @@ export const DEFAULT_CONFIG: ClusterConfig = {
   resiliency: 'three-way-mirror',
   nestedMapMirrorPct: 0.1,
   backupMethod: 'rct',
+  sanCsvLayoutMode: 'balanced',
+  sanCustomCsvCount: 14,
   witnessType: 'cloud',
   // Representative modern 2U node — dual 48-core EPYC class, 1.5 TiB RAM, all-NVMe.
   // Not a Dell BOM: the tool derives a reference architecture from the workload rather than
