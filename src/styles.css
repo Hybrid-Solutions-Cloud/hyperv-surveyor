@@ -110,7 +110,9 @@ a { color: inherit; }
 }
 .top-strip span { display: inline-flex; align-items: center; gap: 6px; }
 .content-wrap { max-width: 1400px; margin: 0 auto; padding: 36px 34px 70px; }
-.site-footer { max-width: 1400px; margin: 0 auto; padding: 18px 34px 30px; color: #8090a0; font-size: 11px; border-top: 1px solid var(--line); }
+.site-footer { max-width: 1400px; margin: 0 auto; padding: 18px 34px 30px; display: flex; align-items: center; justify-content: space-between; gap: 18px; color: #8090a0; font-size: 11px; border-top: 1px solid var(--line); }
+.site-footer a { color: var(--blue); font-weight: 750; text-decoration: none; }
+.site-footer a:hover { text-decoration: underline; }
 .mobile-menu, .mobile-close, .nav-backdrop { display: none; }
 
 .page-header {
@@ -665,6 +667,29 @@ tr.infeasible td { opacity: 0.48; }
 .platform-limit-value { color: var(--navy-800); font-size: 12px; }
 .platform-limits-table td a { display: flex; align-items: center; gap: 5px; width: fit-content; margin-top: 7px; color: var(--blue); font-size: 9px; font-weight: 750; text-decoration: none; }
 
+.about-page { max-width: 1080px; }
+.about-intro { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; }
+.about-icon { width: 46px; height: 46px; display: grid; place-items: center; color: var(--blue); background: #eaf4fb; border: 1px solid #c9ddec; border-radius: 12px; }
+.about-page h2 { margin: 0 0 7px; color: var(--navy-900); }
+.about-page p { color: #506375; line-height: 1.65; }
+.about-intro p, .about-grid p, .warranty-notice > p { margin-bottom: 0; }
+.legal-notice { background: #fffaf0; border-color: #edd7a7; box-shadow: inset 4px 0 #d89a29; }
+.legal-notice-heading, .about-section-heading { display: flex; align-items: flex-start; gap: 11px; color: #a46808; }
+.legal-notice-heading .matrix-category { color: #a46808; }
+.legal-notice-heading h2 { margin-top: 3px; }
+.legal-notice p:last-child { margin-bottom: 0; }
+.about-section-heading { color: var(--blue); }
+.about-section-heading p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+.about-checklist { display: grid; gap: 10px; margin: 17px 0 0; padding: 0; list-style: none; }
+.about-checklist li { position: relative; padding: 11px 13px 11px 35px; color: #506375; background: #f6f9fb; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; line-height: 1.55; }
+.about-checklist li::before { content: '✓'; position: absolute; left: 13px; top: 10px; color: #16876d; font-weight: 900; }
+.about-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.warranty-notice { border-color: #cadce8; }
+.warranty-notice .note { margin-top: 18px; }
+.about-links { display: flex; align-items: center; justify-content: space-between; gap: 22px; }
+.about-links p { margin: 0; font-size: 12px; }
+.about-links .page-action-row { flex: none; }
+
 @media (max-width: 1180px) {
   .workflow-grid { grid-template-columns: repeat(2, 1fr); }
   .journey-grid { grid-template-columns: repeat(2, 1fr); }
@@ -688,6 +713,7 @@ tr.infeasible td { opacity: 0.48; }
   .hero { grid-template-columns: 1fr; margin-top: -36px; }
   .scenario-card { max-width: 560px; }
   .advisor-layout, .deployment-layout, .report-layout, .cost-layout, .method-grid, .two-panel-grid { grid-template-columns: 1fr; }
+  .about-grid { grid-template-columns: 1fr; }
   .detail-columns { grid-template-columns: 1fr 1fr; }
   .recommendation-column, .deployment-inputs, .report-controls, .cost-inputs { position: static; }
   .grid.two { grid-template-columns: 1fr; }
@@ -724,6 +750,8 @@ tr.infeasible td { opacity: 0.48; }
   .question-card { grid-template-columns: 28px 1fr; }
   .binary-choice { grid-column: 2; width: 120px; }
   .matrix-toolbar, .source-note { display: block; }
+  .site-footer, .about-links { display: grid; }
+  .about-intro { grid-template-columns: 1fr; }
   .matrix-toolbar .field, .source-note .btn { margin-top: 12px !important; }
   .matrix-toolbar .library-search, .matrix-toolbar .license-toggle { margin-top: 12px; }
   .library-search { width: 100%; }

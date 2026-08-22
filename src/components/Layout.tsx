@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 import {
   BarChart3,
   BookOpen,
@@ -9,6 +9,7 @@ import {
   Cpu,
   ExternalLink,
   Home,
+  Info,
   Menu,
   Network,
   Workflow,
@@ -38,6 +39,7 @@ const navGroups = [
     { to: '/report', label: 'Solution report', icon: FileText },
     { to: '/project', label: 'Project & scenarios', icon: FolderOpen },
     { to: '/method', label: 'Sources & method', icon: BookOpen },
+    { to: '/about', label: 'About & legal', icon: Info },
   ] },
 ]
 
@@ -133,7 +135,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </div>
         <div className="content-wrap">{children}</div>
         <footer className="site-footer">
-          Hyper-V Surveyor · Windows Server 2025 planning · assumptions and recommendations are labelled in every result
+          <span>Hyper-V Surveyor · Independent planning aid · Estimates require validation</span>
+          <Link to="/about">Important use notice</Link>
         </footer>
       </main>
     </div>
