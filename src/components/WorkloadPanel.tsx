@@ -27,6 +27,13 @@ const SHOW_ALL_ROWS_UP_TO = 1000
 const DEFAULT_ROWS_PER_PAGE = 200
 const NAMES_SHOWN = 25
 
+/** The line above the inventory list. Only a list that fits on one page can be scrolled to see every row. */
+export function rowsShownText(first: number, last: number, matching: number, total: number): string {
+  const of = `${matching.toLocaleString()}${matching < total ? ` matching VMs, out of ${total.toLocaleString()} in the inventory` : ' VMs'}`
+  const rest = last - first + 1 >= matching ? 'Scroll the list to see them all.' : 'Use Previous and Next below the list for the other rows, or choose All under Rows shown.'
+  return `Showing rows ${first.toLocaleString()}–${last.toLocaleString()} of ${of}. ${rest}`
+}
+
 export function WorkloadPanel({ vms, setVms, tiers, report, onImport, onClearAll, onLoadDemo, onPerformanceSource }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const performanceFileRef = useRef<HTMLInputElement>(null)
@@ -360,7 +367,7 @@ export function WorkloadPanel({ vms, setVms, tiers, report, onImport, onClearAll
           <p className="small muted" style={{ marginBottom: 6 }}>
             {shown.length === 0
               ? `No VMs match these filters, out of ${vms.length.toLocaleString()} in the inventory.`
-              : `Showing rows ${(currentPage * pageSize + 1).toLocaleString()}–${Math.min((currentPage + 1) * pageSize, shown.length).toLocaleString()} of ${shown.length.toLocaleString()}${shown.length < vms.length ? ` matching VMs, out of ${vms.length.toLocaleString()} in the inventory` : ' VMs'}. Scroll the list to see them all.`}
+              : rowsShownText(currentPage * pageSize + 1, Math.min((currentPage + 1) * pageSize, shown.length), shown.length, vms.length)}
           </p>
         )}
         {vms.length === 0 ? (
