@@ -33,6 +33,12 @@ export type InventoryFormat = 'rvtools' | 'rvtools-vinfo-csv' | 'inventory-templ
 export interface ImportDetection {
   rdm: boolean
   sharedDisks: boolean
+  /** vDisk Raw Comp. Mode: physical or virtual compatibility. */
+  rdmMode?: boolean
+  /** vDisk Disk Mode: independent disks. */
+  diskMode?: boolean
+  /** vDatastore Type with a datastore path for the VM's disks: vSAN placement. */
+  vsan?: boolean
   encryption: boolean
   vtpm: boolean
 }
@@ -256,6 +262,10 @@ const ENCRYPTION_COLUMNS = ['Encrypted', 'Encryption', 'VM Encrypted', 'Encrypte
 const TPM_COLUMNS = ['TPM', 'vTPM', 'Virtual TPM', 'vTPM present']
 const RDM_COLUMNS = ['Raw', 'Raw Comp. Mode', 'Raw Com. Mode', 'Disk type', 'Type']
 const SHARING_COLUMNS = ['Sharing mode', 'Shared Bus']
+const RDM_MODE_COLUMNS = ['Raw Comp. Mode', 'Raw Com. Mode']
+const DISK_MODE_COLUMNS = ['Disk Mode', 'Mode']
+/** "[datastore] folder/file.vmdk" gives "datastore". */
+const datastoreOf = (path: string) => /^\s*\[([^\]]+)\]/.exec(path)?.[1]?.trim().toLowerCase() ?? ''
 
 type StorageSource = keyof StorageSourceCounts
 
@@ -340,13 +350,24 @@ export function parseRvToolsWorkbook(wb: XLSX.WorkBook): ImportReport {
   })
 
   const vDisk = found.fromTab ? readSheet(wb, 'vDisk') : null
+  const vDatastore = found.fromTab ? readSheet(wb, 'vDatastore') : null
+  const vsanDatastores = new Set((vDatastore ?? [])
+    .filter((row) => /vsan/i.test(text(pick(row, 'Type'))))
+    .map((row) => text(pick(row, 'Name')).toLowerCase())
+    .filter(Boolean))
   const detection: ImportDetection = {
     rdm: hasColumn(vDisk, ...RDM_COLUMNS),
     sharedDisks: hasColumn(vDisk, ...SHARING_COLUMNS),
+    rdmMode: hasColumn(vDisk, ...RDM_MODE_COLUMNS),
+    diskMode: hasColumn(vDisk, ...DISK_MODE_COLUMNS),
+    vsan: hasColumn(vDatastore, 'Type') && (hasColumn(vDisk, 'Path', 'Disk Path') || hasColumn(vInfo, 'Path')),
     encryption: hasColumn(vInfo, ...ENCRYPTION_COLUMNS),
     vtpm: hasColumn(vInfo, ...TPM_COLUMNS),
   }
   const rdmByVm = new Set<number>()
+  const rdmPhysicalByVm = new Set<number>()
+  const independentByVm = new Set<number>()
+  const vsanByVm = new Set<number>()
   const sharedByVm = new Set<number>()
   const sharedDiskOwners = new Map<string, Set<number>>()
   const diskCountByVm = new Map<number, number>()
@@ -356,6 +377,10 @@ export function parseRvToolsWorkbook(wb: XLSX.WorkBook): ImportReport {
     const rawValue = pick(row, 'Raw')
     const compatibility = text(pick(row, 'Raw Comp. Mode', 'Raw Com. Mode'))
     if (flag(rawValue) || /physical|virtual/i.test(compatibility) || /rdm|raw device/i.test(`${typeText} ${text(rawValue)}`)) rdmByVm.add(vmIndex)
+    if (/physical/i.test(compatibility)) rdmPhysicalByVm.add(vmIndex)
+    if (/independent/i.test(text(pick(row, ...DISK_MODE_COLUMNS)))) independentByVm.add(vmIndex)
+    const store = datastoreOf(text(pickFilled(row, 'Path', 'Disk Path')))
+    if (store && vsanDatastores.has(store)) vsanByVm.add(vmIndex)
     const sharing = text(pick(row, 'Sharing mode'))
     const bus = text(pick(row, 'Shared Bus'))
     if (/multi/i.test(sharing) || /physical|virtual/i.test(bus)) {
@@ -482,6 +507,9 @@ export function parseRvToolsWorkbook(wb: XLSX.WorkBook): ImportReport {
         nicCount: num(pick(row, 'NICs')) || undefined,
         snapshotCount: found.fromTab ? snapshotCountByVm.get(rowIndex) ?? 0 : undefined,
         hasRdm: detection.rdm ? rdmByVm.has(rowIndex) : undefined,
+        rdmPhysical: detection.rdmMode ? rdmPhysicalByVm.has(rowIndex) : undefined,
+        hasIndependentDisk: detection.diskMode ? independentByVm.has(rowIndex) : undefined,
+        onVsan: detection.vsan ? vsanByVm.has(rowIndex) || vsanDatastores.has(datastoreOf(text(pick(row, 'Path')))) : undefined,
         hasSharedDisk: detection.sharedDisks ? sharedByVm.has(rowIndex) : undefined,
         encrypted: detection.encryption ? flag(pick(row, ...ENCRYPTION_COLUMNS)) : undefined,
         hasVtpm: detection.vtpm ? flag(pick(row, ...TPM_COLUMNS)) : undefined,
@@ -580,6 +608,8 @@ export function parseRvToolsWorkbook(wb: XLSX.WorkBook): ImportReport {
     !detection.sharedDisks && 'shared disks (no vDisk Sharing mode column)',
     !detection.encryption && 'VM encryption (no Encrypted column)',
     !detection.vtpm && 'vTPM (no TPM column)',
+    !detection.diskMode && 'independent disks (no vDisk Disk Mode column)',
+    !detection.vsan && 'vSAN placement (no vDatastore Type column)',
   ].filter(Boolean)
   if (unchecked.length > 0) {
     warnings.push(`This file could not show ${unchecked.join(', ')}. Readiness cannot report these, which does not mean there are none. Check them in vCenter.`)

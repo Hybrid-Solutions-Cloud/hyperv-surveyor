@@ -63,7 +63,7 @@ export function ExistingResultsPanel({ assessment, hardware, tiers, fitPath, set
 
       <section className="panel">
         <h2>Capacity and headroom</h2>
-        <p className="small muted" style={{ marginTop: -6 }}>Usable capacity after spare hosts and host reserves.{multi ? ' The used share is for the fullest cluster, because VMs do not move between clusters.' : ''} {assessment.annualGrowthPct > 0 ? `At ${(assessment.annualGrowthPct * 100).toFixed(1)}% annual growth, the last column is the year each resource runs out.` : 'Enter annual growth to see the year each resource runs out.'}</p>
+        <p className="small muted" style={{ marginTop: -6 }}>Usable capacity after spare hosts and host reserves.{multi ? ' The used share is for the fullest cluster, because VMs do not move between clusters.' : ''} {assessment.annualGrowthPct > 0 ? `At ${(assessment.annualGrowthPct * 100).toFixed(1)}% annual growth, the last column is the year each resource runs out. ${assessment.exhaustionNote}` : 'Enter annual growth to see the year each resource runs out.'}</p>
         <div className="scroll">
           <table>
             <thead><tr><th>Resource</th><th className="num">Available</th><th className="num">Used</th><th className="num">Headroom</th><th className="num">Used share</th><th>Runs out</th></tr></thead>

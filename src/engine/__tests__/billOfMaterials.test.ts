@@ -54,7 +54,9 @@ describe('what to buy (C1)', () => {
     expect(san.detail).toMatch(/free/)
     expect(san.detail).toMatch(/2\.5:1 data reduction/)
     expect(d.bom.sanConnectivity.required).toBe(true)
-    expect(line(d, /SAN connectivity/)!.quantity).toBe('Not planned yet')
+    // Phase 8: SAN connectivity comes from the Implementation plan (default Fibre Channel, two HBAs per host).
+    expect(d.bom.sanConnectivity.status).toBe('planned')
+    expect(line(d, /Fibre Channel HBAs/)!.quantity).toMatch(new RegExp(`^2 per server, ${(d.totalNodes ?? 0) * 2} in total`))
   })
 
   it('gives no bill of materials for a design that does not fit, or another path', () => {

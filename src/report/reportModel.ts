@@ -14,8 +14,8 @@ import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
 import { DEFAULT_PLACEMENT_INPUTS, type PlacementInputs } from '../engine/deploymentPlanning'
 import { assessStorageDecision, STORAGE_DECISION_QUESTIONS, STORAGE_FAMILY_LABELS, type StorageDecisionAnswers } from '../engine/storageDecision'
 import { assessMigrationReadiness } from '../engine/readiness'
-import { DEFAULT_NETWORK_INPUTS, designNetwork, type NetworkDesignInputs } from '../engine/networkDesign'
-import { DEFAULT_DR_INPUTS, designDisasterRecovery, type DrDesignInputs } from '../engine/drDesign'
+import type { NetworkDesignInputs } from '../engine/networkDesign'
+import { designDisasterRecovery, DR_STRATEGY_LABELS, type DrDesignInputs } from '../engine/drDesign'
 import { DEFAULT_REPORT_METADATA, ENGINE_VERSION, type ProjectDataSource, type ReportMetadata } from '../state/project'
 import {
   additionalVmsByTier, computeHostsToAdd, exhaustionText, existingVerdictLabel, hostGroupLabel, usedShareText,
@@ -226,6 +226,8 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
     managementDeploymentInputs: input.managementDeploymentInputs,
     includeManagementInSizing: input.includeManagementInSizing,
     managementAdvisorAnswers: input.managementAdvisorAnswers,
+    networkDesignInputs: input.networkDesignInputs,
+    drDesignInputs: input.drDesignInputs,
   })
   const managementOnly = design.path === 'management-only'
   const usesExistingHardware = design.path === 'existing'
@@ -265,12 +267,15 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   const fitDecisionLabel = existing ? existingVerdictLabel(existing.verdict) : 'Not assessed'
   const designFails = design.feasible === false
   const split = design.status === 'split'
-  const readiness = assessMigrationReadiness(platformVms, platformCfg)
-  const networkInputs = input.networkDesignInputs ?? DEFAULT_NETWORK_INPUTS
-  const network = design.network.nodes === null ? null : designNetwork(platformCfg, design.network.nodes, networkInputs)
+  // Readiness, network and recovery: the resolved design's Implementation plan, as the page shows it.
+  const readiness = design.implementation.readiness ?? assessMigrationReadiness([], platformCfg)
+  const networkInputs = design.implementation.networkInputs
+  const network = design.implementation.network
   const metadata = { ...DEFAULT_REPORT_METADATA, ...input.reportMetadata }
-  const recoveryInputs = input.drDesignInputs ?? DEFAULT_DR_INPUTS
-  const recovery = designDisasterRecovery(platformVms, finalSizing, recoveryInputs)
+  const recoveryInputs = design.implementation.recoveryInputs
+  const recovery = design.implementation.recovery ?? designDisasterRecovery([], finalSizing, { strategy: 'none' })
+  const recoveryNone = recoveryInputs.strategy === 'none'
+  const strategyLabel = DR_STRATEGY_LABELS[recoveryInputs.strategy]
   const storageGuide = assessStorageDecision(input.storageDecisionAnswers ?? {}, options)
   const binding = usesExistingHardware && existing
     ? existing.firstToRunOut ? RESOURCE_LABELS[existing.firstToRunOut.resource] : 'none'
@@ -687,6 +692,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         ...existing.remedies.performance.map((item) => `Performance: ${item.detail}`),
         ...(existing.remedies.unplaceable.length > 0 ? [`VMs that cannot fit any host: ${existing.remedies.unplaceable.map((vm) => vm.name).slice(0, 20).join(', ')}${existing.remedies.unplaceable.length > 20 ? ` and ${existing.remedies.unplaceable.length - 20} more` : ''}. Use larger hosts or resize these VMs.`] : []),
         ...existing.remedies.blockers.map((item) => `Resolve: ${item}`),
+        ...(existing.annualGrowthPct > 0 ? [`Runs out: ${existing.exhaustionNote}`] : []),
       ],
       tables: !usesExistingHardware || !existing || existing.verdict === 'no-hardware' ? [] : [
         {
@@ -879,27 +885,38 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
     {
       id: 'readiness',
       title: 'Migration readiness',
-      paragraphs: [managementOnly ? 'Workload migration readiness was not assessed.' : 'Readiness uses the source metadata available in the imported inventory. Application-owner validation, test migration, backup verification, and cluster validation remain required.'],
+      paragraphs: managementOnly ? ['Workload migration readiness was not assessed.'] : [
+        'Readiness uses the source metadata in your imported inventory. Application-owner validation, a test migration, backup verification and cluster validation remain required.',
+        readiness.readyMeaning,
+      ],
       metrics: managementOnly ? [
         { label: 'Migration readiness', value: 'Not assessed' },
       ] : [
-        { label: 'Ready', value: number(readiness.ready) },
+        { label: 'Ready', value: number(readiness.ready), detail: 'No exception in your data' },
         { label: 'Review', value: number(readiness.review) },
         { label: 'Blocked', value: number(readiness.blocked) },
         { label: 'Assessed', value: number(readiness.assessed) },
+        { label: 'Checks not run', value: number(readiness.notChecked.length), detail: readiness.notChecked.length > 0 ? 'Data missing for some VMs' : undefined },
       ],
       reasoning: managementOnly ? [] : [{
         decision: `${readiness.ready} ready, ${readiness.review} requiring review, and ${readiness.blocked} blocked`,
         basis: 'Derived from inputs',
-        explanation: 'The readiness status is derived from the source metadata present for each included VM and the known target-platform checks. It is an exception screen, not proof that an application is migration-ready.',
+        explanation: 'Guest OS support is read against Microsoft\'s supported-guest lists, the target generation and its limits from the firmware, and the conversion blockers from the VMM and Windows Admin Center conversion documentation. A VM is Ready only when no check found an exception; checks without data are listed.',
         tradeoff: 'Application-owner approval, dependency discovery, backup verification, a representative migration pilot, and post-migration testing remain required regardless of the calculated status.',
       }],
       bullets: [],
-      tables: managementOnly ? [] : [{
-        title: 'Readiness exceptions',
-        headers: ['VM', 'Status', 'Category', 'Finding', 'Required action'],
-        rows: readiness.findings.map((finding) => [finding.vmName, finding.status, finding.category, finding.finding, finding.action]),
-      }],
+      tables: managementOnly ? [] : [
+        {
+          title: 'Readiness exceptions',
+          headers: ['VM', 'Status', 'Category', 'Finding', 'Required action'],
+          rows: readiness.findings.map((finding) => [finding.vmName, finding.status, finding.category, finding.finding, finding.action]),
+        },
+        ...(readiness.notChecked.length > 0 ? [{
+          title: 'Checks not run (data missing)',
+          headers: ['Check', 'VMs', 'Data it needs'],
+          rows: readiness.notChecked.map((gap) => [gap.check, number(gap.vms), gap.needs]),
+        }] : []),
+      ],
     },
     {
       id: 'storage',
@@ -991,56 +1008,81 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       paragraphs: [managementOnly
         ? 'Host networking was not assessed because no platform hardware profile was supplied.'
         : network
-          ? `The host-network design for ${design.network.nodes} nodes separates management, compute, live migration, and storage intent while identifying switch and RDMA dependencies that must be validated against the physical fabric.`
+          ? `The host network for ${design.network.nodes} nodes uses ${networkInputs.intents.length} Network ATC intent${networkInputs.intents.length === 1 ? '' : 's'}, with each adapter mapped to one intent${network.san ? ', plus SAN connectivity' : ''}. Validate it against the physical fabric.`
           : design.network.reason ?? 'Host networking was not calculated.'],
       metrics: managementOnly ? [
         { label: 'Host network design', value: 'Not assessed' },
       ] : [
-        { label: 'Adapters / node', value: number(networkInputs.adaptersPerNode) },
-        { label: 'Adapter speed', value: `${number(networkInputs.adapterSpeedGbps)} Gbps` },
+        { label: 'Adapters / node', value: number(networkInputs.adaptersPerNode), detail: 'Across your intents' },
+        { label: 'Adapter speed', value: `${number(networkInputs.adapterSpeedGbps)} Gbps`, detail: 'Fastest intent' },
         { label: 'Aggregate / node', value: network ? `${number(network.aggregateGbpsPerNode)} Gbps` : 'Not calculated' },
         { label: 'Host switch ports', value: network ? number(network.totalHostPorts) : 'Not calculated', detail: network ? `For ${design.network.nodes} nodes` : design.network.reason ?? undefined },
-        { label: 'RDMA', value: networkInputs.rdmaProtocol.toUpperCase() },
+        { label: 'BMC ports', value: network ? number(network.bmcPorts) : 'Not calculated' },
+        { label: 'RDMA', value: networkInputs.rdmaProtocol === 'iwarp' ? 'iWARP' : networkInputs.rdmaProtocol === 'roce-v2' ? 'RoCE v2' : 'None' },
+        ...(network?.san ? [
+          { label: 'SAN connectivity', value: network.san.protocol === 'none' ? 'Not chosen' : network.san.protocol === 'fc' ? 'Fibre Channel' : network.san.protocol === 'iscsi' ? 'iSCSI' : 'Other' },
+          { label: 'SAN host ports', value: number(network.san.totalHostPorts), detail: `${network.san.hostPortsPerNode} per host` },
+          { label: 'SAN fabric ports', value: number(network.san.fabricPortsNeeded), detail: `${number(network.san.totalHostPorts)} host and ${number(network.san.arrayPorts)} array` },
+          { label: 'Paths / LUN', value: number(networkInputs.san.pathsPerLun), detail: `Up to ${number(network.san.maxPathsPerLun)} possible; MPIO ${networkInputs.san.mpio ? 'on' : 'off'}` },
+        ] : []),
+        ...(network?.traffic ? [{ label: 'Network P95, all VMs', value: `${number(network.traffic.totalP95Mbps)} Mbps`, detail: `Compute bandwidth ${number(network.traffic.computeMbps)} Mbps; ${number(network.traffic.measuredVms)} of ${number(network.traffic.includedVms)} VMs measured` }] : []),
       ],
       reasoning: managementOnly || !network ? [] : [{
-        decision: `Use ${networkInputs.adaptersPerNode} × ${networkInputs.adapterSpeedGbps} Gbps host adapters with ${networkInputs.rdmaProtocol.toUpperCase()}`,
+        decision: `Map ${networkInputs.adaptersPerNode} adapters per host to ${networkInputs.intents.length} intent${networkInputs.intents.length === 1 ? '' : 's'}`,
         basis: 'User-selected',
-        explanation: `The entered host profile provides ${number(network.aggregateGbpsPerNode)} Gbps aggregate link rate per node and ${number(network.totalHostPorts)} host-facing switch ports across ${design.network.nodes} nodes. Management, compute, live migration, and storage intents are separated in the generated plan.`,
-        tradeoff: 'Aggregate link rate is not guaranteed usable throughput. Validate switch redundancy, oversubscription, QoS, VLANs, RDMA configuration, SAN paths, cabling, and failure behavior against the final physical topology.',
+        explanation: `The intents give ${number(network.aggregateGbpsPerNode)} Gbps aggregate link rate per node and ${number(network.totalHostPorts)} host-facing switch ports across ${design.network.nodes} nodes, plus ${number(network.bmcPorts)} BMC ports.`,
+        tradeoff: 'Aggregate link rate is not guaranteed usable throughput. Validate switch redundancy, oversubscription, QoS, VLANs, RDMA configuration, SAN zoning, cabling and failure behavior against the final physical topology.',
       }],
       bullets: managementOnly || !network ? [] : network.findings.map((finding) => `${finding.severity.toUpperCase()}: ${finding.message}`),
-      tables: managementOnly || !network ? [] : [{ title: 'Network intents', headers: ['Intent'], rows: network.intentSummary.map((intent) => [intent]) }],
+      tables: managementOnly || !network ? [] : [
+        { title: 'Network intents', headers: ['Intent', 'Traffic', 'Adapters / host', 'Speed', 'SET team', 'Ports'], rows: network.intents.map((intent) => [intent.name, intent.types.join(', ') || 'None', number(intent.adapters), `${number(intent.speedGbps, 1)} Gbps`, intent.setTeam ? 'Yes' : 'No', number(intent.portsTotal)]) },
+        { title: 'Network plan', headers: ['Item'], rows: network.intentSummary.map((intent) => [intent]) },
+      ],
     },
     {
       id: 'recovery',
       title: 'Backup and disaster recovery',
-      paragraphs: [managementOnly ? 'Workload backup and disaster recovery were not assessed.' : 'Cluster high availability protects against selected local failures; the recovery design separately addresses site loss, corruption, and restoration objectives. Replication bandwidth remains an estimate until measured changed-block data is available.'],
+      paragraphs: managementOnly ? ['Workload backup and disaster recovery were not assessed.'] : recoveryNone ? [
+        'No disaster-recovery strategy is selected, so no protected scope, WAN or recovery-time figures are given. Cluster high availability does not protect against site loss.',
+      ] : [
+        `Cluster high availability protects against local failures; the recovery design addresses site loss, corruption and restore objectives. RPO and RTO are checked against ${strategyLabel} with the assumptions below.`,
+      ],
       metrics: managementOnly ? [
         { label: 'Workload recovery design', value: 'Not assessed' },
+      ] : recoveryNone ? [
+        { label: 'Strategy', value: strategyLabel },
       ] : [
-        { label: 'Strategy', value: recoveryInputs.strategy },
+        { label: 'Strategy', value: strategyLabel },
         { label: 'Protected VMs', value: number(recovery.protectedVms) },
         { label: 'Protected storage', value: tib(recovery.protectedStorageTiB) },
         { label: 'Secondary storage', value: tib(recovery.secondaryStorageTiB) },
-        { label: 'Estimated burst WAN', value: `${number(recovery.estimatedBurstMbps, 1)} Mbps`, detail: recovery.bandwidthPasses ? 'Within entered WAN capacity' : 'Above entered WAN capacity' },
+        ...(recovery.estimatedBurstMbps !== null ? [{ label: 'Estimated burst WAN', value: `${number(recovery.estimatedBurstMbps, 1)} Mbps`, detail: recovery.bandwidthPasses === false ? 'Above your WAN' : 'Within your WAN' }] : []),
         { label: 'RPO / RTO', value: `${number(recoveryInputs.rpoMinutes, 1)} min / ${number(recoveryInputs.rtoHours, 1)} hr` },
+        ...(recovery.replicationIntervalMinutes !== null ? [{ label: 'Replication interval', value: recovery.replicationIntervalMinutes === 0.5 ? '30 seconds' : `${number(recovery.replicationIntervalMinutes)} minutes` }] : []),
+        { label: 'RPO check', value: recovery.rpoPasses === null ? 'Validate with your vendor' : recovery.rpoPasses ? 'Meets your RPO' : 'Misses your RPO' },
+        { label: 'Recovery estimate', value: recovery.estimatedRecoveryHours === null ? 'Not estimated' : `${number(recovery.estimatedRecoveryHours, 1)} hr`, detail: recovery.rtoPasses === null ? undefined : recovery.rtoPasses ? 'Meets your RTO' : 'Misses your RTO' },
+        ...(recovery.seedingDays !== null ? [{ label: 'Initial copy over the WAN', value: `${number(recovery.seedingDays, 1)} days` }] : []),
+        ...(recovery.secondaryHosts !== null ? [{ label: 'Secondary hosts', value: number(recovery.secondaryHosts), detail: 'Before a failure reserve' }] : []),
       ],
-      reasoning: managementOnly ? [] : [
+      reasoning: managementOnly || recoveryNone ? [] : [
         {
-          decision: `Use ${recoveryInputs.strategy} for ${number(recoveryInputs.protectedWorkloadPct, 1)}% of workloads`,
+          decision: `Use ${strategyLabel} for ${number(recovery.protectedVms)} of ${number(includedVms.length)} VMs`,
           basis: 'User-selected',
-          explanation: `The selected protection scope covers ${recovery.protectedVms} VMs and ${tib(recovery.protectedStorageTiB)} of modeled storage with a target RPO/RTO of ${number(recoveryInputs.rpoMinutes, 1)} minutes / ${number(recoveryInputs.rtoHours, 1)} hours.`,
+          explanation: `The protected scope is ${recovery.protectedVms} VMs and ${tib(recovery.protectedStorageTiB)} of modeled storage, in the same proportion, with a target RPO/RTO of ${number(recoveryInputs.rpoMinutes, 1)} minutes / ${number(recoveryInputs.rtoHours, 1)} hours.`,
           tradeoff: 'Cluster HA handles local component failures; it does not replace backup, immutable recovery, application consistency, or site-loss protection.',
         },
-        {
-          decision: recovery.bandwidthPasses ? 'The entered WAN passes the planning estimate' : 'The entered WAN does not pass the planning estimate',
-          basis: 'Calculated',
-          explanation: `The bandwidth estimate applies a ${number(recoveryInputs.dailyChangeRatePct, 1)}% daily change rate and ${number(recoveryInputs.burstFactor, 1)}x burst factor to protected consumed storage, producing ${number(recovery.estimatedBurstMbps, 1)} Mbps against ${number(recoveryInputs.availableWanMbps, 1)} Mbps entered capacity.`,
+        ...(recovery.estimatedBurstMbps !== null ? [{
+          decision: recovery.bandwidthPasses === false ? 'Your WAN does not pass the planning estimate' : 'Your WAN passes the planning estimate',
+          basis: 'Calculated' as const,
+          explanation: `The estimate applies a ${number(recoveryInputs.dailyChangeRatePct, 1)}% daily change rate and ${number(recoveryInputs.burstFactor, 1)}x burst factor to protected consumed storage, giving ${number(recovery.estimatedBurstMbps, 1)} Mbps against ${number(recoveryInputs.availableWanMbps, 1)} Mbps.`,
           tradeoff: 'This estimate is not measured changed-block telemetry. Measure real write-change patterns and test failover and failback before committing bandwidth or RPO claims.',
-        },
+        }] : []),
       ],
-      bullets: managementOnly ? [] : recovery.findings.map((finding) => `${finding.severity.toUpperCase()}: ${finding.message}`),
-      tables: [],
+      bullets: managementOnly ? [] : [
+        ...recovery.assumptions.map((item) => `ASSUMPTION: ${item}`),
+        ...recovery.findings.map((finding) => `${finding.severity.toUpperCase()}: ${finding.message}`),
+      ],
+      tables: !managementOnly && recovery.asrBlockers.length > 0 ? [{ title: 'Azure Site Recovery blockers', headers: ['VM', 'Blocker'], rows: recovery.asrBlockers.map((item) => [item.vmName, item.reason]) }] : [],
     },
     {
       id: 'management',

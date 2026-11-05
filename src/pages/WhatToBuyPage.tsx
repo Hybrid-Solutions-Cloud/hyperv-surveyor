@@ -49,7 +49,7 @@ export default function WhatToBuyPage() {
                   </table>
                 </div>
                 {bom.sanConnectivity.required && (
-                  <div className="note"><strong>SAN connectivity: not planned yet</strong>{bom.sanConnectivity.note}</div>
+                  <div className={`note ${bom.sanConnectivity.status === 'planned' ? '' : 'warn'}`}><strong>SAN connectivity{bom.sanConnectivity.status === 'planned' ? ' from your Implementation plan' : ': not chosen'}</strong>{bom.sanConnectivity.note} Change it on the Implementation plan page.</div>
                 )}
               </>
             )}

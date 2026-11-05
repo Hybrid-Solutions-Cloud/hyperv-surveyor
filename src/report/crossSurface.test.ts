@@ -93,9 +93,12 @@ function expectNewPlatformAgreement({ design, report, sheets, project }: Surface
   expect(metric(report, 'deployment', 'Total nodes')?.value).toBe(design.totalNodes === null ? 'Not calculated' : num(design.totalNodes))
   const ports = metric(report, 'network', 'Host switch ports')?.value
   if (design.network.nodes === null) expect(ports).toBe('Not calculated')
-  else expect(ports).toBe(num(designNetwork(design.cfg, design.network.nodes, payload.networkDesignInputs).totalHostPorts))
-  if (design.sizing) {
-    const dr = designDisasterRecovery(payload.vms, design.sizing, payload.drDesignInputs)
+  else expect(ports).toBe(num(design.implementation.network!.totalHostPorts))
+  // Phase 8: the page, report and workbook read the resolved design's Implementation plan.
+  expect(design.implementation.network?.totalHostPorts ?? null).toBe(design.network.nodes === null ? null : designNetwork(design.cfg, design.network.nodes, payload.networkDesignInputs, { workloadNodes: design.workloadNodes ?? design.network.nodes }).totalHostPorts)
+  if (design.implementation.recovery) {
+    const dr = design.implementation.recovery
+    expect(dr.protectedStorageTiB).toBeCloseTo(design.storage?.requiredTiB ?? designDisasterRecovery(payload.vms, design.sizing!, payload.drDesignInputs).protectedStorageTiB, 6)
     expect(metric(report, 'recovery', 'Protected storage')?.value).toBe(`${dr.protectedStorageTiB.toLocaleString('en-US', { maximumFractionDigits: 2 })} TiB`)
   }
   // Project comparison.

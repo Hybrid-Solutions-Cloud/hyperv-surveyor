@@ -23,8 +23,8 @@ export interface BillOfMaterials {
   reason: string | null
   title: string
   lines: BomLine[]
-  /** Phase 8 hook: SAN connectivity (HBA or iSCSI NICs, MPIO, zoning) is not modelled yet. */
-  sanConnectivity: { required: boolean; status: 'not-modelled'; note: string }
+  /** SAN connectivity from the Implementation plan: adapters, ports, paths and fabrics. */
+  sanConnectivity: { required: boolean; status: 'planned' | 'not-chosen' | 'not-applicable'; note: string }
   caveats: string[]
 }
 
@@ -36,19 +36,20 @@ export const BOM_CAVEATS = [
 
 /** Microsoft S2D network guidance: 10 GbE minimum for 2-3 nodes; 25 GbE or faster with RDMA for 4+ nodes. [MS-REC] */
 export const S2D_NETWORK_SOURCE = SRC.s2dHardware
+const SRC_CLUSTERING = 'https://learn.microsoft.com/windows-server/failover-clustering/clustering-requirements'
 
 const fmt = (value: number, digits = 0) => value.toLocaleString('en-US', { maximumFractionDigits: digits })
 
 /** Builds the bill of materials from a resolved design. Only new-platform designs that fit get one. */
 export function buildBillOfMaterials(design: PlatformDesign): BillOfMaterials {
   const usesSan = design.cfg.architecture === 'san' || design.cfg.architecture === 'hybrid'
-  const sanConnectivity = {
-    required: usesSan,
-    status: 'not-modelled' as const,
-    note: usesSan
-      ? 'SAN connectivity (Fibre Channel HBAs or iSCSI adapters, MPIO, zoning, path counts) is not planned yet. Size it with your array vendor.'
-      : 'Not applicable: this design has no external array.',
-  }
+  const sanPlan = design.implementation.network?.san ?? null
+  const sanInputs = design.implementation.networkInputs.san
+  const sanConnectivity: BillOfMaterials['sanConnectivity'] = !usesSan
+    ? { required: false, status: 'not-applicable', note: 'Not applicable: this design has no external array.' }
+    : sanInputs.protocol === 'none'
+      ? { required: true, status: 'not-chosen', note: 'No SAN connectivity is chosen. Choose Fibre Channel, iSCSI or other in the Implementation plan.' }
+      : { required: true, status: 'planned', note: `${sanInputs.protocol === 'fc' ? 'Fibre Channel' : sanInputs.protocol === 'iscsi' ? 'iSCSI' : 'Other'}: ${sanInputs.adaptersPerHost} adapter(s) × ${sanInputs.portsPerAdapter} port(s) at ${sanInputs.speedGbps} Gbps per host, ${sanInputs.pathsPerLun} paths per LUN over ${sanInputs.fabrics} fabric(s), MPIO ${sanInputs.mpio ? 'on' : 'off'}. Validate zoning and host settings with your array vendor.` }
   const empty = (reason: string): BillOfMaterials => ({ available: false, reason, title: 'What to buy', lines: [], sanConnectivity, caveats: BOM_CAVEATS })
   if (design.path !== 'new-platform') return empty('A bill of materials is given for new-platform designs only.')
   if (design.status === 'no-workload') return empty('Add workloads first.')
@@ -108,45 +109,59 @@ export function buildBillOfMaterials(design: PlatformDesign): BillOfMaterials {
     }
   }
 
-  // Network classes. Storage: Microsoft's S2D guidance. Other traffic and BMC ports: tool assumptions.
+  // Network classes, from the intents in your Implementation plan. Storage: Microsoft's S2D guidance.
   const smallestCluster = design.status === 'split' ? Math.min(...design.clusters.map((cluster) => cluster.nodes ?? Infinity)) : nodes
-  let storagePorts = 0
-  if (usesS2d) {
-    storagePorts = 2
+  const network = design.implementation.network
+  const netInputs = design.implementation.networkInputs
+  const intents = network?.intents ?? []
+  const storageIntent = usesS2d ? intents.find((intent) => intent.types.includes('storage')) : undefined
+  const portsBySpeed = new Map<number, number>()
+  const addPorts = (speed: number, count: number) => { if (count > 0) portsBySpeed.set(speed, (portsBySpeed.get(speed) ?? 0) + count) }
+  if (storageIntent) {
+    const rdma = netInputs.rdmaProtocol === 'none' ? 'no RDMA selected' : netInputs.rdmaProtocol === 'iwarp' ? 'iWARP' : 'RoCE v2'
     lines.push({
       category: 'Network',
       item: smallestCluster >= 4 ? 'Storage network adapters: 25 GbE or faster, RDMA' : 'Storage network adapters: 10 GbE minimum (25 GbE RDMA recommended)',
-      quantity: `2 ports per server, ${fmt(nodes * 2)} in total`,
-      detail: smallestCluster >= 4
+      quantity: `${storageIntent.adapters} ports per server, ${fmt(nodes * storageIntent.adapters)} in total`,
+      detail: `${storageIntent.name} intent at ${fmt(storageIntent.speedGbps, 1)} GbE, ${rdma}. ${smallestCluster >= 4
         ? 'For 4 or more nodes Microsoft recommends RDMA-capable adapters (iWARP recommended, or RoCE, which needs Data Center Bridging on the switches) at 25 Gbps or faster, with two or more connections per node.'
-        : 'For 2 to 3 nodes Microsoft states a 10 Gbps minimum with two or more connections per node; RDMA at 25 Gbps is recommended for performance. Two-node clusters can be cabled switchless.',
+        : 'For 2 to 3 nodes Microsoft states a 10 Gbps minimum with two or more connections per node; RDMA at 25 Gbps is recommended for performance. Two-node clusters can be cabled switchless.'}`,
       basis: 'MS-REC',
       source: S2D_NETWORK_SOURCE,
     })
+    addPorts(storageIntent.speedGbps, nodes * storageIntent.adapters)
   }
-  const hostPorts = 2
-  lines.push({
-    category: 'Network',
-    item: usesS2d ? 'Management, VM and live-migration adapters: 25 GbE' : 'Management, VM, live-migration and cluster adapters: 25 GbE',
-    quantity: `${hostPorts} ports per server, ${fmt(nodes * hostPorts)} in total`,
-    detail: 'A redundant pair teamed with Switch Embedded Teaming. Tool assumption: converging these onto the storage adapters with Network ATC is also valid; confirm in the network design.',
-    basis: 'TOOL',
-    source: SRC.networkAtc,
+  intents.filter((intent) => intent !== storageIntent && intent.adapters > 0).forEach((intent) => {
+    lines.push({
+      category: 'Network',
+      item: `${intent.name} adapters (${intent.types.join(', ') || 'no traffic type'}): ${fmt(intent.speedGbps, 1)} GbE`,
+      quantity: `${intent.adapters} ports per server, ${fmt(nodes * intent.adapters)} in total`,
+      detail: `From your network intents.${intent.setTeam ? ' Teamed with Switch Embedded Teaming (up to eight adapters in a team).' : ''} Each adapter belongs to one Network ATC intent.`,
+      basis: 'Calculated',
+      source: SRC.networkAtc,
+    })
+    addPorts(intent.speedGbps, nodes * intent.adapters)
   })
-  lines.push({
-    category: 'Network',
-    item: 'Out-of-band management (BMC) port',
-    quantity: `1 per server, ${fmt(nodes)} in total`,
-    detail: '1 GbE management port for the server baseboard controller. Tool assumption.',
-    basis: 'TOOL',
-  })
-  const dataPorts = nodes * (storagePorts + hostPorts)
+  const bmcPerNode = netInputs.bmcPortsPerNode
+  if (bmcPerNode > 0) {
+    lines.push({
+      category: 'Network',
+      item: 'Out-of-band management (BMC) port',
+      quantity: `${bmcPerNode} per server, ${fmt(nodes * bmcPerNode)} in total`,
+      detail: '1 GbE management port for the server baseboard controller. Tool assumption for the speed.',
+      basis: 'TOOL',
+    })
+  }
+  const san = network?.san ?? null
+  if (san?.onEthernet) addPorts(netInputs.san.speedGbps, san.totalHostPorts + san.arrayPorts)
+  const dataPorts = [...portsBySpeed.values()].reduce((total, value) => total + value, 0)
+  const speedText = [...portsBySpeed.entries()].sort((a, b) => b[0] - a[0]).map(([speed, count]) => `${fmt(count)} × ${fmt(speed, 1)} GbE`).join(', ')
   lines.push({
     category: 'Switching',
     item: 'Top-of-rack switch ports',
-    quantity: `${fmt(dataPorts)} × 25 GbE and ${fmt(nodes)} × 1 GbE`,
-    detail: `Spread across a redundant switch pair (${fmt(Math.ceil(dataPorts / 2))} data ports on each). Add uplinks and inter-switch links.${usesS2d ? ' With RoCE, the switches must support Data Center Bridging (PFC and ETS).' : ''} Tool assumption for the pair; port counts are calculated.`,
-    basis: 'TOOL',
+    quantity: `${speedText || '0 data ports'}${bmcPerNode > 0 ? ` and ${fmt(nodes * bmcPerNode)} × 1 GbE` : ''}`,
+    detail: `Spread across a redundant switch pair (${fmt(Math.ceil(dataPorts / 2))} data ports on each). Add uplinks and inter-switch links.${san?.onEthernet ? ' Includes the iSCSI host and array ports.' : ''}${usesS2d && netInputs.rdmaProtocol === 'roce-v2' ? ' With RoCE, the switches must support Data Center Bridging (PFC and ETS).' : ''} Port counts are calculated from your intents.`,
+    basis: 'Calculated',
   })
 
   if (usesSan && design.storage) {
@@ -169,7 +184,26 @@ export function buildBillOfMaterials(design: PlatformDesign): BillOfMaterials {
         basis: 'Calculated',
       })
     }
-    lines.push({ category: 'SAN', item: 'SAN connectivity', quantity: 'Not planned yet', detail: sanConnectivity.note, basis: 'TOOL' })
+    if (sanConnectivity.status !== 'planned' || !sanPlan) {
+      lines.push({ category: 'SAN', item: 'SAN connectivity', quantity: 'Not chosen', detail: sanConnectivity.note, basis: 'TOOL' })
+    } else {
+      const adapterName = sanInputs.protocol === 'fc' ? 'Fibre Channel HBAs' : sanInputs.protocol === 'iscsi' ? 'iSCSI network adapters (dedicated)' : 'SAN adapters'
+      lines.push({
+        category: 'SAN',
+        item: `${adapterName}: ${fmt(sanInputs.speedGbps, 1)} Gbps, ${sanInputs.portsPerAdapter} port(s) each`,
+        quantity: `${sanInputs.adaptersPerHost} per server, ${fmt(nodes * sanInputs.adaptersPerHost)} in total (${fmt(sanPlan.totalHostPorts)} ports)`,
+        detail: `${sanConnectivity.note} Each clustered server needs adapters or HBAs dedicated to cluster storage, with multipath I/O.`,
+        basis: 'Calculated',
+        source: SRC_CLUSTERING,
+      })
+      lines.push({
+        category: 'SAN',
+        item: sanPlan.onEthernet ? 'iSCSI switch ports' : 'SAN fabric switch ports',
+        quantity: `${fmt(sanPlan.fabricPortsNeeded)} (${fmt(sanPlan.totalHostPorts)} host, ${fmt(sanPlan.arrayPorts)} array)`,
+        detail: `${fmt(sanPlan.hostPortsPerFabric)} host ports in each of ${sanInputs.fabrics} fabric(s), plus ${sanInputs.arrayPortsPerFabric} array port(s) per fabric. Up to ${sanPlan.maxPathsPerLun} paths per LUN are possible with this zoning.${sanPlan.onEthernet ? ' These ports are also counted in the top-of-rack total.' : ''}`,
+        basis: 'Calculated',
+      })
+    }
   }
 
   lines.push({

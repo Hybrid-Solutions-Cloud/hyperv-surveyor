@@ -153,6 +153,76 @@ export function bomSheet(design: PlatformDesign): WorkbookSheet {
   }
 }
 
+/** The Implementation plan: readiness, network with SAN connectivity, and recovery, from the resolved design. */
+export function implementationSheets(design: PlatformDesign): WorkbookSheet[] {
+  const { readiness, network, networkInputs, recovery, recoveryInputs } = design.implementation
+  const sheets: WorkbookSheet[] = []
+  if (readiness) {
+    sheets.push({ name: 'Readiness', rows: [
+      ['MIGRATION READINESS'],
+      [readiness.readyMeaning],
+      ['Ready', readiness.ready],
+      ['Review', readiness.review],
+      ['Blocked', readiness.blocked],
+      ['Assessed', readiness.assessed],
+      [],
+      ['VM', 'Status', 'Category', 'Finding', 'Required action', 'Source'],
+      ...readiness.findings.map((finding) => [finding.vmName, finding.status, finding.category, finding.finding, finding.action, finding.source ?? '']),
+      ...(readiness.notChecked.length > 0 ? [[], ['CHECKS NOT RUN (DATA MISSING)'], ['Check', 'VMs', 'Data it needs'], ...readiness.notChecked.map((gap) => [gap.check, gap.vms, gap.needs])] : []),
+    ] })
+  }
+  if (design.path !== 'management-only') {
+    sheets.push({ name: 'Network', rows: network ? [
+      ['HOST NETWORK DESIGN'],
+      ['Nodes', design.network.nodes],
+      ['Host switch ports', network.totalHostPorts],
+      ['BMC ports', network.bmcPorts],
+      ['Aggregate per host (Gbps)', network.aggregateGbpsPerNode],
+      ['RDMA', networkInputs.rdmaProtocol],
+      [],
+      ['Intent', 'Traffic', 'Adapters per host', 'Speed (Gbps)', 'SET team', 'Ports'],
+      ...network.intents.map((intent) => [intent.name, intent.types.join(', '), intent.adapters, intent.speedGbps, intent.setTeam ? 'Yes' : 'No', intent.portsTotal]),
+      ...(network.san ? [[], ['SAN CONNECTIVITY'],
+        ['Protocol', network.san.protocol],
+        ['Adapters per host', networkInputs.san.adaptersPerHost],
+        ['Ports per adapter', networkInputs.san.portsPerAdapter],
+        ['Speed (Gbps)', networkInputs.san.speedGbps],
+        ['Host ports', network.san.totalHostPorts],
+        ['Fabrics', networkInputs.san.fabrics],
+        ['Fabric ports needed', network.san.fabricPortsNeeded],
+        ['Paths per LUN', networkInputs.san.pathsPerLun],
+        ['Most paths possible', network.san.maxPathsPerLun],
+        ['MPIO', networkInputs.san.mpio ? 'On' : 'Off']] : []),
+      ...(network.traffic ? [[], ['NETWORK P95'], ['Sum of VM P95 (Mbps)', Math.round(network.traffic.totalP95Mbps)], ['Compute bandwidth (Mbps)', Math.round(network.traffic.computeMbps)], ['VMs measured', network.traffic.measuredVms]] : []),
+      [], ['Severity', 'Finding', 'Source'],
+      ...network.findings.map((finding) => [finding.severity.toUpperCase(), finding.message, finding.source ?? '']),
+    ] : [['HOST NETWORK DESIGN'], [design.network.reason ?? 'Not calculated.']] })
+    sheets.push({ name: 'Recovery', rows: !recovery || recoveryInputs.strategy === 'none' ? [
+      ['BACKUP AND DISASTER RECOVERY'], ['Strategy', 'Not selected'], ['No protected scope, WAN or recovery-time figures are given.'],
+    ] : [
+      ['BACKUP AND DISASTER RECOVERY'],
+      ['Strategy', recoveryInputs.strategy],
+      ['RPO (minutes)', recoveryInputs.rpoMinutes],
+      ['RTO (hours)', recoveryInputs.rtoHours],
+      ['Protected VMs', recovery.protectedVms],
+      ['Protected storage (TiB)', Math.round(recovery.protectedStorageTiB * 100) / 100],
+      ['Secondary storage (TiB)', Math.round(recovery.secondaryStorageTiB * 100) / 100],
+      ['Estimated burst WAN (Mbps)', recovery.estimatedBurstMbps === null ? 'Not applicable' : Math.round(recovery.estimatedBurstMbps)],
+      ['Replication interval (minutes)', recovery.replicationIntervalMinutes ?? 'Not applicable'],
+      ['RPO check', recovery.rpoPasses === null ? 'Validate with your vendor' : recovery.rpoPasses ? 'Meets' : 'Misses'],
+      ['Recovery estimate (hours)', recovery.estimatedRecoveryHours === null ? 'Not estimated' : Math.round(recovery.estimatedRecoveryHours * 10) / 10],
+      ['RTO check', recovery.rtoPasses === null ? 'Not estimated' : recovery.rtoPasses ? 'Meets' : 'Misses'],
+      ['Initial copy over the WAN (days)', recovery.seedingDays === null ? 'Not applicable' : Math.round(recovery.seedingDays * 10) / 10],
+      ['Secondary hosts', recovery.secondaryHosts ?? 'Not applicable'],
+      [], ['ASSUMPTIONS'], ...recovery.assumptions.map((item) => [item]),
+      ...(recovery.asrBlockers.length > 0 ? [[], ['AZURE SITE RECOVERY BLOCKERS'], ['VM', 'Blocker'], ...recovery.asrBlockers.map((item) => [item.vmName, item.reason])] : []),
+      [], ['Severity', 'Finding', 'Source'],
+      ...recovery.findings.map((finding) => [finding.severity.toUpperCase(), finding.message, finding.source ?? '']),
+    ] })
+  }
+  return sheets
+}
+
 function findingsSheet(design: PlatformDesign): WorkbookSheet {
   return {
     name: 'Findings',
@@ -335,6 +405,7 @@ export function designWorkbookSheets(design: PlatformDesign, vms: Vm[], generate
     { name: 'Tier Policy', rows: tierPolicy },
     { name: 'Inventory', rows: inventoryRows(vms) },
     { name: 'Data Quality', rows: dataQuality },
+    ...implementationSheets(design),
     ...licensingSheet(design, vms, costModel),
   ]
 }
@@ -403,6 +474,7 @@ export function existingWorkbookSheets(design: PlatformDesign, vms: Vm[], genera
   const headroom: unknown[][] = [
     ['CAPACITY AND HEADROOM BY RESOURCE'],
     [`Annual growth ${r1(assessment.annualGrowthPct * 100)}%`],
+    [assessment.exhaustionNote],
     ['Resource', 'Unit', 'Available', 'Used', 'Headroom', 'Used share (fullest cluster)', 'Runs out'],
     ...assessment.resources.map((item) => [item.label, item.unit, r1(item.available), r1(item.used), r1(item.headroom), usedShareText(item.worstPct), exhaustionText(item, assessment.annualGrowthPct)]),
   ]
@@ -422,7 +494,7 @@ export function existingWorkbookSheets(design: PlatformDesign, vms: Vm[], genera
   const byTier = additionalVmsByTier(assessment)
   const tierCapacity: unknown[][] = [
     ['ADDITIONAL VM CAPACITY'],
-    ['Values are mutually exclusive. Filling one tier consumes headroom available to the others. Empty tiers use the documented nominal fallback profile.'],
+    ['Values are mutually exclusive. Filling one tier consumes headroom available to the others. Empty tiers use the documented nominal fallback profile. With one shared array, the clusters together cannot pass its room.'],
     [],
     ['Chosen profile', assessment.profile.label],
     ['Profile vCPU', r1(assessment.profile.vCpu)],
@@ -462,6 +534,7 @@ export function existingWorkbookSheets(design: PlatformDesign, vms: Vm[], genera
     storagePlanSheet(design),
     { name: 'Findings', rows: findings },
     { name: 'Inventory', rows: inventory },
+    ...implementationSheets(design),
     ...licensingSheet(design, vms, costModel),
   ]
 }

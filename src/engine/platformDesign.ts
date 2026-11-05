@@ -28,6 +28,9 @@ import { sanCapacityTiB, sanFreeSpaceTarget } from './capacity'
 import { licensableCores } from './compute'
 import { overLimitAdvice } from './advice'
 import { buildBillOfMaterials, type BillOfMaterials } from './billOfMaterials'
+import { assessMigrationReadiness, type MigrationReadiness } from './readiness'
+import { designNetwork, normalizeNetworkDesignInputs, type NetworkDesign, type NetworkDesignInputs } from './networkDesign'
+import { designDisasterRecovery, normalizeDrDesignInputs, type DrDesign, type DrDesignInputs } from './drDesign'
 import type { ClusterConfig, CsvPlan, Finding, SizingResult, TierId, TierPolicy, Vm } from './types'
 
 export type DesignEngagementMode = 'new-platform' | 'existing-capacity' | 'fit-gap' | 'management-only'
@@ -54,6 +57,24 @@ export interface PlatformDesignInputs {
   includeManagementInSizing: boolean
   /** Management Plane Advisor answers. The stack follows them until the user picks stack fields. */
   managementAdvisorAnswers?: AdvisorAnswers
+  /** Implementation plan inputs. Defaults apply when absent. */
+  networkDesignInputs?: Partial<NetworkDesignInputs>
+  drDesignInputs?: Partial<DrDesignInputs>
+}
+
+/**
+ * The Implementation plan for the design: migration readiness, host networking with SAN
+ * connectivity, and recovery. Every surface reads these, so the page, report and workbook agree.
+ */
+export interface DesignImplementation {
+  /** Null on the management-only path. */
+  readiness: MigrationReadiness | null
+  networkInputs: NetworkDesignInputs
+  /** Null when the design has no node count to cable; design.network.reason says why. */
+  network: NetworkDesign | null
+  recoveryInputs: DrDesignInputs
+  /** Null on the management-only path or with no sized platform. */
+  recovery: DrDesign | null
 }
 
 export type PlatformPath = 'new-platform' | 'existing' | 'management-only'
@@ -203,6 +224,9 @@ export interface PlatformDesign {
   network: { nodes: number | null; reason: string | null }
   findings: Finding[]
   errors: string[]
+  /** The workload inventory the design was resolved from. */
+  vms: Vm[]
+  implementation: DesignImplementation
   /** Class-level bill of materials for a new-platform design that fits; otherwise unavailable with a reason. */
   bom: BillOfMaterials
 }
@@ -767,8 +791,9 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
     ...(status === 'does-not-fit' && findings.every((finding) => finding.severity !== 'error') ? [headline] : []),
   ]
 
-  const design: Omit<PlatformDesign, 'bom'> = {
+  const design: Omit<PlatformDesign, 'bom' | 'implementation'> = {
     path,
+    vms: input.vms,
     engagementMode,
     platformLabel,
     cfg,
@@ -818,7 +843,40 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
     findings,
     errors: [...new Set(errors)],
   }
-  return { ...design, bom: buildBillOfMaterials(design as PlatformDesign) }
+  return withImplementation(design, input)
+}
+
+/**
+ * Adds the Implementation plan, and the bill of materials that reads it, to a resolved design.
+ * The hook calls this on its own when only network or recovery inputs change, so typing a VLAN does
+ * not re-run the sizing.
+ */
+export function withImplementation(
+  design: Omit<PlatformDesign, 'bom' | 'implementation'>,
+  input: Pick<PlatformDesignInputs, 'networkDesignInputs' | 'drDesignInputs'>,
+): PlatformDesign {
+  const platformVms = design.path === 'management-only' ? [] : design.vms
+  const networkInputs = normalizeNetworkDesignInputs(input.networkDesignInputs)
+  const recoveryInputs = normalizeDrDesignInputs(input.drDesignInputs)
+  const clusterNodes = design.clusters.map((cluster) => cluster.nodes).filter((value): value is number => value !== null && value > 0)
+  const nodes = design.network.nodes
+  const implementation: DesignImplementation = {
+    readiness: design.path === 'management-only' ? null : assessMigrationReadiness(platformVms, design.cfg),
+    networkInputs,
+    network: nodes === null ? null : designNetwork(design.cfg, nodes, networkInputs, {
+      workloadNodes: design.workloadNodes ?? nodes,
+      smallestClusterNodes: clusterNodes.length > 0 ? Math.min(...clusterNodes) : nodes,
+      vms: platformVms,
+    }),
+    recoveryInputs,
+    recovery: design.path === 'management-only' || !design.sizing ? null : designDisasterRecovery(platformVms, design.sizing, recoveryInputs, {
+      requiredStorageTiB: design.storage?.requiredTiB ?? design.sizing.requiredStorageTiB,
+      workloadNodes: design.workloadNodes,
+      clustered: true,
+    }),
+  }
+  const full = { ...design, implementation } as PlatformDesign
+  return { ...full, bom: buildBillOfMaterials(full) }
 }
 
 /** One-word outcome for tables that compare designs. */

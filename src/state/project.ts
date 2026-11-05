@@ -2,8 +2,8 @@ import { DEFAULT_CONFIG, DEFAULT_PROPOSED_CONFIG, defaultTiers } from './default
 import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
 import type { ManagementDeploymentInputs } from '../engine/managementDeployment'
 import { normalizePlacementInputs, type PlacementInputs } from '../engine/deploymentPlanning'
-import { DEFAULT_NETWORK_INPUTS, type NetworkDesignInputs } from '../engine/networkDesign'
-import { DEFAULT_DR_INPUTS, type DrDesignInputs } from '../engine/drDesign'
+import { normalizeNetworkDesignInputs, type NetworkDesignInputs } from '../engine/networkDesign'
+import { normalizeDrDesignInputs, type DrDesignInputs } from '../engine/drDesign'
 import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMode, type ManagementDecision } from './journey'
 import type { StorageDecisionAnswers } from '../engine/storageDecision'
 import { normalizeAdvisorAnswers, type AdvisorAnswers } from '../data/managementPlane'
@@ -13,9 +13,10 @@ import { normalizeCostModelInputs, type CostModelInputs } from '../engine/licens
 /**
  * 5 added savedScenarios to the project file. 6 added the Management Plane Advisor answers. 7 added
  * existing hardware as clusters of host groups; older files migrate from the single-spec fields. 8 added
- * the Cost Model inputs; older files open with the defaults.
+ * the Cost Model inputs; older files open with the defaults. 9 added network intents, BMC ports, SAN
+ * connectivity and recovery assumptions; older files build intents from their adapter count.
  */
-export const PROJECT_SCHEMA_VERSION = 8 as const
+export const PROJECT_SCHEMA_VERSION = 9 as const
 export const ENGINE_VERSION = '1.2.0'
 
 export interface ReportMetadata {
@@ -211,8 +212,9 @@ export function normalizeProjectPayload(value: unknown): ProjectPayload {
     managementAdvisorAnswers: normalizeAdvisorAnswers(value.managementAdvisorAnswers),
     includeManagementInSizing: typeof value.includeManagementInSizing === 'boolean' ? value.includeManagementInSizing : true,
     placementInputs: normalizePlacementInputs(value.placementInputs),
-    networkDesignInputs: { ...DEFAULT_NETWORK_INPUTS, ...(record(value.networkDesignInputs) ? value.networkDesignInputs : {}) },
-    drDesignInputs: { ...DEFAULT_DR_INPUTS, ...(record(value.drDesignInputs) ? value.drDesignInputs : {}) },
+    // Files before schema 9 have no intents or SAN connectivity: intents come from the adapter count.
+    networkDesignInputs: normalizeNetworkDesignInputs(value.networkDesignInputs),
+    drDesignInputs: normalizeDrDesignInputs(value.drDesignInputs),
     reportMetadata: { ...DEFAULT_REPORT_METADATA, ...(record(value.reportMetadata) ? value.reportMetadata : {}) },
     storageDecisionAnswers: normalizeStorageDecisionAnswers(value.storageDecisionAnswers),
     costModel: normalizeCostModelInputs(value.costModel),

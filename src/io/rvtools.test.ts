@@ -242,3 +242,31 @@ describe('B8 host data kept per host', () => {
     ])
   })
 })
+
+describe('Phase 8 conversion blockers from vDisk and vDatastore', () => {
+  it('reads independent disks, physical-mode RDMs and vSAN placement', () => {
+    const report = parseRvTools(workbook([row('ind', 'poweredOn'), row('prdm', 'poweredOn'), row('onvsan', 'poweredOn'), row('plain', 'poweredOn')], {
+      vDisk: [
+        disk('ind', { 'Disk Mode': 'independent_persistent' }),
+        disk('prdm', { Raw: true, 'Raw Comp. Mode': 'physicalMode', 'Disk Mode': 'persistent' }),
+        disk('onvsan', { 'Disk Path': '[vsanDatastore] onvsan/onvsan.vmdk', Path: '[vsanDatastore] onvsan/onvsan.vmdk', 'Disk Mode': 'persistent' }),
+        disk('plain', { 'Disk Mode': 'persistent' }),
+      ],
+      vDatastore: [{ Name: 'vsanDatastore', Type: 'vsan' }, { Name: 'ds1', Type: 'VMFS' }],
+    }))
+    const byName = Object.fromEntries(report.vms.map((v) => [v.name, v]))
+    expect(byName.ind.hasIndependentDisk).toBe(true)
+    expect(byName.prdm.rdmPhysical).toBe(true)
+    expect(byName.prdm.hasRdm).toBe(true)
+    expect(byName.onvsan.onVsan).toBe(true)
+    expect(byName.plain).toMatchObject({ hasIndependentDisk: false, rdmPhysical: false, onVsan: false })
+    expect(report.detection).toMatchObject({ diskMode: true, rdmMode: true, vsan: true })
+  })
+
+  it('leaves the fields unknown when the columns are missing, and says so', () => {
+    const report = parseRvTools(workbook([row('a', 'poweredOn')]))
+    expect(report.vms[0].hasIndependentDisk).toBeUndefined()
+    expect(report.vms[0].onVsan).toBeUndefined()
+    expect(report.warnings.some((warning) => warning.includes("independent disks (no vDisk Disk Mode column)"))).toBe(true)
+  })
+})

@@ -87,6 +87,12 @@ export interface Vm {
   nicCount?: number
   snapshotCount?: number
   hasRdm?: boolean
+  /** A raw device mapping in physical compatibility mode. Undefined when the file has no Raw Comp. Mode column. */
+  rdmPhysical?: boolean
+  /** A disk in independent mode (persistent or nonpersistent). Undefined when the file has no Disk Mode column. */
+  hasIndependentDisk?: boolean
+  /** The VM's disks are on a vSAN datastore. Undefined when the file does not show datastore types. */
+  onVsan?: boolean
   encrypted?: boolean
   hasVtpm?: boolean
   performance?: VmPerformanceMetrics

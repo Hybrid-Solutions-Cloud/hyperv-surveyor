@@ -637,6 +637,13 @@ export interface ExistingAssessment {
   licensableCores: number
   addSpec: { group: HostGroup; cluster: string } | null
   spareRule: string
+  /**
+   * More VMs per tier at each tier's average profile. Each cluster's answer is summed, then capped by
+   * a shared array's room and IOPS, which the clusters use together.
+   */
+  additionalVmsByTier: Record<TierId, number>
+  /** How the run-out year is worked out. */
+  exhaustionNote: string
 }
 
 export const SPARE_RULE = 'Spare hosts are removed from the largest hosts first, for each resource on its own: the hosts with the most usable cores for CPU and the hosts with the most usable memory for memory. The result holds whichever hosts are down.'
@@ -910,8 +917,8 @@ export function assessExistingHardware(input: ExistingAssessmentInput): Existing
 
   // Resources across the estate.
   const sum = (pick: (cluster: ExistingClusterResult) => number) => clusters.reduce((total, cluster) => total + pick(cluster), 0)
-  const domain = (cluster: ExistingClusterResult, name: 's2d' | 'san') => cluster.reverse.storageDomains.find((item) => item.domain === name)
-  const rows: Array<Omit<ResourceRow, 'exhaustionYear'> & { perCluster: Array<{ cluster: ExistingClusterResult; available: number; used: number; fixed: number }> }> = []
+  type RowItem = { cluster: ExistingClusterResult; available: number; used: number; fixed: number }
+  type Row = Omit<ResourceRow, 'exhaustionYear'> & { perCluster: RowItem[] }
   const fixedDemand = (cluster: ExistingClusterResult) => {
     const demand = computeDemand(cluster.fixedVms, tiers, 1, policy)
     let s2d = 0
@@ -924,62 +931,108 @@ export function assessExistingHardware(input: ExistingAssessmentInput): Existing
     return { cores: demand.requiredPCores, ram: demand.requiredRamGiB, s2d, san }
   }
   const fixedByCluster = new Map(clusters.map((cluster) => [cluster.id, fixedDemand(cluster)]))
-  const addRow = (resource: ExistingResource, unit: string, perCluster: Array<{ cluster: ExistingClusterResult; available: number; used: number; fixed: number }>, sharedAvailable?: number) => {
-    if (perCluster.length === 0) return
-    const available = sharedAvailable ?? perCluster.reduce((total, item) => total + item.available, 0)
-    const used = perCluster.reduce((total, item) => total + item.used, 0)
-    const share = (u: number, a: number) => a > 0 ? u / a : u > 0 ? Infinity : 0
-    let worstPct = share(used, available)
-    let worstCluster: string | null = null
-    if (sharedAvailable === undefined) {
-      worstPct = 0
-      perCluster.forEach((item) => {
-        const pct = share(item.used, item.available)
-        if (pct > worstPct || worstCluster === null) { worstPct = pct; worstCluster = item.cluster.name }
-      })
-    }
-    rows.push({ resource, label: RESOURCE_LABELS[resource], unit, available, used, headroom: available - used, pct: share(used, available), worstPct, worstCluster: multi ? worstCluster : null, perCluster })
-  }
-  addRow('cpu', 'physical cores', clusters.map((cluster) => ({ cluster, available: cluster.reverse.availablePCores, used: cluster.reverse.usedPCores, fixed: fixedByCluster.get(cluster.id)!.cores })))
-  addRow('memory', 'GiB', clusters.map((cluster) => ({ cluster, available: cluster.reverse.availableRamGiB, used: cluster.reverse.usedRamGiB, fixed: fixedByCluster.get(cluster.id)!.ram })))
-  addRow('s2d-storage', 'TiB', clusters.filter((cluster) => domain(cluster, 's2d')).map((cluster) => ({ cluster, available: domain(cluster, 's2d')!.availableTiB, used: domain(cluster, 's2d')!.usedTiB, fixed: fixedByCluster.get(cluster.id)!.s2d })))
-  addRow('san-storage', 'TiB effective', clusters.filter((cluster) => domain(cluster, 'san')).map((cluster) => ({ cluster, available: domain(cluster, 'san')!.availableTiB, used: domain(cluster, 'san')!.usedTiB, fixed: fixedByCluster.get(cluster.id)!.san })), sharedSan ? sharedSanEffective : undefined)
-  const perf = (pick: (cluster: ExistingClusterResult) => { required: number; available: number | null }) => clusters
-    .map((cluster) => ({ cluster, ...pick(cluster) }))
-    .filter((item) => item.available !== null)
-    .map((item) => ({ cluster: item.cluster, available: item.available!, used: item.required, fixed: 0 }))
-  addRow('s2d-iops', 'IOPS', perf((cluster) => ({ required: cluster.reverse.storagePerformance.requiredS2dIops, available: cluster.reverse.storagePerformance.availableS2dIops })))
-  addRow('s2d-throughput', 'MB/s', perf((cluster) => ({ required: cluster.reverse.storagePerformance.requiredS2dThroughputMBps, available: cluster.reverse.storagePerformance.availableS2dThroughputMBps })))
   const sanIopsShared = sharedSan && (hardware.sharedSan.maxIops ?? 0) > 0 ? hardware.sharedSan.maxIops : undefined
   const sanThroughputShared = sharedSan && (hardware.sharedSan.maxThroughputMBps ?? 0) > 0 ? hardware.sharedSan.maxThroughputMBps : undefined
-  addRow('san-iops', 'IOPS', perf((cluster) => ({ required: cluster.reverse.storagePerformance.requiredSanIops, available: cluster.reverse.storagePerformance.availableSanIops })), sanIopsShared)
-  addRow('san-throughput', 'MB/s', perf((cluster) => ({ required: cluster.reverse.storagePerformance.requiredSanThroughputMBps, available: cluster.reverse.storagePerformance.availableSanThroughputMBps })), sanThroughputShared)
-
-  // The year each resource runs out: workload demand grows each year, fixed VMs do not.
-  const annual = growth.annualGrowthPct
-  const yearShort = (item: { available: number; used: number; fixed: number }) => {
-    const workload = Math.max(0, item.used - item.fixed)
-    for (let year = 0; year <= EXHAUSTION_SEARCH_YEARS; year++) {
-      if (workload * (1 + annual) ** year + item.fixed > item.available + 1e-9) return year
-      if (annual <= 0 || workload <= 0) return null
+  /** Resource rows from a reverse result per cluster: today's, or a re-run at a later year's demand. */
+  const buildRows = (rev: (cluster: ExistingClusterResult) => ReverseResult): Row[] => {
+    const out: Row[] = []
+    const domain = (cluster: ExistingClusterResult, name: 's2d' | 'san') => rev(cluster).storageDomains.find((item) => item.domain === name)
+    const addRow = (resource: ExistingResource, unit: string, perCluster: RowItem[], sharedAvailable?: number) => {
+      if (perCluster.length === 0) return
+      const available = sharedAvailable ?? perCluster.reduce((total, item) => total + item.available, 0)
+      const used = perCluster.reduce((total, item) => total + item.used, 0)
+      const share = (u: number, a: number) => a > 0 ? u / a : u > 0 ? Infinity : 0
+      let worstPct = share(used, available)
+      let worstCluster: string | null = null
+      if (sharedAvailable === undefined) {
+        worstPct = 0
+        perCluster.forEach((item) => {
+          const pct = share(item.used, item.available)
+          if (pct > worstPct || worstCluster === null) { worstPct = pct; worstCluster = item.cluster.name }
+        })
+      }
+      out.push({ resource, label: RESOURCE_LABELS[resource], unit, available, used, headroom: available - used, pct: share(used, available), worstPct, worstCluster: multi ? worstCluster : null, perCluster })
     }
-    return null
+    addRow('cpu', 'physical cores', clusters.map((cluster) => ({ cluster, available: rev(cluster).availablePCores, used: rev(cluster).usedPCores, fixed: fixedByCluster.get(cluster.id)!.cores })))
+    addRow('memory', 'GiB', clusters.map((cluster) => ({ cluster, available: rev(cluster).availableRamGiB, used: rev(cluster).usedRamGiB, fixed: fixedByCluster.get(cluster.id)!.ram })))
+    addRow('s2d-storage', 'TiB', clusters.filter((cluster) => domain(cluster, 's2d')).map((cluster) => ({ cluster, available: domain(cluster, 's2d')!.availableTiB, used: domain(cluster, 's2d')!.usedTiB, fixed: fixedByCluster.get(cluster.id)!.s2d })))
+    addRow('san-storage', 'TiB effective', clusters.filter((cluster) => domain(cluster, 'san')).map((cluster) => ({ cluster, available: domain(cluster, 'san')!.availableTiB, used: domain(cluster, 'san')!.usedTiB, fixed: fixedByCluster.get(cluster.id)!.san })), sharedSan ? sharedSanEffective : undefined)
+    const perf = (pick: (cluster: ExistingClusterResult) => { required: number; available: number | null }) => clusters
+      .map((cluster) => ({ cluster, ...pick(cluster) }))
+      .filter((item) => item.available !== null)
+      .map((item) => ({ cluster: item.cluster, available: item.available!, used: item.required, fixed: 0 }))
+    addRow('s2d-iops', 'IOPS', perf((cluster) => ({ required: rev(cluster).storagePerformance.requiredS2dIops, available: rev(cluster).storagePerformance.availableS2dIops })))
+    addRow('s2d-throughput', 'MB/s', perf((cluster) => ({ required: rev(cluster).storagePerformance.requiredS2dThroughputMBps, available: rev(cluster).storagePerformance.availableS2dThroughputMBps })))
+    addRow('san-iops', 'IOPS', perf((cluster) => ({ required: rev(cluster).storagePerformance.requiredSanIops, available: rev(cluster).storagePerformance.availableSanIops })), sanIopsShared)
+    addRow('san-throughput', 'MB/s', perf((cluster) => ({ required: rev(cluster).storagePerformance.requiredSanThroughputMBps, available: rev(cluster).storagePerformance.availableSanThroughputMBps })), sanThroughputShared)
+    return out
   }
-  const resources: ResourceRow[] = rows.map(({ perCluster, ...row }) => {
-    const shared = (row.resource === 'san-storage' && sharedSan) || (row.resource === 'san-iops' && sanIopsShared !== undefined) || (row.resource === 'san-throughput' && sanThroughputShared !== undefined)
-    const years = shared
-      ? [yearShort({ available: row.available, used: row.used, fixed: perCluster.reduce((total, item) => total + item.fixed, 0) })]
-      : perCluster.map(yearShort)
-    const known = years.filter((year): year is number => year !== null)
-    return { ...row, exhaustionYear: known.length > 0 ? Math.min(...known) : null }
-  })
+  const rows = buildRows((cluster) => cluster.reverse)
+  const domain = (cluster: ExistingClusterResult, name: 's2d' | 'san') => cluster.reverse.storageDomains.find((item) => item.domain === name)
+  const isShared = (resource: ExistingResource) => (resource === 'san-storage' && sharedSan) || (resource === 'san-iops' && sanIopsShared !== undefined) || (resource === 'san-throughput' && sanThroughputShared !== undefined)
+  const shortIn = (row: Row) => isShared(row.resource)
+    ? row.used > row.available + 1e-9
+    : row.perCluster.some((item) => item.used > item.available + 1e-9)
+
+  // The year each resource runs out: the capacity calculation is re-run for each year's demand, with
+  // every VM where it is placed today. Workload demand grows each year; management VMs do not.
+  const annual = growth.annualGrowthPct
+  const exhaustion = new Map<ExistingResource, number | null>(rows.map((row) => [row.resource, shortIn(row) ? 0 : null]))
+  if (annual > 0 && clusters.some((cluster) => cluster.vms.length > 0)) {
+    // A straight-line estimate bounds the search, so a resource that never runs out costs nothing.
+    const linearYear = (item: { available: number; used: number; fixed: number }) => {
+      const workload = Math.max(0, item.used - item.fixed)
+      if (workload <= 0) return null
+      const room = item.available - item.fixed
+      if (room <= 0) return 0
+      const years = Math.log(room / workload) / Math.log(1 + annual)
+      return years > EXHAUSTION_SEARCH_YEARS ? null : Math.max(0, Math.ceil(years))
+    }
+    const bound = rows.reduce((max, row) => {
+      const items = isShared(row.resource) ? [{ available: row.available, used: row.used, fixed: row.perCluster.reduce((t, i) => t + i.fixed, 0) }] : row.perCluster
+      const known = items.map(linearYear).filter((year): year is number => year !== null)
+      return known.length > 0 ? Math.max(max, Math.min(...known)) : max
+    }, 0)
+    const lastYear = Math.min(EXHAUSTION_SEARCH_YEARS, bound + 3)
+    const capacityOf = new Map(activeClusters.map((cluster) => [cluster.id, capacities.get(cluster.id)!]))
+    for (let year = 1; year <= lastYear && [...exhaustion.values()].some((value) => value === null); year++) {
+      const yearFactor = factor * (1 + annual) ** year
+      const reverses = new Map(clusters.map((cluster) => [cluster.id, solveReverse(
+        { ...cluster.cfg, growthFactor: yearFactor, annualGrowthPct: 0, growthStrategy: 'phased' },
+        cluster.hosts, cluster.vms, tiers, cluster.fixedVms, capacityOf.get(cluster.id),
+      )]))
+      buildRows((cluster) => reverses.get(cluster.id)!).forEach((row) => {
+        if (exhaustion.get(row.resource) === null && shortIn(row)) exhaustion.set(row.resource, year)
+      })
+    }
+  }
+  const resources: ResourceRow[] = rows.map(({ perCluster: _perCluster, ...row }) => ({ ...row, exhaustionYear: exhaustion.get(row.resource) ?? null }))
   const anyWorkload = workloadVms.length + fixedVms.length > 0
   const firstToRunOut = anyWorkload && resources.length > 0
     ? resources.reduce((worst, row) => row.worstPct > worst.worstPct ? row : worst)
     : null
 
   // How many more VMs of the chosen profile fit.
-  const profile = profileFit(hardware, clusters, tiers, policy, sharedSan ? Math.max(0, sharedSanEffective * (1 - sanFreeSpaceTarget(policy)) - sharedSanUsed) : null, workloadVms, factor)
+  const sharedSanRoomTiB = sharedSan ? Math.max(0, sharedSanEffective * (1 - sanFreeSpaceTarget(policy)) - sharedSanUsed) : null
+  const profile = profileFit(hardware, clusters, tiers, policy, sharedSanRoomTiB, workloadVms, factor)
+
+  // More VMs per tier. With one shared array the clusters' answers cannot each use the whole array.
+  const sanClusters = clusters.filter((cluster) => usesSan(cluster.cfg.architecture))
+  const tierRoom = Object.fromEntries(TIER_IDS.map((id) => {
+    let total = clusters.reduce((sum, cluster) => {
+      const value = cluster.reverse.additionalVmsByTier[id]
+      return sum + (Number.isFinite(value) ? value : 0)
+    }, 0)
+    if (sharedSanRoomTiB !== null && sanClusters.length > 1 && total > 0) {
+      const tierVms = workloadVms.filter((vm) => vm.tier === id)
+      const averageGiB = tierVms.length > 0 ? computeDemand(tierVms, tiers, factor, policy).byTier[id].storageGiB / tierVms.length : 200
+      const perVmTiB = Math.max(0, ...sanClusters.map((cluster) => storageSplit(cluster.cfg.architecture, cluster.cfg, tiers[id], averageGiB).sanTiB))
+      if (perVmTiB > 0) total = Math.min(total, Math.floor(sharedSanRoomTiB / perVmTiB))
+      const averageIops = tierVms.length > 0 ? tierVms.reduce((t, vm) => t + (vm.performance?.storageIopsP95 ?? 0), 0) / tierVms.length * factor : 0
+      if (sanIopsShared !== undefined && averageIops > 0 && perVmTiB > 0) total = Math.min(total, Math.max(0, Math.floor((sanIopsShared - sharedIops) / averageIops)))
+    }
+    return [id, Math.max(0, total)]
+  })) as Record<TierId, number>
 
   // Remedies.
   const addSpec = (() => {
@@ -1194,6 +1247,8 @@ export function assessExistingHardware(input: ExistingAssessmentInput): Existing
     licensableCores: sum((cluster) => cluster.licensableCores),
     addSpec: addSpec ? { group: addSpec.group, cluster: addSpec.cluster.name } : null,
     spareRule: SPARE_RULE,
+    additionalVmsByTier: tierRoom,
+    exhaustionNote: 'The year each resource runs out comes from re-running the capacity calculation for each year at your growth rate, with every VM where it is placed today.',
   }
 }
 
@@ -1223,7 +1278,8 @@ export function exhaustionText(row: Pick<ResourceRow, 'exhaustionYear'>, annualG
 export const computeHostsToAdd = (assessment: Pick<ExistingAssessment, 'remedies'>) => assessment.remedies.compute.reduce((total, item) => total + item.hostsToAdd, 0)
 
 /** Additional VMs per tier at each tier's average profile, summed over the clusters. */
-export function additionalVmsByTier(assessment: Pick<ExistingAssessment, 'clusters'>): Record<TierId, number> {
+export function additionalVmsByTier(assessment: Pick<ExistingAssessment, 'clusters'> & Partial<Pick<ExistingAssessment, 'additionalVmsByTier'>>): Record<TierId, number> {
+  if (assessment.additionalVmsByTier) return assessment.additionalVmsByTier
   return Object.fromEntries(TIER_IDS.map((id) => [id, assessment.clusters.reduce((total, cluster) => {
     const value = cluster.reverse.additionalVmsByTier[id]
     return total + (Number.isFinite(value) ? value : 0)

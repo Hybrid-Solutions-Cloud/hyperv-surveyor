@@ -77,28 +77,49 @@ export function plannedPlatformNodes(result: SizingResult, plan: MultiClusterPla
 }
 
 const weight = (vm: Vm) => vm.vCpu + vm.ramGiB / 4 + vm.storageGiB / 100
+const unitWeight = (unit: Vm[], key: (vm: Vm) => number = weight) => unit.reduce((sum, vm) => sum + key(vm), 0)
 
-function placementUnits(vms: Vm[], preserveSourceClusters: boolean): Vm[][] {
-  if (!preserveSourceClusters) return vms.map((vm) => [vm])
-  const groups = new Map<string, Vm[]>()
+interface PlacementUnit {
+  vms: Vm[]
+  /** The source cluster when the unit keeps one together. */
+  source: string | null
+}
+
+function placementUnits(vms: Vm[], preserveSourceClusters: boolean): PlacementUnit[] {
+  if (!preserveSourceClusters) return vms.map((vm) => ({ vms: [vm], source: null }))
+  const groups = new Map<string, PlacementUnit>()
   vms.forEach((vm) => {
-    const key = vm.sourceCluster?.trim() || `ungrouped-${vm.id}`
-    groups.set(key, [...(groups.get(key) ?? []), vm])
+    const source = vm.sourceCluster?.trim() || null
+    const key = source ?? `ungrouped-${vm.id}`
+    const unit = groups.get(key) ?? { vms: [], source }
+    unit.vms.push(vm)
+    groups.set(key, unit)
   })
   return [...groups.values()]
 }
 
-function distribute(units: Vm[][], count: number): Vm[][] {
+/**
+ * Packs units into count bins, largest first, each into the lightest bin that still has room under
+ * the VM target. Several orders are tried (combined weight, then vCPU, memory and storage on their
+ * own) because one greedy order can reject a packing that another finds.
+ */
+const PACKING_KEYS: Array<(vm: Vm) => number> = [weight, (vm) => vm.vCpu, (vm) => vm.ramGiB, (vm) => vm.storageGiB]
+
+function distribute(units: PlacementUnit[], count: number, targetVms: number, key: (vm: Vm) => number): Vm[][] {
   const bins = Array.from({ length: count }, () => [] as Vm[])
   const binWeights = Array.from({ length: count }, () => 0)
-  const sorted = [...units].sort((a, b) => b.reduce((sum, vm) => sum + weight(vm), 0) - a.reduce((sum, vm) => sum + weight(vm), 0))
+  const sorted = [...units].sort((a, b) => unitWeight(b.vms, key) - unitWeight(a.vms, key) || b.vms.length - a.vms.length)
   sorted.forEach((unit) => {
-    const index = binWeights.indexOf(Math.min(...binWeights))
-    bins[index].push(...unit)
-    binWeights[index] += unit.reduce((sum, vm) => sum + weight(vm), 0)
+    const open = bins.map((_, index) => index).filter((index) => bins[index].length + unit.vms.length <= targetVms)
+    const pool = open.length > 0 ? open : bins.map((_, index) => index)
+    const index = pool.reduce((best, candidate) => binWeights[candidate] < binWeights[best] ? candidate : best, pool[0])
+    bins[index].push(...unit.vms)
+    binWeights[index] += unitWeight(unit.vms, key)
   })
   return bins.filter((bin) => bin.length > 0)
 }
+
+interface PoolPlan { clusters: PlannedCluster[]; feasible: boolean; oversizedSources: string[] }
 
 function planPool(
   purpose: string,
@@ -107,35 +128,52 @@ function planPool(
   tiers: Record<TierId, TierPolicy>,
   inputs: PlacementInputs,
   fixedManagementVms: Vm[] = [],
-): { clusters: PlannedCluster[]; feasible: boolean } {
-  if (vms.length === 0 && fixedManagementVms.length === 0) return { clusters: [], feasible: true }
+  maxClusters: number = inputs.maxClusters,
+): PoolPlan {
+  if (vms.length === 0 && fixedManagementVms.length === 0) return { clusters: [], feasible: true, oversizedSources: [] }
   const units = placementUnits(vms, inputs.preserveSourceClusters)
-  let last: PlannedCluster[] = []
-  const ceiling = Math.min(inputs.maxClusters, Math.max(1, units.length))
-  for (let count = 1; count <= ceiling; count += 1) {
-    const bins = distribute(units, count)
+  const nodeCeiling = Math.min(inputs.maxNodesPerCluster, clusterNodeLimitFor(cfg))
+  const fitsCluster = (result: SizingResult, vmCount: number) => result.feasible && result.nodes <= nodeCeiling && vmCount <= inputs.targetVmsPerCluster
+  // A source cluster that cannot fit one target cluster on its own can never be kept together.
+  const oversizedSources = inputs.preserveSourceClusters
+    ? units.filter((unit) => unit.source && unit.vms.length > 1 && !fitsCluster(solveForward(cfg, unit.vms, tiers), unit.vms.length)).map((unit) => unit.source!)
+    : []
+  const build = (bins: Vm[][]): PlannedCluster[] => {
     if (bins.length === 0) bins.push([])
-    const candidate = bins.map((bin, index): PlannedCluster => {
-      const management = index === 0 ? fixedManagementVms : []
-      const plannedVms = [...bin, ...management]
-      // Management VMs stay fixed while the workload grows, the same as in forecastGrowth.
+    // Management VMs stay together on one cluster of this pool: the lightest, so they fit best.
+    const lightest = bins.reduce((best, bin, index) => unitWeight(bin) < unitWeight(bins[best]) ? index : best, 0)
+    return bins.map((bin, index): PlannedCluster => {
+      const management = index === lightest ? fixedManagementVms : []
       return {
         id: `${purpose.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index + 1}`,
         name: `${purpose} ${index + 1}`,
         purpose,
-        vms: plannedVms,
+        vms: [...bin, ...management],
+        // Management VMs stay fixed while the workload grows, the same as in forecastGrowth.
         result: solveForward(cfg, bin, tiers, management),
         sourceClusters: [...new Set(bin.map((vm) => vm.sourceCluster).filter((value): value is string => !!value))],
         managementVmCount: management.length,
       }
     })
-    last = candidate
-    const fits = candidate.every((cluster) => cluster.result.feasible
-      && cluster.result.nodes <= Math.min(inputs.maxNodesPerCluster, clusterNodeLimitFor(cfg))
-      && cluster.vms.length <= inputs.targetVmsPerCluster)
-    if (fits) return { clusters: candidate, feasible: true }
   }
-  return { clusters: last, feasible: false }
+  let last: PlannedCluster[] = []
+  // Management VMs count as one more unit, so the ceiling can give them room of their own.
+  const ceiling = Math.min(Math.max(1, maxClusters), Math.max(1, units.length + (fixedManagementVms.length > 0 ? 1 : 0)))
+  for (let count = 1; count <= ceiling; count += 1) {
+    const tried = new Set<string>()
+    for (const key of PACKING_KEYS) {
+      const bins = distribute(units, count, inputs.targetVmsPerCluster, key)
+      // Management VMs are a unit too: with a cluster to spare they may have one of their own.
+      if (fixedManagementVms.length > 0 && bins.length < count) bins.push([])
+      const signature = bins.map((bin) => bin.map((vm) => vm.id).sort().join(',')).sort().join('|')
+      if (tried.has(signature)) continue
+      tried.add(signature)
+      const candidate = build(bins)
+      last = candidate
+      if (candidate.every((cluster) => fitsCluster(cluster.result, cluster.vms.length))) return { clusters: candidate, feasible: true, oversizedSources }
+    }
+  }
+  return { clusters: last, feasible: false, oversizedSources }
 }
 
 function planSingleCluster(
@@ -190,18 +228,52 @@ export function planMultipleClusters(
       ]
     : [{ purpose: 'Workload cluster', vms: included }]
   const managementPoolIndex = pools.findIndex((pool) => pool.purpose !== 'Database cluster')
-  const planned = pools.map((pool, index) => planPool(pool.purpose, pool.vms, cfg, tiers, inputs, index === managementPoolIndex || managementPoolIndex < 0 && index === 0 ? fixedManagementVms : []))
+  const managementFor = (index: number) => index === managementPoolIndex || managementPoolIndex < 0 && index === 0 ? fixedManagementVms : []
+  // The maximum applies to all clusters together: each pool may use what the other pools leave.
+  const nonEmpty = pools.map((pool, index) => pool.vms.length > 0 || managementFor(index).length > 0)
+  const planned = pools.map((pool, index) => planPool(pool.purpose, pool.vms, cfg, tiers, inputs, managementFor(index),
+    inputs.maxClusters - nonEmpty.filter((value, other) => value && other !== index).length))
   const clusters = planned.flatMap((pool) => pool.clusters)
+  const totalWithinMax = clusters.length <= inputs.maxClusters
   const warnings: string[] = []
   if (inputs.preserveSourceClusters && included.some((vm) => !vm.sourceCluster)) warnings.push('VMs without a source-cluster value are treated as independent placement units.')
-  if (!planned.every((pool) => pool.feasible)) warnings.push(`The workload could not be placed within ${inputs.maxClusters} clusters under the selected node and VM ceilings. Increase the ceiling, use denser hardware, or relax source-cluster preservation.`)
+  if (inputs.preserveSourceClusters && inputs.separateDatabaseTier) {
+    const sources = new Map<string, Set<string>>()
+    included.forEach((vm) => {
+      if (!vm.sourceCluster) return
+      sources.set(vm.sourceCluster, new Set([...(sources.get(vm.sourceCluster) ?? []), vm.tier === 'database' ? 'database' : 'general']))
+    })
+    const split = [...sources.entries()].filter(([, kinds]) => kinds.size > 1).map(([name]) => name)
+    const one = split.length === 1
+    if (split.length > 0) warnings.push(`Database separation comes first, so ${one ? 'source cluster' : 'source clusters'} ${split.join(', ')} ${one ? 'is' : 'are'} split: ${one ? 'its' : 'their'} database VMs go to the database clusters and the rest stay together on the general clusters. Turn off database separation to keep ${one ? 'it' : 'them'} whole.`)
+  }
+  const oversized = [...new Set(planned.flatMap((pool) => pool.oversizedSources))]
+  if (oversized.length > 0) {
+    const one = oversized.length === 1
+    warnings.push(`${one ? 'Source cluster' : 'Source clusters'} ${oversized.join(', ')} cannot fit one target cluster on ${one ? 'its' : 'their'} own under your ${Math.min(inputs.maxNodesPerCluster, clusterNodeLimitFor(cfg))}-node and ${inputs.targetVmsPerCluster.toLocaleString('en-US')}-VM ceilings, so ${one ? 'it' : 'they'} cannot be kept together. Turn off "Keep each source cluster together" or raise the ceilings.`)
+  } else if (!planned.every((pool) => pool.feasible) || !totalWithinMax) {
+    warnings.push(`The workload could not be placed within ${inputs.maxClusters} cluster${inputs.maxClusters === 1 ? '' : 's'} in total under the selected node and VM ceilings${inputs.separateDatabaseTier ? ', counting the database and general clusters together' : ''}. Increase the maximum, use denser hardware, or relax the grouping rules.`)
+  }
+  const sharedFixedSan = cfg.sanSizingMode !== 'calculated' && inputs.sanCapacityScope === 'shared' && cfg.architecture !== 's2d' && clusters.length > 1
   const sharedSanRequired = clusters.reduce((sum, cluster) => sum + cluster.result.requiredSanTiB, 0)
   const sharedSanAvailable = clusters[0]?.result.sanCapacityTiB ?? 0
-  const sharedSanPasses = cfg.sanSizingMode === 'calculated' || inputs.sanCapacityScope === 'per-cluster' || cfg.architecture === 's2d' || sharedSanRequired <= sharedSanAvailable
+  const sharedSanPasses = !sharedFixedSan || sharedSanRequired <= sharedSanAvailable
   if (!sharedSanPasses) warnings.push(`All target clusters share one SAN capacity pool, but they require ${sharedSanRequired.toFixed(1)} TiB and the configured array provides ${sharedSanAvailable.toFixed(1)} TiB effective. Expand the shared array or select per-cluster arrays.`)
+  // One shared array serves every cluster, so its IOPS and throughput are shared too.
+  const sumOf = (pick: (result: SizingResult) => number) => clusters.reduce((sum, cluster) => sum + pick(cluster.result), 0)
+  const sharedIops = sumOf((result) => result.storagePerformance.requiredSanIops)
+  const sharedThroughput = sumOf((result) => result.storagePerformance.requiredSanThroughputMBps)
+  const arrayIops = clusters[0]?.result.storagePerformance.availableSanIops ?? null
+  const arrayThroughput = clusters[0]?.result.storagePerformance.availableSanThroughputMBps ?? null
+  const sharedPerformancePasses = !sharedFixedSan
+    || ((arrayIops === null || sharedIops <= arrayIops) && (arrayThroughput === null || sharedThroughput <= arrayThroughput))
+  const n0 = (value: number) => value.toLocaleString('en-US', { maximumFractionDigits: 0 })
+  if (!sharedPerformancePasses) warnings.push(`All target clusters share one array: together they need ${n0(sharedIops)} IOPS and ${n0(sharedThroughput)} MB/s, and the array sustains ${arrayIops === null ? 'no entered IOPS limit' : `${n0(arrayIops)} IOPS`} and ${arrayThroughput === null ? 'no entered throughput limit' : `${n0(arrayThroughput)} MB/s`}. Add array performance or select per-cluster arrays.`)
   if (clusters.some((cluster) => cluster.result.performanceAssessment.confidence !== 'high')) warnings.push('At least one target cluster has less than high measured-data confidence; retain allocation fallback until coverage improves.')
+  const feasible = planned.every((pool) => pool.feasible) && totalWithinMax && sharedSanPasses && sharedPerformancePasses
+
   return {
-    feasible: planned.every((pool) => pool.feasible) && sharedSanPasses,
+    feasible,
     clusters,
     totalNodes: clusters.reduce((sum, cluster) => sum + (cluster.result.feasible ? cluster.result.nodes : 0), 0),
     totalWorkloadNodes: clusters.reduce((sum, cluster) => sum + (cluster.result.feasible ? cluster.result.workloadNodes : 0), 0),

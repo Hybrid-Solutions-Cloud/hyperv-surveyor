@@ -9,8 +9,8 @@ import type { StorageDecisionAnswers } from '../engine/storageDecision'
 import { DEFAULT_REPORT_METADATA, normalizeConfig, normalizeManagementInputs, normalizeProjectPayload, normalizeProposedConfig, normalizeScenarioSnapshots, normalizeStorageDecisionAnswers, normalizeTiers, normalizeVms, type ProjectDataSource, type ProjectPayload, type ReportMetadata, type ScenarioSnapshot } from './project'
 import { surveyorStorage } from './persistence'
 import { DEFAULT_PLACEMENT_INPUTS, normalizePlacementInputs, type PlacementInputs } from '../engine/deploymentPlanning'
-import { DEFAULT_NETWORK_INPUTS, type NetworkDesignInputs } from '../engine/networkDesign'
-import { DEFAULT_DR_INPUTS, type DrDesignInputs } from '../engine/drDesign'
+import { DEFAULT_NETWORK_INPUTS, normalizeNetworkDesignInputs, type NetworkDesignInputs } from '../engine/networkDesign'
+import { DEFAULT_DR_INPUTS, normalizeDrDesignInputs, type DrDesignInputs } from '../engine/drDesign'
 import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMode, type ManagementDecision } from './journey'
 import type { Scenario } from './urlState'
 import { normalizeAdvisorAnswers, type AdvisorAnswers } from '../data/managementPlane'
@@ -196,6 +196,9 @@ export function migratePersistedState(persisted: unknown): SurveyorState {
     managementAdvisorAnswers: normalizeAdvisorAnswers(value.managementAdvisorAnswers),
     // Saves before version 10 have no Cost Model inputs; they open with the defaults.
     costModel: normalizeCostModelInputs(value.costModel),
+    // Saves before version 11 have no network intents, SAN connectivity or recovery assumptions.
+    networkDesignInputs: normalizeNetworkDesignInputs(value.networkDesignInputs),
+    drDesignInputs: normalizeDrDesignInputs(value.drDesignInputs),
   } as SurveyorState
 }
 
@@ -273,8 +276,8 @@ export const useSurveyorStore = create<SurveyorState>()(
         lastImport: null,
       })),
       setPlacementInputs: (placementInputs) => set({ placementInputs }),
-      setNetworkDesignInputs: (networkDesignInputs) => set({ networkDesignInputs }),
-      setDrDesignInputs: (drDesignInputs) => set({ drDesignInputs }),
+      setNetworkDesignInputs: (networkDesignInputs) => set({ networkDesignInputs: normalizeNetworkDesignInputs(networkDesignInputs) }),
+      setDrDesignInputs: (drDesignInputs) => set({ drDesignInputs: normalizeDrDesignInputs(drDesignInputs) }),
       setReportMetadata: (reportMetadata) => set({ reportMetadata }),
       addDataSource: (source) => set((state) => ({ dataSources: [{ ...source, id: newId('source'), importedAt: new Date().toISOString() }, ...state.dataSources] })),
       applyImport: (mode, report, fileName) => set((state) => {
@@ -328,8 +331,8 @@ export const useSurveyorStore = create<SurveyorState>()(
         if (scenario.managementAdvisorAnswers !== undefined) next.managementAdvisorAnswers = normalizeAdvisorAnswers(scenario.managementAdvisorAnswers)
         if (scenario.includeManagementInSizing !== undefined) next.includeManagementInSizing = scenario.includeManagementInSizing
         if (scenario.placementInputs !== undefined) next.placementInputs = normalizePlacementInputs(scenario.placementInputs)
-        if (scenario.networkDesignInputs !== undefined) next.networkDesignInputs = scenario.networkDesignInputs
-        if (scenario.drDesignInputs !== undefined) next.drDesignInputs = scenario.drDesignInputs
+        if (scenario.networkDesignInputs !== undefined) next.networkDesignInputs = normalizeNetworkDesignInputs(scenario.networkDesignInputs)
+        if (scenario.drDesignInputs !== undefined) next.drDesignInputs = normalizeDrDesignInputs(scenario.drDesignInputs)
         if (scenario.reportMetadata !== undefined) next.reportMetadata = scenario.reportMetadata
         if (scenario.dataSources !== undefined) next.dataSources = scenario.dataSources
         if (scenario.storageDecisionAnswers !== undefined) next.storageDecisionAnswers = normalizeStorageDecisionAnswers(scenario.storageDecisionAnswers)
@@ -347,7 +350,8 @@ export const useSurveyorStore = create<SurveyorState>()(
       // 8 adds storage-outlier choices on VMs (Data check); malformed ones are dropped on load.
       // 9 keeps existing hardware as clusters of host groups, migrated from the single-spec fields.
       // 10 keeps the Cost Model inputs; older saves open with the defaults.
-      version: 10,
+      // 11 adds network intents, BMC ports, SAN connectivity and recovery assumptions.
+      version: 11,
       storage: createJSONStorage(() => surveyorStorage),
       onRehydrateStorage: () => () => settleHydration(),
       migrate: (persisted) => migratePersistedState(persisted),

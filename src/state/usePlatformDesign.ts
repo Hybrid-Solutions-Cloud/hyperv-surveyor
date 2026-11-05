@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { resolvePlatformDesign, type PlatformDesign, type PlatformDesignInputs } from '../engine/platformDesign'
+import { resolvePlatformDesign, withImplementation, type PlatformDesign, type PlatformDesignInputs } from '../engine/platformDesign'
 import { buildOptionsMatrix, type OptionsMatrix } from '../engine/optionsMatrix'
 import type { ManagementDeploymentInputs } from '../engine/managementDeployment'
 import { useSurveyorStore, type SurveyorState } from './store'
@@ -8,7 +8,7 @@ import type { EngagementMode } from './journey'
 type DesignState = Pick<SurveyorState,
   'engagementMode' | 'cfg' | 'tiers' | 'vms' | 'chosenKey' | 'existingCapacityCfg' | 'existingCapacityTiers'
   | 'existingCapacityNodes' | 'placementInputs' | 'managementDecision' | 'managementDeploymentInputs' | 'includeManagementInSizing'>
-  & Partial<Pick<SurveyorState, 'managementAdvisorAnswers' | 'existingHardware'>>
+  & Partial<Pick<SurveyorState, 'managementAdvisorAnswers' | 'existingHardware' | 'networkDesignInputs' | 'drDesignInputs'>>
 
 /** The planning state the design function reads. Project payloads and saved scenarios have the same fields. */
 export function platformDesignInputs(state: DesignState): PlatformDesignInputs {
@@ -27,6 +27,8 @@ export function platformDesignInputs(state: DesignState): PlatformDesignInputs {
     managementDeploymentInputs: state.managementDeploymentInputs,
     includeManagementInSizing: state.includeManagementInSizing,
     managementAdvisorAnswers: state.managementAdvisorAnswers,
+    networkDesignInputs: state.networkDesignInputs,
+    drDesignInputs: state.drDesignInputs,
   }
 }
 
@@ -52,9 +54,11 @@ export function usePlatformDesign(options: { management?: ManagementDeploymentIn
   const storedManagement = useSurveyorStore((state) => state.managementDeploymentInputs)
   const includeManagementInSizing = useSurveyorStore((state) => state.includeManagementInSizing)
   const managementAdvisorAnswers = useSurveyorStore((state) => state.managementAdvisorAnswers)
+  const networkDesignInputs = useSurveyorStore((state) => state.networkDesignInputs)
+  const drDesignInputs = useSurveyorStore((state) => state.drDesignInputs)
   const overridden = managementOverride !== undefined
   const managementDeploymentInputs = overridden ? managementOverride : storedManagement
-  return useMemo(() => resolvePlatformDesign(platformDesignInputs({
+  const base = useMemo(() => resolvePlatformDesign(platformDesignInputs({
     engagementMode, cfg, tiers, vms, chosenKey, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, existingHardware,
     placementInputs,
     managementDecision: overridden ? 'design' : managementDecision,
@@ -62,6 +66,8 @@ export function usePlatformDesign(options: { management?: ManagementDeploymentIn
     includeManagementInSizing,
     managementAdvisorAnswers,
   })), [engagementMode, cfg, tiers, vms, chosenKey, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, existingHardware, placementInputs, managementDecision, managementDeploymentInputs, includeManagementInSizing, managementAdvisorAnswers, overridden])
+  // Network and recovery inputs only change the Implementation plan and the bill of materials.
+  return useMemo(() => withImplementation(base, { networkDesignInputs, drDesignInputs }), [base, networkDesignInputs, drDesignInputs])
 }
 
 /**
