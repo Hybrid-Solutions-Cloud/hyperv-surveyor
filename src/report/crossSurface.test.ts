@@ -252,7 +252,7 @@ describe('existing hardware', () => {
         expect(sheetRow(sheets, 'Capacity and Fit', 'Existing nodes')?.[1]).toBe(4)
         expect(project.nodes).toBe('4 existing')
         // Fit verdict agrees.
-        const verdict = design.fitGap!.fits ? 'Fits' : 'Does not fit'
+        const verdict = design.existing!.verdict === 'fits' ? 'Fits' : 'Does not fit'
         expect(metric(report, 'executive', 'Fit decision')?.value).toBe(verdict)
         expect(metric(report, 'existing', 'Fit decision')?.value).toBe(verdict)
         expect(sheetRow(sheets, 'Capacity and Fit', 'Decision')?.[1]).toBe(verdict.toUpperCase())
@@ -267,9 +267,9 @@ describe('existing hardware', () => {
         expect(metric(report, 'nodes', 'Licensable cores (entered hosts)')?.value).toBe(num(design.cfg.node.sockets * design.cfg.node.coresPerSocket * 4))
         // Placement and network use the entered nodes, and placement is not green when fit fails.
         expect(metric(report, 'deployment', 'Entered nodes')?.value).toBe('4')
-        expect(metric(report, 'deployment', 'Placement status')?.value).toBe(design.fitGap!.fits ? 'Fits' : 'Does not fit')
+        expect(metric(report, 'deployment', 'Placement status')?.value).toBe(design.existing!.verdict === 'fits' ? 'Fits' : 'Does not fit')
         expect(design.network.nodes).toBe(4 + (design.management.dedicated?.nodes ?? 0))
-        expect(design.clusters[0].feasible).toBe(design.fitGap!.fits !== false)
+        expect(design.clusters[0].feasible).toBe(design.existing!.verdict !== 'does-not-fit')
       })
     }
   }

@@ -8,7 +8,7 @@ import type { ArchitectureOption } from '../engine/solve'
 import { giBToTiB } from '../engine/compute'
 import { RESILIENCY, TIER_IDS } from '../engine/rules'
 import type { SizingResult, Vm } from '../engine/types'
-import { fitGapAdditionalLabel, fitGapRequiredLabel } from '../engine/fitGap'
+import { additionalVmsByTier, computeHostsToAdd, exhaustionText, existingVerdictLabel, hostGroupLabel, RESOURCE_LABELS, usedShareText } from '../engine/existingHardware'
 import { singleClusterNodesLabel, type PlatformDesign } from '../engine/platformDesign'
 
 const r1 = (n: number) => Math.round(n * 10) / 10
@@ -332,79 +332,122 @@ export function designWorkbookSheets(design: PlatformDesign, vms: Vm[], generate
 
 /** Sheets for the existing-capacity and fit-gap workbook. */
 export function existingWorkbookSheets(design: PlatformDesign, vms: Vm[], generatedAt = new Date().toISOString()): WorkbookSheet[] {
-  const assessment = design.fitGap
+  const assessment = design.existing
   if (!assessment) return [{ name: 'Capacity and Fit', rows: [['Hyper-V Surveyor — Existing Capacity and Fit'], ['No existing-hardware design to export.']] }]
-  const cfg = design.cfg
-  const r = assessment.reverse
-  const status = assessment.fits === null ? 'NOT ASSESSED' : assessment.fits ? 'FITS' : 'DOES NOT FIT'
-  const sanDomain = r.storageDomains.find((domain) => domain.domain === 'san')
-  const summary: unknown[][] = [
+  const header: unknown[][] = [
     ['Hyper-V Surveyor — Existing Capacity and Fit'],
     ['Generated', generatedAt.slice(0, 16).replace('T', ' ')],
     ['Engagement', design.engagementMode === 'fit-gap' ? 'Fit workloads to existing hardware' : 'Assess existing capacity'],
     [],
+  ]
+  if (assessment.verdict === 'no-hardware') {
+    return [{ name: 'Capacity and Fit', rows: [...header, ['Decision', 'ENTER YOUR HARDWARE'], ['Enter your hardware. No hosts are entered yet, so nothing is calculated and nothing is invented.']] }]
+  }
+  const status = existingVerdictLabel(assessment.verdict).toUpperCase()
+  const row = (resource: string) => assessment.resources.find((item) => item.resource === resource)
+  const storage = design.storage
+  const summary: unknown[][] = [
+    ...header,
+    ...assessment.notices.map((notice) => ['NOTICE', notice]),
+    ...(assessment.notices.length > 0 ? [[]] : []),
     ['HARDWARE CAPACITY'],
-    ['Existing nodes', assessment.existingNodes],
-    ['Reserved / unavailable nodes', cfg.spareNodes],
-    ['Workload-bearing nodes', r.workloadNodes],
-    ['Architecture', cfg.architecture],
+    ['Existing nodes', assessment.totalHosts],
+    ['Clusters', assessment.clusters.length],
+    ['Reserved / unavailable nodes', assessment.totalHosts - assessment.workloadHosts],
+    ['Workload-bearing nodes', assessment.workloadHosts],
+    ['Spare host rule', assessment.spareRule],
+    ['Architecture', design.platformLabel],
     ['Storage protection', protectionLabel(design)],
-    ['Usable physical cores', r1(r.availablePCores)],
-    ['Usable memory (GiB)', r0(r.availableRamGiB)],
-    ...(r.capacity ? [['S2D usable capacity (TiB)', r1(r.capacity.usableTiB)]] : []),
-    ...(sanDomain ? [
-      ['SAN usable capacity entered (TiB)', r1(cfg.san.usableTiB)],
-      ['SAN data reduction ratio', `${Math.max(1, cfg.san.drr)}:1`],
-      ['SAN effective capacity (TiB, usable × DRR)', r1(sanDomain.availableTiB)],
+    ['Usable physical cores', r1(row('cpu')?.available ?? 0)],
+    ['Usable memory (GiB)', r0(row('memory')?.available ?? 0)],
+    ...(row('s2d-storage') ? [['S2D usable capacity (TiB)', r1(row('s2d-storage')!.available)]] : []),
+    ...(row('san-storage') ? [
+      ['SAN usable capacity entered (TiB)', r1(storage?.sanUsableTiB ?? 0)],
+      ['SAN data reduction ratio', `${storage?.sanDrr ?? 1}:1`],
+      ['SAN effective capacity (TiB, usable × DRR)', r1(row('san-storage')!.available)],
     ] : []),
-    ['Total available storage (TiB, S2D usable + SAN effective)', r1(r.availableStorageTiB)],
     ['Licensable cores for the entered hosts', design.licensableCores ?? '—'],
     [],
     ['WORKLOAD FIT'],
-    ['Included VMs', assessment.assessedVms],
+    ['Included VMs', assessment.includedVms],
     ['Management VMs counted', assessment.managementVms],
     ['Management host impact', design.management.impactLabel],
     ['Decision', status],
-    ['Binding resource', r.binding],
-    ['Explanation', r.bindingExplanation],
-    ['Same-spec nodes required', fitGapRequiredLabel(assessment)],
-    ['Additional same-spec nodes', fitGapAdditionalLabel(assessment)],
-    ['CPU deficit (physical cores)', r1(assessment.deficits.physicalCores)],
-    ['Memory deficit (GiB)', r1(assessment.deficits.ramGiB)],
-    ['S2D capacity deficit (usable TiB)', r1(assessment.deficits.s2dTiB)],
-    ['SAN capacity deficit (effective TiB)', r1(assessment.deficits.sanTiB)],
+    ['Explanation', assessment.explanation],
+    ['First resource to run out', assessment.firstToRunOut ? `${assessment.firstToRunOut.label} at ${usedShareText(assessment.firstToRunOut.worstPct)}` : 'Not assessed'],
+    ['Placement rule', assessment.placement.rule],
+    ['VMs not placed', assessment.unplaced.length],
+    ['Hosts to add for compute', computeHostsToAdd(assessment)],
+    ['Host specification to add', assessment.addSpec ? hostGroupLabel(assessment.addSpec.group) : '—'],
+  ]
+
+  const hosts: unknown[][] = [
+    ['YOUR HOSTS'],
+    ['Cluster', 'Hosts', 'Sockets', 'Cores / socket', 'RAM (GiB)', 'CPU vendor', 'CPU model', 'Spare hosts', 'Storage'],
+    ...assessment.clusters.flatMap((cluster) => cluster.hostGroups.map((group) => [cluster.name, group.count, group.sockets, group.coresPerSocket, r0(group.ramGiB), group.cpuVendor, group.cpuModel ?? '', cluster.spareNodes, cluster.cfg.architecture])),
     [],
-    ['RECOMMENDATIONS'],
-    ...assessment.recommendations.map((recommendation) => [recommendation]),
+    ['PER-CLUSTER RESULTS'],
+    ['Cluster', 'Hosts', 'Workload hosts', 'VMs placed', 'Management VMs', 'Usable cores', 'Used cores', 'Usable memory (GiB)', 'Used memory (GiB)', 'Result'],
+    ...assessment.clusters.map((cluster) => [cluster.name, cluster.hosts, cluster.workloadNodes, cluster.vms.length, cluster.fixedVms.length, r1(cluster.reverse.availablePCores), r1(cluster.reverse.usedPCores), r0(cluster.reverse.availableRamGiB), r0(cluster.reverse.usedRamGiB), cluster.fits === null ? 'Nothing placed' : cluster.fits ? 'FITS' : 'DOES NOT FIT']),
+  ]
+
+  const headroom: unknown[][] = [
+    ['CAPACITY AND HEADROOM BY RESOURCE'],
+    [`Annual growth ${r1(assessment.annualGrowthPct * 100)}%`],
+    ['Resource', 'Unit', 'Available', 'Used', 'Headroom', 'Used share (fullest cluster)', 'Runs out'],
+    ...assessment.resources.map((item) => [item.label, item.unit, r1(item.available), r1(item.used), r1(item.headroom), usedShareText(item.worstPct), exhaustionText(item, assessment.annualGrowthPct)]),
+  ]
+
+  const whatToAdd: unknown[][] = [
+    ['WHAT TO ADD'],
+    ['Each line is a separate remedy: compute, storage, performance, and VMs that cannot fit any host.'],
+    ['Area', 'Where', 'Quantity', 'Unit', 'Item', 'Detail'],
+    ...(assessment.whatToAdd.length > 0
+      ? assessment.whatToAdd.map((item) => [item.category, item.scope, item.quantity, item.unit, item.item, item.detail])
+      : [[assessment.verdict === 'fits' ? 'Nothing: the workload fits.' : 'Nothing to add was calculated.']]),
+    ...(assessment.remedies.blockers.length > 0 ? [[], ['RESOLVE FIRST'], ...assessment.remedies.blockers.map((blocker) => [blocker])] : []),
+    ...(assessment.unplaced.length > 0 ? [[], ['VMS THAT COULD NOT BE PLACED'], ['VM', 'vCPU', 'RAM (GiB)', 'Reason'], ...assessment.unplaced.map((vm) => [vm.name, vm.vCpu, r1(vm.ramGiB), vm.detail])] : []),
   ]
 
   const counted = design.management.countedVms
+  const byTier = additionalVmsByTier(assessment)
   const tierCapacity: unknown[][] = [
     ['ADDITIONAL VM CAPACITY'],
     ['Values are mutually exclusive. Filling one tier consumes headroom available to the others. Empty tiers use the documented nominal fallback profile.'],
     [],
+    ['Chosen profile', assessment.profile.label],
+    ['Profile vCPU', r1(assessment.profile.vCpu)],
+    ['Profile RAM (GiB)', r1(assessment.profile.ramGiB)],
+    ['Profile storage (GiB)', r1(assessment.profile.storageGiB)],
+    ['More VMs of the chosen profile', assessment.profile.count],
+    ['Limited by', assessment.profile.limitedBy === 'host-size' ? 'Larger than a host' : assessment.profile.limitedBy ? RESOURCE_LABELS[assessment.profile.limitedBy] : 'Not limited'],
+    [],
     ['Tier', 'Current VMs', 'Additional VMs', 'Ceiling', 'vCPU:pCore', 'Demand factor'],
     ...TIER_IDS.map((id) => {
       const current = [...vms, ...counted].filter((vm) => vm.include && vm.tier === id).length
-      const more = finite(r.additionalVmsByTier[id], 'Not limited')
-      return [design.tiers[id].label, current, more, typeof more === 'number' ? current + more : more, design.tiers[id].oversubscription, design.tiers[id].rightSizingFactor]
+      const more = byTier[id]
+      return [design.tiers[id].label, current, more, current + more, design.tiers[id].oversubscription, design.tiers[id].rightSizingFactor]
     }),
   ]
 
   const findings: unknown[][] = [
     ['VALIDATION FINDINGS'],
     ['Severity', 'Basis', 'Code', 'Message', 'Source'],
-    ...r.findings.map((finding) => [finding.severity.toUpperCase(), finding.basis, finding.code, finding.message, finding.source ?? '']),
+    ...assessment.findings.map((finding) => [finding.severity.toUpperCase(), finding.basis, finding.code, finding.message, finding.source ?? '']),
   ]
 
   const inventory: unknown[][] = [[
-    'VM', 'Tier', 'Included', 'Power state', 'vCPU', 'RAM (GiB)', 'Consumed (GiB)', 'Provisioned (GiB, not sized)', 'Guest OS', 'Source cluster', 'Source host',
+    'VM', 'Tier', 'Included', 'Power state', 'vCPU', 'RAM (GiB)', 'Consumed (GiB)', 'Provisioned (GiB, not sized)', 'Guest OS', 'Source cluster', 'Source host', 'Placed on',
   ], ...vms.map((vm) => [
     vm.name, design.tiers[vm.tier].label, vm.include ? 'YES' : 'no', vm.powerState, vm.vCpu, r1(vm.ramGiB), r1(vm.storageGiB), r1(vm.provisionedGiB), vm.guestOs ?? '', vm.sourceCluster ?? '', vm.sourceHost ?? '',
+    vm.include ? assessment.clusters.find((cluster) => cluster.vms.some((item) => item.id === vm.id))?.name ?? 'Not placed' : '',
   ])]
 
   return [
     { name: 'Capacity and Fit', rows: summary },
+    { name: 'Hosts', rows: hosts },
+    { name: 'Headroom', rows: headroom },
+    { name: 'What to Add', rows: whatToAdd },
     { name: 'VM Capacity', rows: tierCapacity },
     growthSheet(design),
     storagePlanSheet(design),

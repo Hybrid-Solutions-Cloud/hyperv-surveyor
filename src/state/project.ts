@@ -7,9 +7,13 @@ import { DEFAULT_DR_INPUTS, type DrDesignInputs } from '../engine/drDesign'
 import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMode, type ManagementDecision } from './journey'
 import type { StorageDecisionAnswers } from '../engine/storageDecision'
 import { normalizeAdvisorAnswers, type AdvisorAnswers } from '../data/managementPlane'
+import { normalizeExistingHardware, type ExistingHardware } from '../engine/existingHardware'
 
-/** 5 added savedScenarios to the project file. 6 added the Management Plane Advisor answers. */
-export const PROJECT_SCHEMA_VERSION = 6 as const
+/**
+ * 5 added savedScenarios to the project file. 6 added the Management Plane Advisor answers. 7 added
+ * existing hardware as clusters of host groups; older files migrate from the single-spec fields.
+ */
+export const PROJECT_SCHEMA_VERSION = 7 as const
 export const ENGINE_VERSION = '1.2.0'
 
 export interface ReportMetadata {
@@ -48,7 +52,10 @@ export interface ProjectPayload {
   chosenKey: string
   existingCapacityCfg: ClusterConfig
   existingCapacityTiers: Record<TierId, TierPolicy>
+  /** Read only when existingHardware is absent (files before schema 7). */
   existingCapacityNodes: number
+  /** Your hosts as clusters of host groups. Absent in files written before schema 7. */
+  existingHardware?: ExistingHardware
   managementDeploymentInputs: ManagementDeploymentInputs | null
   includeManagementInSizing: boolean
   placementInputs: PlacementInputs
@@ -181,6 +188,8 @@ export function normalizeManagementInputs(value: unknown): ManagementDeploymentI
 export function normalizeProjectPayload(value: unknown): ProjectPayload {
   if (!record(value)) throw new Error('The project payload is missing or invalid.')
   const vms = normalizeVms(value.vms)
+  const existingCapacityCfg = normalizeConfig(value.existingCapacityCfg)
+  const existingCapacityNodes = typeof value.existingCapacityNodes === 'number' ? Math.max(1, value.existingCapacityNodes) : 8
   return {
     engagementMode: normalizeEngagementMode(value.engagementMode, vms.length > 0 ? 'new-platform' : null),
     managementDecision: value.managementDecision === undefined && record(value.managementDeploymentInputs) ? 'design' : normalizeManagementDecision(value.managementDecision),
@@ -189,9 +198,11 @@ export function normalizeProjectPayload(value: unknown): ProjectPayload {
     cfg: normalizeProposedConfig(value.cfg),
     tiers: normalizeTiers(value.tiers),
     chosenKey: typeof value.chosenKey === 'string' ? value.chosenKey : 'san',
-    existingCapacityCfg: normalizeConfig(value.existingCapacityCfg),
+    existingCapacityCfg,
     existingCapacityTiers: normalizeTiers(value.existingCapacityTiers),
-    existingCapacityNodes: typeof value.existingCapacityNodes === 'number' ? Math.max(1, value.existingCapacityNodes) : 8,
+    existingCapacityNodes,
+    // Older files carry one host spec and a count: they migrate to one cluster with one host group.
+    existingHardware: normalizeExistingHardware(value.existingHardware, record(value.existingCapacityCfg) ? existingCapacityCfg : undefined, existingCapacityNodes),
     managementDeploymentInputs: normalizeManagementInputs(value.managementDeploymentInputs),
     managementAdvisorAnswers: normalizeAdvisorAnswers(value.managementAdvisorAnswers),
     includeManagementInSizing: typeof value.includeManagementInSizing === 'boolean' ? value.includeManagementInSizing : true,

@@ -361,8 +361,9 @@ function DeploymentDesignerPanel({
   const plan = management.plan
   const impactDesign = design
   const hostDelta = impactDesign.management.hostDelta
-  const fitText = platformKind === 'existing' && impactDesign.fitGap?.fits !== null && impactDesign.fitGap
-    ? impactDesign.fitGap.fits ? ` Fits on the ${platformNodes} entered nodes.` : ` Does not fit the ${platformNodes} entered nodes.`
+  const existingVerdict = impactDesign.existing?.verdict
+  const fitText = platformKind === 'existing' && (existingVerdict === 'fits' || existingVerdict === 'does-not-fit')
+    ? existingVerdict === 'fits' ? ` Fits on your ${platformNodes} hosts.` : ` Does not fit your ${platformNodes} hosts.`
     : ''
   const impactValue = platformKind === 'management-only' ? 'BOM only' : impactDesign.management.impactLabel
   const impactDetail = platformKind === 'management-only'

@@ -146,19 +146,26 @@ describe('fit workloads to existing hardware', () => {
     })
   })
 
-  it('states the compute answer in the report when the array blocks', () => {
+  // Phase 6: the same-spec node count is replaced by separate remedies, so the compute answer and the
+  // array answer are both stated, each with its own number.
+  it('states the compute and storage answers separately when the array blocks', () => {
     const cfg = structuredClone(DEFAULT_CONFIG)
     cfg.architecture = 'san'
     cfg.san = { ...cfg.san, usableTiB: 1, drr: 1 }
     const r = report('fit-gap', { existingCapacityCfg: cfg, existingCapacityNodes: 2, vms: fleet(50) })
     expect(metric(r, 'existing', 'Fit decision')).toBe('Does not fit')
-    expect(metric(r, 'existing', 'Same-spec nodes required')).toMatch(/for compute/)
+    expect(Number(metric(r, 'nodes', 'Hosts to add for compute'))).toBeGreaterThan(0)
+    const bullets = section(r, 'existing').bullets.join(' ')
+    expect(bullets).toMatch(/Compute: add \d+ hosts?/)
+    expect(bullets).toMatch(/Storage: The array .* Add [\d.]+ TiB usable to fit/)
+    expect(section(r, 'existing').tables.some((table) => table.title === 'What to add')).toBe(true)
   })
 
   it('asks for workloads rather than reporting a shortfall', () => {
     const r = report('fit-gap', { vms: [] })
-    expect(metric(r, 'existing', 'Same-spec nodes required')).toBe('Add workloads')
-    expect(metric(r, 'existing', 'Additional nodes')).toBe('Add workloads')
+    expect(metric(r, 'nodes', 'Hosts to add for compute')).toBe('Add workloads')
+    expect(metric(r, 'existing', 'Fit decision')).toBe('Not assessed')
+    expect(JSON.stringify(r.sections)).not.toContain('Not sufficient')
   })
 })
 

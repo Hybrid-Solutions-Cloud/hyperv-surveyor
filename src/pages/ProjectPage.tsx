@@ -25,6 +25,7 @@ export default function ProjectPage() {
     existingCapacityCfg: store.existingCapacityCfg,
     existingCapacityTiers: store.existingCapacityTiers,
     existingCapacityNodes: store.existingCapacityNodes,
+    existingHardware: store.existingHardware,
     managementDeploymentInputs: store.managementDeploymentInputs,
     managementAdvisorAnswers: store.managementAdvisorAnswers,
     includeManagementInSizing: store.includeManagementInSizing,
@@ -44,7 +45,7 @@ export default function ProjectPage() {
     const row = compareScenario(scenario)
     const result = row.design.path === 'management-only' ? null : row.design.sizing
     return { scenario, design: row.design, result, architecture: row.architecture, nodes: row.nodes, resultLabel: row.result, storage: row.storage }
-  }), [store.engagementMode, store.managementDecision, store.cfg, store.vms, store.tiers, store.chosenKey, store.customerName, store.existingCapacityCfg, store.existingCapacityTiers, store.existingCapacityNodes, store.managementDeploymentInputs, store.managementAdvisorAnswers, store.includeManagementInSizing, store.placementInputs, store.networkDesignInputs, store.drDesignInputs, store.reportMetadata, store.dataSources, store.storageDecisionAnswers, store.savedScenarios])
+  }), [store.engagementMode, store.managementDecision, store.cfg, store.vms, store.tiers, store.chosenKey, store.customerName, store.existingCapacityCfg, store.existingCapacityTiers, store.existingCapacityNodes, store.existingHardware, store.managementDeploymentInputs, store.managementAdvisorAnswers, store.includeManagementInSizing, store.placementInputs, store.networkDesignInputs, store.drDesignInputs, store.reportMetadata, store.dataSources, store.storageDecisionAnswers, store.savedScenarios])
 
   const resetEverything = useResetEverything()
 

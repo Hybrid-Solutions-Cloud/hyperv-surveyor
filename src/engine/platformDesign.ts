@@ -9,7 +9,10 @@
  */
 import { compareArchitectures, forecastGrowth, solveForward, type ArchitectureOption } from './solve'
 import { DEFAULT_PLACEMENT_INPUTS, planMultipleClusters, type MultiClusterPlan, type PlacementInputs } from './deploymentPlanning'
-import { assessFitGap, type FitGapAssessment } from './fitGap'
+import {
+  assessExistingHardware, clusterConfig, existingHardwareFromConfig, hardwareEntered, hostGroupLabel, RESOURCE_LABELS,
+  totalHostCount, type ExistingAssessment, type ExistingHardware,
+} from './existingHardware'
 import {
   deploymentComponentsToVms,
   normalizeManagementDeploymentInputs,
@@ -40,6 +43,11 @@ export interface PlatformDesignInputs {
   existingCapacityCfg?: ClusterConfig
   existingCapacityTiers?: Record<TierId, TierPolicy>
   existingCapacityNodes?: number
+  /**
+   * Your hosts as clusters of host groups. When absent, the older single-spec fields above are read as
+   * one cluster with one host group, the same way saved projects migrate.
+   */
+  existingHardware?: ExistingHardware
   placementInputs?: PlacementInputs
   managementDecision?: DesignManagementDecision
   managementDeploymentInputs: ManagementDeploymentInputs | null
@@ -52,9 +60,10 @@ export type PlatformPath = 'new-platform' | 'existing' | 'management-only'
 
 /**
  * new-platform: feasible (one cluster), split (selected and feasible), split-failed, over-limit,
- * blocked. existing: fits, does-not-fit. Both: no-workload. management-only: not-assessed.
+ * blocked. existing: no-hardware (nothing entered yet), fits, does-not-fit. Both: no-workload.
+ * management-only: not-assessed.
  */
-export type DesignStatus = 'feasible' | 'split' | 'split-failed' | 'over-limit' | 'blocked' | 'fits' | 'does-not-fit' | 'no-workload' | 'not-assessed'
+export type DesignStatus = 'feasible' | 'split' | 'split-failed' | 'over-limit' | 'blocked' | 'no-hardware' | 'fits' | 'does-not-fit' | 'no-workload' | 'not-assessed'
 
 export interface DesignClusterRow {
   id: string
@@ -189,7 +198,8 @@ export interface PlatformDesign {
   clusters: DesignClusterRow[]
   growth: DesignGrowth | null
   storage: DesignStorage | null
-  fitGap: FitGapAssessment | null
+  /** The existing-hardware assessment: capacity, placement, fit verdict and remedies. Existing paths only. */
+  existing: ExistingAssessment | null
   network: { nodes: number | null; reason: string | null }
   findings: Finding[]
   errors: string[]
@@ -307,34 +317,39 @@ function splitGrowth(cfg: ClusterConfig, vms: Vm[], tiers: Record<TierId, TierPo
   }
 }
 
-function existingGrowth(cfg: ClusterConfig, vms: Vm[], tiers: Record<TierId, TierPolicy>, fixedVms: Vm[], existingNodes: number): DesignGrowth {
-  const forecast = forecastGrowth(cfg, vms, tiers, fixedVms)
+/** Growth on your hosts: each year, what runs out and how many hosts of the chosen spec it needs. */
+function existingGrowth(cfg: ClusterConfig, assessment: ExistingAssessment): DesignGrowth {
+  const plan = resolveGrowthPlan(cfg)
+  const hosts = assessment.totalHosts
+  const spec = assessment.addSpec ? hostGroupLabel(assessment.addSpec.group) : 'your most common host'
+  const points = assessment.growthYears.map((point): DesignGrowthPoint => {
+    const resource = point.worstResource ? RESOURCE_LABELS[point.worstResource] : 'No resource'
+    const add = point.hostsToAdd
+    const action = point.fits
+      ? `Fits on your ${plural(hosts, 'host')}`
+      : add !== null && add > 0
+        ? `${resource} runs out: add ${plural(add, 'host')} of ${spec}`
+        : `${resource} runs out: more hosts do not fix this, see the remedies`
+    return {
+      year: point.year,
+      demandFactor: point.demandFactor,
+      nodes: add === null ? null : hosts + add,
+      nodesLabel: add !== null && add > 0 ? `${fmt(hosts, 0)} entered + ${fmt(add, 0)}` : `${fmt(hosts, 0)} entered`,
+      binding: point.worstResource ?? 'none',
+      feasible: point.fits,
+      additionalNodes: add,
+      sanToBuyUsableTiB: null,
+      action,
+    }
+  })
   return {
-    plan: forecast.plan,
+    plan,
     scope: 'existing',
-    scopeLabel: `The ${existingNodes} entered nodes`,
-    currentRequiredNodes: forecast.currentRequiredNodes,
-    plannedNodesToday: existingNodes,
-    allFeasible: forecast.points.every((point) => point.result.feasible && point.result.nodes <= existingNodes),
-    points: forecast.points.map((point) => {
-      const nodes = point.result.feasible ? point.result.nodes : null
-      const action = nodes === null
-        ? `Not solved by adding nodes: ${infeasibleAction(point.result).toLowerCase()}`
-        : nodes <= existingNodes
-          ? `Fits on the ${existingNodes} existing nodes`
-          : `Needs ${plural(nodes - existingNodes, 'more node')} than the ${existingNodes} entered`
-      return {
-        year: point.year,
-        demandFactor: point.demandFactor,
-        nodes,
-        nodesLabel: nodes === null ? singleClusterNodesLabel(point.result) : `${fmt(nodes, 0)} needed`,
-        binding: point.result.binding,
-        feasible: nodes !== null && nodes <= existingNodes,
-        additionalNodes: nodes === null ? null : Math.max(0, nodes - existingNodes),
-        sanToBuyUsableTiB: null,
-        action,
-      }
-    }),
+    scopeLabel: `Your ${plural(hosts, 'entered host')}`,
+    currentRequiredNodes: points[0]?.nodes ?? null,
+    plannedNodesToday: hosts,
+    allFeasible: points.every((point) => point.feasible),
+    points,
   }
 }
 
@@ -384,7 +399,12 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
   const includedVmCount = input.vms.filter((vm) => vm.include).length
   const existingCfg = input.existingCapacityCfg ?? input.cfg
   const existingTiers = input.existingCapacityTiers ?? input.tiers
-  const existingNodes = Math.max(1, Math.round(input.existingCapacityNodes ?? 8))
+  const existingHardware = input.existingHardware ?? existingHardwareFromConfig(existingCfg, Math.max(1, Math.round(input.existingCapacityNodes ?? 8)))
+  const existingEntered = hardwareEntered(existingHardware)
+  const existingNodes = totalHostCount(existingHardware)
+  const firstExistingCluster = existingHardware.clusters.find((cluster) => cluster.hostGroups.some((group) => group.count > 0 && group.sockets > 0 && group.coresPerSocket > 0 && group.ramGiB > 0)) ?? existingHardware.clusters[0]
+  /** The first cluster's configuration stands for the estate where one configuration is needed (network, readiness). */
+  const existingDesignCfg = clusterConfig(existingCfg, existingHardware, firstExistingCluster)
   const splitRequested = path === 'new-platform' && placementInputs.clusterLayout === 'split'
 
   // Step 1: the design without management VMs. It sets the host count management defaults use.
@@ -430,12 +450,13 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
     ? counted ? compareArchitectures(input.cfg, platformVms, input.tiers, countedVms) : baselineOptions
     : []
   const chosen = options.find((option) => option.key === input.chosenKey) ?? options[0] ?? null
-  const cfg = path === 'existing' ? existingCfg : chosen?.cfg ?? input.cfg
+  const cfg = path === 'existing' ? existingDesignCfg : chosen?.cfg ?? input.cfg
   const tiers = path === 'existing' ? existingTiers : input.tiers
 
   let placement: MultiClusterPlan | null = null
   let sizing: SizingResult | null = null
-  let fitGap: FitGapAssessment | null = null
+  let existing: ExistingAssessment | null = null
+  let existingHostDelta: number | null = null
   let status: DesignStatus = 'not-assessed'
   let feasible: boolean | null = null
   let headline = 'Platform sizing not requested'
@@ -561,75 +582,111 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
       }
     }
   } else if (path === 'existing') {
-    platformLabel = `Existing ${existingCfg.architecture.toUpperCase()} estate`
-    fitGap = assessFitGap(existingCfg, existingNodes, platformVms, existingTiers, countedVms)
-    sizing = fitGap.required
-    const reverse = fitGap.reverse
-    totalNodes = existingNodes
-    workloadNodes = reverse.workloadNodes
-    nodesLabel = fmt(existingNodes, 0)
-    const coresPerNode = licensableCores(existingCfg.node)
-    licensableCoresValue = coresPerNode * existingNodes
-    licensableCoresDetail = `${coresPerNode} per node × ${existingNodes} entered nodes`
-    if (fitGap.fits === null) {
-      status = 'no-workload'
+    existing = assessExistingHardware({ hardware: existingHardware, policy: existingCfg, tiers: existingTiers, vms: platformVms, fixedVms: countedVms })
+    const assessment = existing
+    const multiCluster = assessment.clusters.length > 1
+    const architectures = [...new Set(assessment.clusters.map((cluster) => cluster.cfg.architecture))]
+    platformLabel = !existingEntered
+      ? 'Existing hardware (not entered)'
+      : `Existing ${architectures.map((value) => value.toUpperCase()).join(' + ') || existingDesignCfg.architecture.toUpperCase()} estate${multiCluster ? `, ${plural(assessment.clusters.length, 'cluster')}` : ''}`
+    const workloadPresent = includedVmCount > 0 || countedVms.length > 0
+    if (!existingEntered) {
+      status = 'no-hardware'
       feasible = null
-      headline = `Capacity of the ${existingNodes} entered nodes`
-      explanation = reverse.bindingExplanation
-    } else if (fitGap.fits) {
-      status = 'fits'
-      feasible = true
-      headline = `Fits on the ${existingNodes} entered nodes`
-      explanation = reverse.bindingExplanation
+      headline = assessment.headline
+      explanation = assessment.explanation
+      nodesLabel = 'Enter your hardware'
+      licensableCoresDetail = 'Not calculated: enter your hardware first'
     } else {
-      status = 'does-not-fit'
-      feasible = false
-      headline = `Does not fit the ${existingNodes} entered nodes`
-      explanation = [reverse.bindingExplanation, ...fitGap.recommendations.slice(0, 1)].join(' ')
-    }
-    clusters = includedVmCount === 0 && countedVms.length === 0 ? [] : [{
-      id: 'existing-cluster',
-      name: 'Existing cluster',
-      purpose: 'Entered estate',
-      workloadVms: includedVmCount,
-      managementVms: countedVms.length,
-      nodes: existingNodes,
-      workloadNodes: reverse.workloadNodes,
-      nodesLabel: `${existingNodes} entered`,
-      binding: reverse.binding,
-      feasible: fitGap.fits !== false,
-      sourceClusters: [...new Set(platformVms.filter((vm) => vm.include).map((vm) => vm.sourceCluster).filter((value): value is string => !!value))],
-      confidence: confidenceText(fitGap.required),
-      requiredStorageTiB: reverse.usedStorageTiB,
-      s2dUsableTiB: reverse.capacity?.usableTiB ?? null,
-      sanToBuyUsableTiB: null,
-      licensableCores: licensableCoresValue,
-    }]
-    growth = includedVmCount === 0 ? null : existingGrowth(existingCfg, platformVms, existingTiers, countedVms, existingNodes)
-    const s2d = reverse.storageDomains.find((domain) => domain.domain === 's2d')
-    const sanDomain = reverse.storageDomains.find((domain) => domain.domain === 'san')
-    const san = sanFields(existingCfg)
-    const reported = fitGap.fits === true
-    storage = {
-      architecture: existingCfg.architecture,
-      requiredTiB: reverse.usedStorageTiB,
-      requiredS2dTiB: s2d?.usedTiB ?? 0,
-      requiredSanTiB: sanDomain?.usedTiB ?? 0,
-      s2dUsableTiB: reverse.capacity?.usableTiB ?? null,
-      ...san,
-      sanToBuyUsableTiB: null,
-      sanToBuyEffectiveTiB: null,
-      csvPlans: reported ? reverse.csvPlans : null,
-      totalCsvs: reported ? reverse.csvPlans.reduce((total, plan) => total + plan.count, 0) : null,
-      csvNotCalculatedReason: reported ? null : fitGap.fits === null
-        ? 'Not calculated: add workloads to plan storage objects.'
-        : `Not calculated: the workload does not fit the ${existingNodes} entered nodes.`,
-      showLocalDrives: existingCfg.architecture !== 'san',
-      perCluster: false,
-    }
-    if (counted) {
-      const baseline = solveForward(existingCfg, platformVms, existingTiers)
-      baselineNodes = baseline.feasible ? baseline.nodes : null
+      // The same-spec forward result carries the performance assessment and the data DR reads.
+      const forward = solveForward(existingDesignCfg, platformVms, existingTiers, countedVms)
+      const perf = assessment.resources
+      const pick = (resource: string) => perf.find((row) => row.resource === resource)
+      const storagePerformance = {
+        ...forward.storagePerformance,
+        requiredS2dIops: assessment.clusters.reduce((total, cluster) => total + cluster.reverse.storagePerformance.requiredS2dIops, 0),
+        requiredS2dThroughputMBps: assessment.clusters.reduce((total, cluster) => total + cluster.reverse.storagePerformance.requiredS2dThroughputMBps, 0),
+        requiredSanIops: assessment.clusters.reduce((total, cluster) => total + cluster.reverse.storagePerformance.requiredSanIops, 0),
+        requiredSanThroughputMBps: assessment.clusters.reduce((total, cluster) => total + cluster.reverse.storagePerformance.requiredSanThroughputMBps, 0),
+        availableS2dIops: pick('s2d-iops')?.available ?? null,
+        availableS2dThroughputMBps: pick('s2d-throughput')?.available ?? null,
+        availableSanIops: pick('san-iops')?.available ?? null,
+        availableSanThroughputMBps: pick('san-throughput')?.available ?? null,
+      }
+      const anyS2d = assessment.clusters.some((cluster) => cluster.cfg.architecture !== 'san')
+      const anySan = assessment.clusters.some((cluster) => cluster.cfg.architecture !== 's2d')
+      storagePerformance.validated = storagePerformance.measuredVmCoveragePct >= 80
+        && (!anyS2d || (storagePerformance.availableS2dIops !== null && storagePerformance.availableS2dThroughputMBps !== null))
+        && (!anySan || (storagePerformance.availableSanIops !== null && storagePerformance.availableSanThroughputMBps !== null))
+      sizing = { ...forward, storagePerformance }
+      totalNodes = assessment.totalHosts
+      workloadNodes = assessment.workloadHosts
+      nodesLabel = multiCluster ? `${fmt(assessment.totalHosts, 0)} across ${plural(assessment.clusters.length, 'cluster')}` : fmt(assessment.totalHosts, 0)
+      licensableCoresValue = assessment.licensableCores
+      licensableCoresDetail = `Summed over your ${plural(assessment.totalHosts, 'entered host')}`
+      headline = assessment.headline
+      explanation = assessment.explanation
+      if (assessment.verdict === 'no-workload') {
+        status = 'no-workload'
+        feasible = null
+      } else if (assessment.verdict === 'fits') {
+        status = 'fits'
+        feasible = true
+      } else {
+        status = 'does-not-fit'
+        feasible = false
+      }
+      const confidence = confidenceText(forward)
+      clusters = !workloadPresent ? [] : assessment.clusters.map((cluster) => ({
+        id: cluster.id,
+        name: multiCluster ? cluster.name : 'Existing cluster',
+        purpose: multiCluster ? `Your cluster ${cluster.name}` : 'Entered estate',
+        workloadVms: cluster.vms.length,
+        managementVms: cluster.fixedVms.length,
+        nodes: cluster.hosts,
+        workloadNodes: cluster.workloadNodes,
+        nodesLabel: `${cluster.hosts} entered`,
+        binding: cluster.reverse.binding,
+        feasible: cluster.fits !== false && (multiCluster || assessment.verdict !== 'does-not-fit'),
+        sourceClusters: [...new Set(cluster.vms.map((vm) => vm.sourceCluster).filter((value): value is string => !!value))],
+        confidence,
+        requiredStorageTiB: cluster.reverse.usedStorageTiB,
+        s2dUsableTiB: cluster.reverse.capacity?.usableTiB ?? null,
+        sanToBuyUsableTiB: null,
+        licensableCores: cluster.licensableCores,
+      }))
+      growth = includedVmCount === 0 ? null : existingGrowth(existingCfg, assessment)
+      const reported = assessment.verdict === 'fits'
+      const sanRow = pick('san-storage')
+      const s2dRow = pick('s2d-storage')
+      const sanClusters = assessment.clusters.filter((cluster) => cluster.cfg.architecture !== 's2d')
+      const sharedArray = existingHardware.sanScope === 'shared'
+      const san = sanFields({ ...existingDesignCfg, architecture: sanClusters.length > 0 ? 'san' : 's2d', san: sharedArray ? existingHardware.sharedSan : sanClusters[0]?.cfg.san ?? existingDesignCfg.san })
+      const csvPlans: DesignCsvPlan[] = assessment.clusters.flatMap((cluster) => cluster.reverse.csvPlans.map((plan) => multiCluster ? { ...plan, cluster: cluster.name } : plan))
+      storage = {
+        architecture: existingDesignCfg.architecture,
+        requiredTiB: assessment.clusters.reduce((total, cluster) => total + cluster.reverse.usedStorageTiB, 0),
+        requiredS2dTiB: s2dRow?.used ?? 0,
+        requiredSanTiB: sanRow?.used ?? 0,
+        s2dUsableTiB: s2dRow ? s2dRow.available : null,
+        ...san,
+        sanUsableTiB: sanClusters.length === 0 ? null : sharedArray ? existingHardware.sharedSan.usableTiB : sanClusters.reduce((total, cluster) => total + cluster.cfg.san.usableTiB, 0),
+        sanEffectiveTiB: sanRow ? sanRow.available : null,
+        sanToBuyUsableTiB: null,
+        sanToBuyEffectiveTiB: null,
+        csvPlans: reported ? csvPlans : null,
+        totalCsvs: reported ? csvPlans.reduce((total, plan) => total + plan.count, 0) : null,
+        csvNotCalculatedReason: reported ? null : assessment.verdict === 'no-workload'
+          ? 'Not calculated: add workloads to plan storage objects.'
+          : `Not calculated: the workload does not fit your ${plural(assessment.totalHosts, 'host')}.`,
+        showLocalDrives: anyS2d,
+        perCluster: multiCluster,
+      }
+      if (counted) {
+        const baseline = assessExistingHardware({ hardware: existingHardware, policy: existingCfg, tiers: existingTiers, vms: platformVms })
+        const hostsToAdd = (value: ExistingAssessment) => value.remedies.compute.reduce((total, item) => total + item.hostsToAdd, 0)
+        existingHostDelta = Math.max(0, hostsToAdd(assessment) - hostsToAdd(baseline))
+      }
     }
   }
 
@@ -651,12 +708,13 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
   }
 
   // Host impact, attributed to management only when management VMs exist and cause it.
-  const designNodesWithManagement = path === 'existing'
-    ? sizing?.feasible ? sizing.nodes : null
-    : status === 'split' || status === 'feasible' ? totalNodes : null
-  const hostDelta = counted && baselineNodes !== null && designNodesWithManagement !== null
-    ? Math.max(0, designNodesWithManagement - baselineNodes)
-    : null
+  const designNodesWithManagement = status === 'split' || status === 'feasible' ? totalNodes : null
+  // Existing hardware: what management adds to the hosts you must add.
+  const hostDelta = path === 'existing'
+    ? counted ? existingHostDelta : null
+    : counted && baselineNodes !== null && designNodesWithManagement !== null
+      ? Math.max(0, designNodesWithManagement - baselineNodes)
+      : null
   let impactLabel: string
   let impactDetail: string
   if (!designed) {
@@ -675,11 +733,13 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
     impactLabel = 'No management VMs'
     impactDetail = 'The saved design has no management VMs to place.'
   } else if (hostDelta === null) {
-    impactLabel = 'Could not compare: the design does not fit'
-    impactDetail = 'A node count is needed with and without management to compare.'
+    impactLabel = path === 'existing' ? 'Could not compare: enter your hardware' : 'Could not compare: the design does not fit'
+    impactDetail = path === 'existing' ? 'Hosts are needed to compare with and without management.' : 'A node count is needed with and without management to compare.'
   } else {
     impactLabel = hostDelta > 0 ? `+${plural(hostDelta, 'node')}` : 'No additional nodes'
-    impactDetail = hostDelta > 0 ? `${managementVms.length} management VMs add ${plural(hostDelta, 'node')}.` : `${managementVms.length} management VMs fit without extra nodes.`
+    impactDetail = hostDelta > 0
+      ? `${managementVms.length} management VMs add ${plural(hostDelta, 'node')}${path === 'existing' ? ' to the hosts you must add' : ''}.`
+      : `${managementVms.length} management VMs fit without extra nodes.`
   }
 
   // Network nodes: only a design with a node count can be cabled.
@@ -687,7 +747,9 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
   if (path === 'management-only') {
     network = { nodes: null, reason: 'Not calculated: no platform hardware in a management-only engagement.' }
   } else if (path === 'existing') {
-    network = { nodes: existingNodes + (dedicated?.nodes ?? 0), reason: null }
+    network = existingEntered
+      ? { nodes: existingNodes + (dedicated?.nodes ?? 0), reason: null }
+      : { nodes: null, reason: 'Not calculated: enter your hardware first.' }
   } else if (totalNodes !== null) {
     network = { nodes: totalNodes + (dedicated?.nodes ?? 0), reason: null }
   } else {
@@ -698,7 +760,7 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
         : 'Not calculated: the design does not fit, so there is no node count to cable.' }
   }
 
-  const findings = path === 'existing' ? fitGap?.reverse.findings ?? [] : sizing?.findings ?? []
+  const findings = path === 'existing' ? existing?.findings ?? [] : sizing?.findings ?? []
   const errors = [
     ...findings.filter((finding) => finding.severity === 'error').map((finding) => finding.message),
     ...(status === 'split-failed' ? placement?.warnings ?? [] : []),
@@ -751,7 +813,7 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
     clusters,
     growth,
     storage,
-    fitGap,
+    existing,
     network,
     findings,
     errors: [...new Set(errors)],
@@ -767,6 +829,7 @@ export function designResultLabel(design: PlatformDesign): string {
     case 'split-failed': return 'Split not feasible'
     case 'over-limit': return 'Over the cluster limit'
     case 'blocked': return 'Blocked'
+    case 'no-hardware': return 'Enter your hardware'
     case 'fits': return 'Fits'
     case 'does-not-fit': return 'Does not fit'
     case 'no-workload': return 'No workloads'

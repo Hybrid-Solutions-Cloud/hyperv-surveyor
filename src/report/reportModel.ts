@@ -17,7 +17,10 @@ import { assessMigrationReadiness } from '../engine/readiness'
 import { DEFAULT_NETWORK_INPUTS, designNetwork, type NetworkDesignInputs } from '../engine/networkDesign'
 import { DEFAULT_DR_INPUTS, designDisasterRecovery, type DrDesignInputs } from '../engine/drDesign'
 import { DEFAULT_REPORT_METADATA, ENGINE_VERSION, type ProjectDataSource, type ReportMetadata } from '../state/project'
-import { fitGapAdditionalLabel, fitGapRequiredLabel } from '../engine/fitGap'
+import {
+  additionalVmsByTier, computeHostsToAdd, exhaustionText, existingVerdictLabel, hostGroupLabel, usedShareText,
+  RESOURCE_LABELS, type ExistingHardware,
+} from '../engine/existingHardware'
 import { DEFAULT_CONFIG, defaultTiers } from '../state/defaults'
 import { ENGAGEMENT_LABELS, type EngagementMode, type ManagementDecision } from '../state/journey'
 
@@ -113,6 +116,8 @@ export interface SolutionReportInputs {
   existingCapacityCfg?: ClusterConfig
   existingCapacityTiers?: Record<TierId, TierPolicy>
   existingCapacityNodes?: number
+  /** Your hosts as clusters of host groups. Absent: read from the single-spec fields above. */
+  existingHardware?: ExistingHardware
   /** The last inventory import, for excluded-record counts and import warnings. */
   lastImport?: ImportSummary | null
 }
@@ -208,6 +213,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
     existingCapacityCfg: input.existingCapacityCfg ?? structuredClone(DEFAULT_CONFIG),
     existingCapacityTiers: input.existingCapacityTiers ?? defaultTiers(),
     existingCapacityNodes: input.existingCapacityNodes ?? 8,
+    existingHardware: input.existingHardware,
     placementInputs,
     managementDecision: input.managementDecision,
     managementDeploymentInputs: input.managementDeploymentInputs,
@@ -247,7 +253,9 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   const growth = design.growth
   const growthPlan = growth?.plan ?? resolveGrowthPlan(platformCfg)
   const storage = design.storage
-  const fitGap = design.fitGap
+  const existing = design.existing
+  const existingVerdict = existing?.verdict ?? null
+  const fitDecisionLabel = existing ? existingVerdictLabel(existing.verdict) : 'Not assessed'
   const designFails = design.feasible === false
   const split = design.status === 'split'
   const readiness = assessMigrationReadiness(platformVms, platformCfg)
@@ -257,7 +265,9 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   const recoveryInputs = input.drDesignInputs ?? DEFAULT_DR_INPUTS
   const recovery = designDisasterRecovery(platformVms, finalSizing, recoveryInputs)
   const storageGuide = assessStorageDecision(input.storageDecisionAnswers ?? {}, options)
-  const binding = usesExistingHardware && fitGap ? fitGap.reverse.binding : finalSizing.binding
+  const binding = usesExistingHardware && existing
+    ? existing.firstToRunOut ? RESOURCE_LABELS[existing.firstToRunOut.resource] : 'none'
+    : finalSizing.binding
   const findingsList = design.findings
   const errorCount = findingsList.filter((item) => item.severity === 'error').length + (design.status === 'split-failed' ? 1 : 0)
   const usesSan = platformCfg.architecture === 'san' || platformCfg.architecture === 'hybrid'
@@ -329,15 +339,22 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       default: return 'The selected design is blocked by the findings below, and adding nodes does not resolve them.'
     }
   }
-  const fitSentence = fitGap?.fits === null || !fitGap
-    ? 'No workload inventory was supplied, so estate-specific utilization is not asserted.'
-    : fitGap.fits ? 'The complete included estate fits.' : 'The complete included estate does not fit under the entered assumptions.'
+  const fitSentence = existingVerdict === 'no-hardware'
+    ? 'Enter your hardware: no hosts are entered, so no capacity or fit is reported.'
+    : existingVerdict === 'no-workload' || !existing
+      ? 'No workload inventory was supplied, so estate-specific utilization is not asserted.'
+      : existingVerdict === 'fits' ? 'The complete included estate fits.' : 'The complete included estate does not fit under the entered assumptions.'
+  const estateText = existing && existing.clusters.length > 1
+    ? `${existingNodes}-host estate in ${existing.clusters.length} clusters (${selectedPlatformLabel})`
+    : `${existingNodes}-node ${platformCfg.architecture.toUpperCase()} estate`
   const engagementOutcome = engagementMode === 'new-platform'
     ? `${customer} is sized on ${chosenLabel}. ${newPlatformOutcome()}`
-    : engagementMode === 'existing-capacity'
-      ? `${customer} assesses an existing ${existingNodes}-node ${platformCfg.architecture.toUpperCase()} estate. ${includedVms.length > 0 ? `${includedVms.length.toLocaleString()} included workloads are applied to the capacity envelope. ${fitSentence}` : fitSentence}`
+    : existingVerdict === 'no-hardware'
+      ? `${customer}: ${fitSentence}`
+      : engagementMode === 'existing-capacity'
+      ? `${customer} assesses an existing ${estateText}. ${includedVms.length > 0 ? `${includedVms.length.toLocaleString()} included workloads are applied to the capacity envelope. ${fitSentence}` : fitSentence}`
       : engagementMode === 'fit-gap'
-        ? `${customer} tests ${includedVms.length.toLocaleString()} included workloads against an existing ${existingNodes}-node ${platformCfg.architecture.toUpperCase()} estate. ${fitGap?.fits === null || !fitGap ? 'A fit decision requires workload evidence.' : fitSentence}`
+        ? `${customer} tests ${includedVms.length.toLocaleString()} included workloads against an existing ${estateText}. ${existingVerdict === 'no-workload' || !existing ? 'A fit decision requires workload evidence.' : fitSentence}`
         : managementDecision === 'design'
           ? `${customer} is a management-only engagement. Platform hardware sizing was not requested; the report documents the management topology, virtual-machine bill of materials, dependencies, and operating-model decisions.`
           : `${customer} is a management-only engagement. No management design is saved, so the report records the management status only and does not describe a topology.`
@@ -359,7 +376,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
     .join('; ')
   const nodesOnly = (value: number) => Number.isFinite(value) ? number(value) : 'more than the supported ceiling'
   const nodesDecision = usesExistingHardware
-    ? fitGap?.fits === null ? `Describe the capacity of the ${existingNodes} entered nodes` : fitGap?.fits ? `Use the ${existingNodes} entered nodes` : `The ${existingNodes} entered nodes do not carry this workload`
+    ? existingVerdict === 'no-hardware' ? 'Enter your hardware' : existingVerdict === 'no-workload' ? `Describe the capacity of the ${existingNodes} entered nodes` : existingVerdict === 'fits' ? `Use the ${existingNodes} entered nodes` : `The ${existingNodes} entered nodes do not carry this workload`
     : split ? `Build ${design.totalNodes} total nodes across ${design.clusters.length} clusters`
       : design.status === 'feasible' ? `Build ${design.totalNodes} total nodes` : 'Revise the node design before approval'
   const sanMetrics: ReportMetric[] = !storage || !storage.sanMode ? [] : storage.sanMode === 'calculated'
@@ -386,7 +403,8 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Engagement', value: ENGAGEMENT_LABELS[engagementMode] },
         { label: 'Platform context', value: selectedPlatformLabel },
         { label: usesExistingHardware ? 'Existing nodes' : managementOnly ? 'Platform sizing' : 'Required nodes', value: managementOnly ? 'Not requested' : design.nodesLabel, detail: managementOnly ? undefined : design.explanation },
-        ...(usesExistingHardware ? [{ label: 'Fit decision', value: fitGap?.fits === null || !fitGap ? 'Not assessed' : fitGap.fits ? 'Fits' : 'Does not fit' }] : []),
+        ...(usesExistingHardware ? [{ label: 'Fit decision', value: fitDecisionLabel, detail: existing?.explanation }] : []),
+        ...(usesExistingHardware && existing && existing.whatToAdd.length > 0 ? [{ label: 'What to add', value: existing.whatToAdd.map((item) => `${number(item.quantity, 1)} ${item.unit} (${item.item}, ${item.scope})`).join('; ') }] : []),
         ...(isNewPlatform && storage?.sanMode === 'calculated' ? [{ label: 'SAN to buy', value: storage.sanToBuyUsableTiB === null ? 'Not calculated' : `${tib(storage.sanToBuyUsableTiB)} usable`, detail: storage.sanToBuyEffectiveTiB === null ? undefined : `${tib(storage.sanToBuyEffectiveTiB)} effective at ${storage.sanDrr}:1` }] : []),
         { label: 'Workload VMs', value: number(includedVms.length) },
         { label: 'Management decision', value: managementDecisionLabel },
@@ -401,7 +419,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
             : engagementMode === 'existing-capacity'
               ? 'The project is documenting what the entered estate can host without asserting a new hardware recommendation.'
               : engagementMode === 'fit-gap'
-                ? 'The project compares the supplied workload inventory with the entered existing estate so gaps and same-spec expansion can be calculated.'
+                ? 'The project tests the supplied workload inventory on your hosts, so each gap gets its own remedy: hosts to add, storage to add, and performance short.'
                 : 'The project scope is limited to the management plane, so workload-platform hardware is intentionally not inferred.',
           tradeoff: 'Changing the planning path changes which conclusions are valid; a management-only or existing-capacity report must not be read as a greenfield hardware recommendation.',
         },
@@ -435,7 +453,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       metrics: [
         { label: 'Architecture', value: selectedPlatformLabel },
         ...(managementOnly ? [] : [storageProtectionMetric(platformCfg)]),
-        { label: 'Failure reserve', value: managementOnly ? 'Not assessed' : `N+${spare}` },
+        { label: 'Failure reserve', value: managementOnly ? 'Not assessed' : existing && existing.clusters.length > 1 ? existing.clusters.map((cluster) => `${cluster.name} N+${cluster.spareNodes}`).join(', ') : `N+${spare}`, detail: existing ? existing.spareRule : undefined },
         { label: 'Binding constraint', value: managementOnly ? 'Not assessed' : binding },
       ],
       reasoning: managementOnly ? [] : [
@@ -527,10 +545,14 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       ] : [
         { label: usesExistingHardware ? 'Existing nodes' : 'Total nodes', value: design.totalNodes === null ? design.nodesLabel : number(design.totalNodes) },
         { label: 'Workload-bearing nodes', value: design.workloadNodes === null ? 'N/A' : number(design.workloadNodes) },
-        ...(usesExistingHardware && fitGap ? [{ label: 'Same-spec nodes required', value: String(fitGapRequiredLabel(fitGap)) }] : []),
-        { label: 'CPU-only requirement', value: Number.isFinite(finalSizing.nodesIfCpuOnly) ? number(finalSizing.nodesIfCpuOnly) : 'N/A' },
-        { label: 'Memory-only requirement', value: Number.isFinite(finalSizing.nodesIfMemoryOnly) ? number(finalSizing.nodesIfMemoryOnly) : 'N/A' },
-        { label: 'Storage-only requirement', value: Number.isFinite(finalSizing.nodesIfStorageOnly) ? number(finalSizing.nodesIfStorageOnly) : 'N/A' },
+        ...(usesExistingHardware && existing ? [
+          { label: 'Hosts to add for compute', value: existing.verdict === 'no-hardware' ? 'Enter your hardware' : existing.verdict === 'no-workload' ? 'Add workloads' : number(computeHostsToAdd(existing)), detail: existing.addSpec ? `Of ${hostGroupLabel(existing.addSpec.group)}` : undefined },
+          { label: 'First resource to run out', value: existing.firstToRunOut ? `${existing.firstToRunOut.label} at ${usedShareText(existing.firstToRunOut.worstPct)}` : 'Not assessed' },
+        ] : [
+          { label: 'CPU-only requirement', value: Number.isFinite(finalSizing.nodesIfCpuOnly) ? number(finalSizing.nodesIfCpuOnly) : 'N/A' },
+          { label: 'Memory-only requirement', value: Number.isFinite(finalSizing.nodesIfMemoryOnly) ? number(finalSizing.nodesIfMemoryOnly) : 'N/A' },
+          { label: 'Storage-only requirement', value: Number.isFinite(finalSizing.nodesIfStorageOnly) ? number(finalSizing.nodesIfStorageOnly) : 'N/A' },
+        ]),
         { label: usesExistingHardware ? 'Licensable cores (entered hosts)' : 'Licensable cores', value: design.licensableCores === null ? 'Not calculated' : number(design.licensableCores), detail: design.licensableCoresDetail },
         { label: 'Growth strategy', value: growthPlan.strategy === 'build-now' ? 'Build forecast capacity now' : 'Phase nodes with growth' },
         { label: 'Annual growth', value: `${number(growthPlan.annualGrowthPct * 100, 1)}% for ${growthPlan.horizonYears} years` },
@@ -539,7 +561,9 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         {
           decision: nodesDecision,
           basis: 'Calculated',
-          explanation: `CPU alone requires ${nodesOnly(finalSizing.nodesIfCpuOnly)} nodes, memory alone requires ${nodesOnly(finalSizing.nodesIfMemoryOnly)}, and storage alone requires ${nodesOnly(finalSizing.nodesIfStorageOnly)}. The controlling result is ${binding}; ${usesExistingHardware ? `the ${existingNodes} entered nodes include` : 'the total includes'} ${spare} reserve node${spare === 1 ? '' : 's'}.`,
+          explanation: usesExistingHardware && existing
+            ? `${existing.explanation} ${existing.spareRule} Your ${number(existingNodes)} hosts keep ${number(existingNodes - existing.workloadHosts)} spare in total.`
+            : `CPU alone requires ${nodesOnly(finalSizing.nodesIfCpuOnly)} nodes, memory alone requires ${nodesOnly(finalSizing.nodesIfMemoryOnly)}, and storage alone requires ${nodesOnly(finalSizing.nodesIfStorageOnly)}. The controlling result is ${binding}; the total includes ${spare} reserve node${spare === 1 ? '' : 's'}.`,
           tradeoff: `Changing a nonbinding resource may not reduce node count. To reduce a ${binding}-bound result, change the demand or usable capacity that actually controls that constraint and rerun the model.`,
         },
         {
@@ -553,7 +577,19 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       ],
       bullets: [],
       tables: managementOnly ? [] : [
-        storage?.showLocalDrives === false ? {
+        usesExistingHardware && existing ? {
+          title: 'Per-host hardware (your host groups)',
+          headers: ['Cluster', 'Hosts', 'Sockets', 'Cores / socket', 'Physical cores', 'Memory', 'Local drives'],
+          rows: existing.clusters.flatMap((cluster) => cluster.hostGroups.map((group) => [
+            cluster.name,
+            number(group.count),
+            number(group.sockets),
+            number(group.coresPerSocket),
+            number(group.sockets * group.coresPerSocket),
+            gib(group.ramGiB),
+            cluster.cfg.architecture === 'san' ? 'Not used: workload data is on the SAN' : `${cluster.cfg.node.capacityDrivesPerNode} x ${cluster.cfg.node.capacityDriveTB} TB capacity, ${cluster.cfg.node.cacheDrivesPerNode} x ${cluster.cfg.node.cacheDriveTB} TB cache`,
+          ])),
+        } : storage?.showLocalDrives === false ? {
           title: 'Per-node hardware profile',
           headers: ['Sockets', 'Cores / socket', 'Physical cores', 'Memory', 'Local drives'],
           rows: [[
@@ -594,58 +630,96 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       title: 'Existing capacity and fit',
       paragraphs: managementOnly ? [
         'No existing-hardware profile is part of this management-only engagement.',
-      ] : !usesExistingHardware ? [
+      ] : !usesExistingHardware || !existing ? [
         'Existing hardware is not part of this planning path, so no fit result is reported against it.',
+      ] : existing.verdict === 'no-hardware' ? [
+        'Enter your hardware. No hosts are entered yet, so this report states no capacity, headroom or fit. Surveyor never invents hardware for this path.',
       ] : [
         engagementMode === 'existing-capacity'
-          ? 'This section describes the capacity envelope of the hardware already owned or quoted. Inventory-specific consumption is shown only when workloads were supplied.'
-          : 'This section combines the existing-hardware profile with the workload inventory to produce the fit, deficit, and same-spec expansion decision.',
+          ? 'This section describes what the hardware you already own can carry: capacity, headroom by resource, the first resource to run out, and how many more VMs of your chosen profile fit.'
+          : 'This section tests your workloads on your hosts: the verdict reflects placement on real hosts, every limit and storage performance, and each shortfall has its own remedy.',
+        existing.headline + '. ' + existing.explanation,
+        ...existing.notices,
       ],
-      metrics: !usesExistingHardware || !fitGap ? [
+      metrics: !usesExistingHardware || !existing ? [
         { label: 'Existing hardware', value: 'Not assessed' },
+      ] : existing.verdict === 'no-hardware' ? [
+        { label: 'Existing hardware', value: 'Enter your hardware' },
+        { label: 'Fit decision', value: fitDecisionLabel },
       ] : [
         { label: 'Existing nodes', value: number(existingNodes) },
-        { label: 'Workload-bearing nodes', value: number(fitGap.reverse.workloadNodes) },
-        { label: 'Usable physical cores', value: number(fitGap.reverse.availablePCores, 1) },
-        { label: 'Usable memory', value: gib(fitGap.reverse.availableRamGiB) },
-        ...(fitGap.reverse.capacity ? [{ label: 'S2D usable capacity', value: tib(fitGap.reverse.capacity.usableTiB) }] : []),
-        ...(usesSan ? [
-          { label: 'SAN usable capacity (entered)', value: tib(platformCfg.san.usableTiB) },
-          { label: 'SAN effective capacity', value: tib(storage?.sanEffectiveTiB ?? null), detail: `Usable × ${Math.max(1, platformCfg.san.drr)}:1 data reduction.` },
-        ] : []),
-        { label: 'Assessed workloads', value: number(fitGap.assessedVms) },
-        { label: 'Management VMs counted', value: number(fitGap.managementVms) },
-        { label: 'Fit decision', value: fitGap.fits === null ? 'Not assessed' : fitGap.fits ? 'Fits' : 'Does not fit' },
-        { label: 'Same-spec nodes required', value: String(fitGapRequiredLabel(fitGap)) },
-        { label: 'Additional nodes', value: String(fitGapAdditionalLabel(fitGap)) },
+        ...(existing.clusters.length > 1 ? [{ label: 'Clusters', value: number(existing.clusters.length) }] : []),
+        { label: 'Workload-bearing nodes', value: number(existing.workloadHosts), detail: existing.spareRule },
+        ...existing.resources.filter((row) => row.resource === 'cpu' || row.resource === 'memory' || row.resource === 's2d-storage' || row.resource === 'san-storage').map((row) => ({
+          label: row.resource === 'cpu' ? 'Usable physical cores' : row.resource === 'memory' ? 'Usable memory' : row.resource === 's2d-storage' ? 'S2D usable capacity' : 'SAN effective capacity',
+          value: row.resource === 'memory' ? gib(row.available) : row.resource === 'cpu' ? number(row.available, 1) : tib(row.available),
+        })),
+        ...(storage?.sanUsableTiB !== null && storage?.sanUsableTiB !== undefined ? [{ label: 'SAN usable capacity (entered)', value: tib(storage.sanUsableTiB), detail: `Effective is usable × ${storage.sanDrr ?? 1}:1 data reduction.` }] : []),
+        { label: 'Assessed workloads', value: number(existing.includedVms) },
+        { label: 'Management VMs counted', value: number(existing.managementVms) },
+        { label: 'Fit decision', value: fitDecisionLabel },
+        { label: 'First resource to run out', value: existing.firstToRunOut ? `${existing.firstToRunOut.label} at ${usedShareText(existing.firstToRunOut.worstPct)}` : 'Not assessed' },
+        { label: `More VMs of the chosen profile (${existing.profile.label})`, value: number(existing.profile.count), detail: existing.profile.note },
+        ...(existing.unplaced.length > 0 ? [{ label: 'VMs not placed', value: number(existing.unplaced.length) }] : []),
       ],
-      reasoning: !usesExistingHardware || !fitGap ? [] : [
+      reasoning: !usesExistingHardware || !existing || existing.verdict === 'no-hardware' ? [] : [
         {
-          decision: fitGap.fits === null ? 'Do not assert workload fit' : fitGap.fits ? 'The included workloads fit the entered estate' : 'The included workloads do not fit the entered estate',
-          basis: fitGap.fits === null ? 'Validation requirement' : 'Calculated',
-          explanation: fitGap.fits === null
-            ? 'A hardware envelope was entered, but there is not enough included workload evidence to make an inventory-specific fit decision.'
-            : `The fit test compares workload demand with ${existingNodes} entered nodes after host reserves and failure capacity. The current deficits are ${number(fitGap.deficits.physicalCores, 1)} physical cores, ${number(fitGap.deficits.ramGiB, 1)} GiB memory, ${number(fitGap.deficits.s2dTiB, 1)} TiB S2D usable, and ${number(fitGap.deficits.sanTiB, 1)} TiB SAN effective.`,
-          tradeoff: fitGap.additionalNodes === null
-            ? `A storage or hard platform constraint cannot be solved by adding identical nodes alone; revise that constraint directly.${fitGap.requiredNodesForCompute === null ? '' : ` Compute alone needs ${number(fitGap.requiredNodesForCompute)} total nodes.`}`
-            : `At the entered node specification, the model requires ${fitGap.requiredNodesAtSameSpec ?? 'an unresolved number of'} total nodes, or ${fitGap.additionalNodes} additional nodes beyond the current estate.`,
+          decision: existing.verdict === 'no-workload' ? 'Do not assert workload fit' : existing.verdict === 'fits' ? 'The included workloads fit your hosts' : 'The included workloads do not fit your hosts',
+          basis: existing.verdict === 'no-workload' ? 'Validation requirement' : 'Calculated',
+          explanation: existing.verdict === 'no-workload'
+            ? 'Your hardware is entered, but there are no included workloads to make an inventory-specific fit decision.'
+            : `${existing.placement.rule} ${existing.spareRule}`,
+          tradeoff: existing.whatToAdd.length > 0 ? 'Each remedy is separate: compute hosts, storage capacity and storage performance are sized on their own, so you can see exactly what closes each gap.' : undefined,
         },
       ],
-      bullets: !usesExistingHardware || !fitGap ? [] : fitGap.recommendations,
-      tables: !usesExistingHardware || !fitGap ? [] : [{
-        title: 'Current resource gaps',
-        headers: ['Resource', 'Deficit', 'Unit'],
-        rows: [
-          ['CPU', number(fitGap.deficits.physicalCores, 1), 'physical cores'],
-          ['Memory', number(fitGap.deficits.ramGiB, 1), 'GiB'],
-          ['S2D', number(fitGap.deficits.s2dTiB, 1), 'usable TiB'],
-          ['SAN', number(fitGap.deficits.sanTiB, 1), 'effective TiB'],
-        ],
-      }, ...(fitGap.fits !== null ? [{
-        title: 'How many more VMs fit',
-        headers: ['Tier', 'Additional VMs'],
-        rows: (Object.keys(platformTiers) as TierId[]).map((tierId) => [platformTiers[tierId].label, Number.isFinite(fitGap.reverse.additionalVmsByTier[tierId]) ? number(fitGap.reverse.additionalVmsByTier[tierId]) : 'Not limited']),
-      }] : [])],
+      bullets: !usesExistingHardware || !existing ? [] : [
+        ...existing.remedies.compute.map((item) => `Compute: add ${number(item.hostsToAdd)} host${item.hostsToAdd === 1 ? '' : 's'} of ${item.specLabel} to ${item.cluster}. ${item.reason}`),
+        ...existing.remedies.storage.map((item) => `Storage: ${item.detail}`),
+        ...existing.remedies.performance.map((item) => `Performance: ${item.detail}`),
+        ...(existing.remedies.unplaceable.length > 0 ? [`VMs that cannot fit any host: ${existing.remedies.unplaceable.map((vm) => vm.name).slice(0, 20).join(', ')}${existing.remedies.unplaceable.length > 20 ? ` and ${existing.remedies.unplaceable.length - 20} more` : ''}. Use larger hosts or resize these VMs.`] : []),
+        ...existing.remedies.blockers.map((item) => `Resolve: ${item}`),
+      ],
+      tables: !usesExistingHardware || !existing || existing.verdict === 'no-hardware' ? [] : [
+        {
+          title: 'Capacity and headroom by resource',
+          headers: ['Resource', 'Available', 'Used', 'Headroom', 'Used share', 'Runs out'],
+          rows: existing.resources.map((row) => [row.label, `${number(row.available, 1)} ${row.unit}`, `${number(row.used, 1)} ${row.unit}`, `${number(row.headroom, 1)} ${row.unit}`, `${usedShareText(row.worstPct)}${row.worstCluster ? ` (${row.worstCluster})` : ''}`, exhaustionText(row, existing.annualGrowthPct)]),
+        },
+        {
+          title: 'Your hosts',
+          headers: ['Cluster', 'Hosts', 'Specification', 'Spare hosts', 'Storage'],
+          rows: existing.clusters.flatMap((cluster) => cluster.hostGroups.map((group, index) => [
+            index === 0 ? cluster.name : '',
+            number(group.count),
+            hostGroupLabel(group),
+            index === 0 ? number(cluster.spareNodes) : '',
+            index === 0 ? cluster.cfg.architecture.toUpperCase() : '',
+          ])),
+        },
+        ...(existing.clusters.length > 1 && existing.verdict !== 'no-workload' ? [{
+          title: 'Per-cluster results',
+          headers: ['Cluster', 'Hosts', 'VMs placed', 'Management VMs', 'Result', 'Binding'],
+          rows: existing.clusters.map((cluster) => [cluster.name, number(cluster.hosts), number(cluster.vms.length), number(cluster.fixedVms.length), cluster.fits === null ? 'Nothing placed' : cluster.fits ? 'Fits' : 'Does not fit', cluster.reverse.binding]),
+        }] : []),
+        ...(existing.unplaced.length > 0 ? [{
+          title: 'VMs that could not be placed',
+          headers: ['VM', 'vCPU', 'Memory', 'Reason'],
+          rows: existing.unplaced.map((vm) => [vm.name, number(vm.vCpu), gib(vm.ramGiB), vm.detail]),
+        }] : []),
+        ...(existing.whatToAdd.length > 0 ? [{
+          title: 'What to add',
+          headers: ['Area', 'Where', 'Add', 'Item', 'Detail'],
+          rows: existing.whatToAdd.map((item) => [item.category === 'vm' ? 'VMs' : item.category[0].toUpperCase() + item.category.slice(1), item.scope, `${number(item.quantity, 1)} ${item.unit}`, item.item, item.detail]),
+        }] : []),
+        {
+          title: 'How many more VMs fit',
+          headers: ['Profile', 'vCPU', 'Memory', 'Storage', 'Additional VMs', 'Limited by'],
+          rows: [
+            [existing.profile.label, number(existing.profile.vCpu, 1), gib(existing.profile.ramGiB), gib(existing.profile.storageGiB), number(existing.profile.count), existing.profile.limitedBy === 'host-size' ? 'Larger than a host' : existing.profile.limitedBy ? RESOURCE_LABELS[existing.profile.limitedBy] : 'Not limited'],
+            ...(Object.keys(platformTiers) as TierId[]).map((tierId) => [`Average ${platformTiers[tierId].label} VM`, '', '', '', number(additionalVmsByTier(existing)[tierId]), 'Tier average or nominal profile']),
+          ],
+        },
+      ],
     },
     {
       id: 'deployment',
@@ -688,7 +762,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
                 : 'Revise the multi-cluster placement policy',
           basis: 'User-selected',
           explanation: usesExistingHardware
-            ? 'The existing estate is one cluster of the entered hosts. Surveyor does not add or split clusters on this path.'
+            ? existing && existing.clusters.length > 1 ? `Your estate has ${existing.clusters.length} clusters, as you entered them. ${existing.placement.rule}` : 'The existing estate is one cluster of the entered hosts. Surveyor does not add or split clusters on this path.'
             : placementInputs.clusterLayout === 'single'
               ? 'The selected layout is one cluster. Surveyor does not split a design unless the user selects that layout.'
               : `The user selected a split. The planner adds clusters until every cluster fits within ${placementInputs.maxNodesPerCluster} nodes and ${placementInputs.targetVmsPerCluster} VMs, up to ${placementInputs.maxClusters} clusters. Database-tier separation is ${placementInputs.separateDatabaseTier ? 'enabled' : 'disabled'} and source-cluster preservation is ${placementInputs.preserveSourceClusters ? 'enabled' : 'disabled'}.`,
@@ -1167,7 +1241,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         headers: ['Severity', 'Basis', 'Finding'],
         rows: [
           ...(design.status === 'split-failed' ? (design.placement?.warnings ?? []).map((warning) => ['ERROR', 'TOOL', warning]) : []),
-          ...(design.status === 'does-not-fit' && findingsList.every((item) => item.severity !== 'error') ? [['ERROR', 'TOOL', `${design.headline}. ${fitGap?.recommendations[0] ?? ''}`.trim()]] : []),
+          ...(design.status === 'does-not-fit' && findingsList.every((item) => item.severity !== 'error') ? [['ERROR', 'TOOL', `${design.headline}. ${existing?.explanation ?? ''}`.trim()]] : []),
           ...findingsList.map((finding) => [finding.severity.toUpperCase(), finding.basis, finding.message]),
         ],
       }],

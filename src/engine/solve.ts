@@ -41,7 +41,8 @@ function minNodesFor(cfg: ClusterConfig): number {
   return Math.max(LIMITS.S2D_MIN_NODES, RESILIENCY[cfg.resiliency].minNodes)
 }
 
-function hybridS2dShareForTier(cfg: ClusterConfig, policy: TierPolicy): number {
+/** Share of a tier's storage that sits on S2D in a hybrid design. */
+export function hybridS2dShareForTier(cfg: ClusterConfig, policy: TierPolicy): number {
   const placement = policy.hybridPlacement ?? (policy.storageTier === 'performance' ? 's2d' : 'san')
   return placement === 's2d' ? 1 : placement === 'san' ? 0 : cfg.hybridS2dShare
 }
@@ -504,6 +505,12 @@ export function forecastGrowth(
   }
 }
 
+export interface ReverseComputeCapacity {
+  workloadNodes: number
+  availablePCores: number
+  availableRamGiB: number
+}
+
 /** Reverse mode: fixed hardware, solve for headroom and the first binding constraint. */
 export function solveReverse(
   cfg: ClusterConfig,
@@ -511,17 +518,22 @@ export function solveReverse(
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
   fixedVms: Vm[] = [],
+  /**
+   * Compute capacity worked out by the caller, for hosts that are not all the same. Spare hosts are
+   * already removed from these figures. Absent means every host is cfg.node.
+   */
+  computeCapacity?: ReverseComputeCapacity,
 ): ReverseResult {
   const growthFactor = resolveGrowthPlan(cfg).currentDesignGrowthFactor
   // The per-VM profiles below describe a further workload VM, so they exclude fixed VMs.
   const workloadDemand = computeDemand(vms, tiers, growthFactor, cfg)
   const demand = combinedDemand(cfg, vms, fixedVms, tiers, growthFactor)
   const allVms = fixedVms.length > 0 ? [...vms, ...fixedVms] : vms
-  const workloadNodes = Math.max(0, nodes - cfg.spareNodes)
+  const workloadNodes = computeCapacity?.workloadNodes ?? Math.max(0, nodes - cfg.spareNodes)
   const usesS2d = cfg.architecture === 's2d' || cfg.architecture === 'hybrid'
 
-  const availablePCores = workloadNodes * usableCoresPerHost(cfg.node, cfg)
-  const availableRamGiB = workloadNodes * usableRamPerHost(cfg.node, cfg)
+  const availablePCores = computeCapacity?.availablePCores ?? workloadNodes * usableCoresPerHost(cfg.node, cfg)
+  const availableRamGiB = computeCapacity?.availableRamGiB ?? workloadNodes * usableRamPerHost(cfg.node, cfg)
 
   const cap = usesS2d ? s2dCapacity(cfg, nodes) : null
   let availableStorageTiB = 0

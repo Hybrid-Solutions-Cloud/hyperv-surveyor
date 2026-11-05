@@ -17,6 +17,7 @@ import { normalizeAdvisorAnswers, type AdvisorAnswers } from '../data/management
 import { optionSelection, type MatrixOption } from '../engine/optionsMatrix'
 import { applyOutlierDecision } from '../engine/dataQuality'
 import type { OutlierDecision } from '../engine/types'
+import { blankExistingHardware, existingHardwareFromImport, normalizeExistingHardware, totalHostCount, type ExistingHardware } from '../engine/existingHardware'
 
 export interface SurveyorState {
   engagementMode: EngagementMode | null
@@ -29,6 +30,8 @@ export interface SurveyorState {
   existingCapacityCfg: ClusterConfig
   existingCapacityTiers: Record<TierId, TierPolicy>
   existingCapacityNodes: number
+  /** Your hosts as clusters of host groups. Starts blank: nothing is invented. */
+  existingHardware: ExistingHardware
   managementDeploymentInputs: ManagementDeploymentInputs | null
   /** Management Plane Advisor answers. The deployment stack follows them until the user picks it. */
   managementAdvisorAnswers: AdvisorAnswers
@@ -64,6 +67,15 @@ export interface SurveyorState {
   setExistingCapacityCfg: (cfg: ClusterConfig) => void
   setExistingCapacityTiers: (tiers: Record<TierId, TierPolicy>) => void
   setExistingCapacityNodes: (nodes: number) => void
+  /** Saves the existing hardware. Any edit from the form marks it as yours (confirmed). */
+  setExistingHardware: (hardware: ExistingHardware) => void
+  /** Confirms values carried over from an older project, such as ones that look like the old defaults. */
+  confirmExistingHardware: () => void
+  /** The VM profile for "how many more fit" and the host spec remedies add. Neither confirms the hardware. */
+  setExistingVmProfile: (profile: ExistingHardware['vmProfile']) => void
+  setExistingAddSpec: (groupId: string | undefined) => void
+  /** Builds host groups from the imported hosts (vHost). Returns false when the import has none. */
+  fillExistingHardwareFromImport: () => boolean
   setManagementDeploymentInputs: (inputs: ManagementDeploymentInputs) => void
   /** Saves advisor answers. Answering makes an unassessed management decision a design. */
   setManagementAdvisorAnswers: (answers: AdvisorAnswers) => void
@@ -101,6 +113,7 @@ const defaults = () => ({
   existingCapacityCfg: structuredClone(DEFAULT_CONFIG),
   existingCapacityTiers: defaultTiers(),
   existingCapacityNodes: 8,
+  existingHardware: blankExistingHardware(),
   managementDeploymentInputs: null as ManagementDeploymentInputs | null,
   managementAdvisorAnswers: {} as AdvisorAnswers,
   includeManagementInSizing: true,
@@ -138,6 +151,7 @@ export function payloadFromState(state: SurveyorState): ProjectPayload {
     existingCapacityCfg: structuredClone(state.existingCapacityCfg),
     existingCapacityTiers: structuredClone(state.existingCapacityTiers),
     existingCapacityNodes: state.existingCapacityNodes,
+    existingHardware: structuredClone(state.existingHardware),
     managementDeploymentInputs: structuredClone(state.managementDeploymentInputs),
     managementAdvisorAnswers: structuredClone(state.managementAdvisorAnswers),
     includeManagementInSizing: state.includeManagementInSizing,
@@ -169,6 +183,8 @@ export function migratePersistedState(persisted: unknown): SurveyorState {
     storageDecisionAnswers: normalizeStorageDecisionAnswers(value.storageDecisionAnswers),
     existingCapacityCfg: normalizeConfig(value.existingCapacityCfg),
     existingCapacityTiers: normalizeTiers(value.existingCapacityTiers),
+    // Saves before version 9 carry one host spec and a count; they become one cluster with one group.
+    existingHardware: normalizeExistingHardware(value.existingHardware, value.existingCapacityCfg ? normalizeConfig(value.existingCapacityCfg) : undefined, typeof value.existingCapacityNodes === 'number' ? value.existingCapacityNodes : 8),
     savedScenarios: normalizeScenarioSnapshots(value.savedScenarios),
     managementDeploymentInputs: normalizeManagementInputs(value.managementDeploymentInputs),
     managementAdvisorAnswers: normalizeAdvisorAnswers(value.managementAdvisorAnswers),
@@ -203,6 +219,18 @@ export const useSurveyorStore = create<SurveyorState>()(
       setExistingCapacityCfg: (existingCapacityCfg) => set({ existingCapacityCfg }),
       setExistingCapacityTiers: (existingCapacityTiers) => set({ existingCapacityTiers }),
       setExistingCapacityNodes: (existingCapacityNodes) => set({ existingCapacityNodes }),
+      setExistingHardware: (hardware) => set({ existingHardware: { ...hardware, confirmed: true, looksLikeOldDefaults: false }, existingCapacityNodes: Math.max(1, totalHostCount(hardware)) }),
+      confirmExistingHardware: () => set((state) => ({ existingHardware: { ...state.existingHardware, confirmed: true, looksLikeOldDefaults: false } })),
+      setExistingVmProfile: (vmProfile) => set((state) => ({ existingHardware: { ...state.existingHardware, vmProfile } })),
+      setExistingAddSpec: (addSpecGroupId) => set((state) => ({ existingHardware: { ...state.existingHardware, addSpecGroupId } })),
+      fillExistingHardwareFromImport: () => {
+        const state = useSurveyorStore.getState()
+        const hosts = state.lastImport?.hostSummary?.perHost ?? []
+        if (hosts.length === 0) return false
+        const existingHardware = existingHardwareFromImport(hosts, state.existingHardware)
+        set({ existingHardware, existingCapacityNodes: Math.max(1, totalHostCount(existingHardware)) })
+        return true
+      },
       setManagementDeploymentInputs: (managementDeploymentInputs) => set({ managementDeploymentInputs }),
       setManagementAdvisorAnswers: (answers) => set((state) => {
         const managementAdvisorAnswers = normalizeAdvisorAnswers(answers)
@@ -256,6 +284,7 @@ export const useSurveyorStore = create<SurveyorState>()(
         existingCapacityCfg: structuredClone(DEFAULT_CONFIG),
         existingCapacityTiers: defaultTiers(),
         existingCapacityNodes: 8,
+        existingHardware: blankExistingHardware(),
       }),
       loadScenario: (scenario) => set((state) => {
         const replacesInventory = scenario.vms !== undefined
@@ -278,6 +307,12 @@ export const useSurveyorStore = create<SurveyorState>()(
           existingCapacityCfg: scenario.existingCapacityCfg ? normalizeConfig(scenario.existingCapacityCfg) : state.existingCapacityCfg,
           existingCapacityTiers: scenario.existingCapacityTiers ? normalizeTiers(scenario.existingCapacityTiers) : state.existingCapacityTiers,
           existingCapacityNodes: typeof scenario.existingCapacityNodes === 'number' ? Math.max(1, scenario.existingCapacityNodes) : state.existingCapacityNodes,
+          // A link from before host groups carries one spec and a count: it migrates the same way a project does.
+          existingHardware: scenario.existingHardware
+            ? normalizeExistingHardware(scenario.existingHardware)
+            : scenario.existingCapacityCfg
+              ? normalizeExistingHardware(undefined, normalizeConfig(scenario.existingCapacityCfg), typeof scenario.existingCapacityNodes === 'number' ? scenario.existingCapacityNodes : 8)
+              : state.existingHardware,
         }
         if (scenario.chosenKey !== undefined) next.chosenKey = scenario.chosenKey
         if (scenario.managementDeploymentInputs !== undefined) next.managementDeploymentInputs = normalizeManagementInputs(scenario.managementDeploymentInputs)
@@ -300,7 +335,8 @@ export const useSurveyorStore = create<SurveyorState>()(
       // 6 normalizes saved VMs and scenarios, such as numbers saved as text.
       // 7 keeps the Management Plane Advisor answers and marks who owns the management stack.
       // 8 adds storage-outlier choices on VMs (Data check); malformed ones are dropped on load.
-      version: 8,
+      // 9 keeps existing hardware as clusters of host groups, migrated from the single-spec fields.
+      version: 9,
       storage: createJSONStorage(() => surveyorStorage),
       onRehydrateStorage: () => () => settleHydration(),
       migrate: (persisted) => migratePersistedState(persisted),
@@ -314,6 +350,7 @@ export const useSurveyorStore = create<SurveyorState>()(
         existingCapacityCfg: state.existingCapacityCfg,
         existingCapacityTiers: state.existingCapacityTiers,
         existingCapacityNodes: state.existingCapacityNodes,
+        existingHardware: state.existingHardware,
         managementDeploymentInputs: state.managementDeploymentInputs,
         managementAdvisorAnswers: state.managementAdvisorAnswers,
         includeManagementInSizing: state.includeManagementInSizing,

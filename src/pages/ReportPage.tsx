@@ -43,6 +43,7 @@ export default function ReportPage() {
     existingCapacityCfg,
     existingCapacityTiers,
     existingCapacityNodes,
+    existingHardware,
     lastImport,
   } = useSurveyorStore()
   const [selection, setSelection] = useState(() => defaultReportSelection(engagementMode))
@@ -71,9 +72,10 @@ export default function ReportPage() {
     existingCapacityCfg,
     existingCapacityTiers,
     existingCapacityNodes,
+    existingHardware,
     lastImport,
     generatedAt,
-  }), [lastImport, engagementMode, managementDecision, cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, managementAdvisorAnswers, placementInputs, storageDecisionAnswers, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, tiers, vms])
+  }), [lastImport, engagementMode, managementDecision, cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, managementAdvisorAnswers, placementInputs, storageDecisionAnswers, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, existingHardware, tiers, vms])
   const visibleSections = selectedReportSections(report, selection, outputOptions)
   const selectedCount = Object.values(selection).filter(Boolean).length
 

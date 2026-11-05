@@ -32,7 +32,7 @@ const SHARE_PARAM = 's'
 /** Design fields a link may carry, besides cfg, tiers, vms and inventoryOmitted. */
 const DESIGN_KEYS = [
   'engagementMode', 'managementDecision', 'customerName', 'chosenKey',
-  'existingCapacityCfg', 'existingCapacityTiers', 'existingCapacityNodes',
+  'existingCapacityCfg', 'existingCapacityTiers', 'existingCapacityNodes', 'existingHardware',
   'managementDeploymentInputs', 'managementAdvisorAnswers', 'includeManagementInSizing', 'placementInputs',
   'networkDesignInputs', 'drDesignInputs', 'reportMetadata', 'dataSources', 'storageDecisionAnswers',
 ] as const satisfies ReadonlyArray<keyof ProjectPayload>

@@ -9,6 +9,7 @@ import { TIER_IDS } from '../engine/rules'
 import { giBToTiB } from '../engine/compute'
 import type { PowerState, TierId, TierPolicy, Vm } from '../engine/types'
 import { Field, NumberInput, fmt0, fmt1 } from './Shared'
+import { Link } from 'react-router-dom'
 
 interface Props {
   vms: Vm[]
@@ -232,6 +233,7 @@ export function WorkloadPanel({ vms, setVms, tiers, report, onImport, onClearAll
                 {report.hostSummary.cpuModels.length > 0 && (
                   <div className="small muted" style={{ marginTop: 4 }}>{report.hostSummary.cpuModels.join(' · ')}</div>
                 )}
+                <div className="small" style={{ marginTop: 4 }}>On the existing-hardware paths, <Link to="/capacity">use these hosts</Link> to fill your hardware as host groups.</div>
               </div>
             )}
           </div>

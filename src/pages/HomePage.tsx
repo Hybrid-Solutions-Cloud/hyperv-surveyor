@@ -47,7 +47,7 @@ const journeys: Array<{
     eyebrow: 'Workloads + hardware',
     title: 'Fit workloads to existing hardware',
     question: 'I have both. Tell me whether the estate fits and what is missing.',
-    outcome: 'Pass or fail, resource deficits, same-spec expansion, and remediation.',
+    outcome: 'A verdict that reflects placement on your hosts, and separate fixes for compute, storage and performance.',
     icon: GitCompareArrows,
   },
 ]

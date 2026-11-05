@@ -8,7 +8,7 @@ import type { EngagementMode } from './journey'
 type DesignState = Pick<SurveyorState,
   'engagementMode' | 'cfg' | 'tiers' | 'vms' | 'chosenKey' | 'existingCapacityCfg' | 'existingCapacityTiers'
   | 'existingCapacityNodes' | 'placementInputs' | 'managementDecision' | 'managementDeploymentInputs' | 'includeManagementInSizing'>
-  & Partial<Pick<SurveyorState, 'managementAdvisorAnswers'>>
+  & Partial<Pick<SurveyorState, 'managementAdvisorAnswers' | 'existingHardware'>>
 
 /** The planning state the design function reads. Project payloads and saved scenarios have the same fields. */
 export function platformDesignInputs(state: DesignState): PlatformDesignInputs {
@@ -21,6 +21,7 @@ export function platformDesignInputs(state: DesignState): PlatformDesignInputs {
     existingCapacityCfg: state.existingCapacityCfg,
     existingCapacityTiers: state.existingCapacityTiers,
     existingCapacityNodes: state.existingCapacityNodes,
+    existingHardware: state.existingHardware,
     placementInputs: state.placementInputs,
     managementDecision: state.managementDecision,
     managementDeploymentInputs: state.managementDeploymentInputs,
@@ -45,6 +46,7 @@ export function usePlatformDesign(options: { management?: ManagementDeploymentIn
   const existingCapacityCfg = useSurveyorStore((state) => state.existingCapacityCfg)
   const existingCapacityTiers = useSurveyorStore((state) => state.existingCapacityTiers)
   const existingCapacityNodes = useSurveyorStore((state) => state.existingCapacityNodes)
+  const existingHardware = useSurveyorStore((state) => state.existingHardware)
   const placementInputs = useSurveyorStore((state) => state.placementInputs)
   const managementDecision = useSurveyorStore((state) => state.managementDecision)
   const storedManagement = useSurveyorStore((state) => state.managementDeploymentInputs)
@@ -53,13 +55,13 @@ export function usePlatformDesign(options: { management?: ManagementDeploymentIn
   const overridden = managementOverride !== undefined
   const managementDeploymentInputs = overridden ? managementOverride : storedManagement
   return useMemo(() => resolvePlatformDesign(platformDesignInputs({
-    engagementMode, cfg, tiers, vms, chosenKey, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes,
+    engagementMode, cfg, tiers, vms, chosenKey, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, existingHardware,
     placementInputs,
     managementDecision: overridden ? 'design' : managementDecision,
     managementDeploymentInputs,
     includeManagementInSizing,
     managementAdvisorAnswers,
-  })), [engagementMode, cfg, tiers, vms, chosenKey, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, placementInputs, managementDecision, managementDeploymentInputs, includeManagementInSizing, managementAdvisorAnswers, overridden])
+  })), [engagementMode, cfg, tiers, vms, chosenKey, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, existingHardware, placementInputs, managementDecision, managementDeploymentInputs, includeManagementInSizing, managementAdvisorAnswers, overridden])
 }
 
 /**
