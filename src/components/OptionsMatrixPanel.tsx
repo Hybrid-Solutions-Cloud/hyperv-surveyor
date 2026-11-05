@@ -48,8 +48,16 @@ function OptionCells({ option }: { option: MatrixOption }) {
   )
 }
 
-function SelectCell({ option, selected, onSelect }: { option: MatrixOption; selected: boolean; onSelect: (option: MatrixOption) => void }) {
-  if (selected) return <td><span className="pill ok">Selected</span></td>
+export function SelectCell({ option, selected, onSelect }: { option: MatrixOption; selected: boolean; onSelect: (option: MatrixOption) => void }) {
+  // The option in use can itself be ruled out (it no longer fits): say why rather than hide it.
+  if (selected) {
+    return (
+      <td>
+        <span className={`pill ${option.rejected ? 'err' : 'ok'}`}>{option.rejected ? 'Selected, ruled out' : 'Selected'}</span>
+        {option.rejected && <div className="small muted" style={{ maxWidth: 360 }}>{option.rejectionReasons.join(' ')}</div>}
+      </td>
+    )
+  }
   if (option.rejected) {
     return (
       <td>
