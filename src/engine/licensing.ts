@@ -418,12 +418,14 @@ export function licensingQuantities(design: PlatformDesign, vms: Vm[]): Licensin
     const scopes: LicensingScope[] = []
     if (design.status === 'split' && design.placement) {
       design.placement.clusters.forEach((cluster) => {
-        const counted = management.counted ? management.countedVms.slice(0, cluster.managementVmCount) : []
+        // cluster.vms already ends with the management VMs placed on it: count each VM once.
+        const workloadVms = cluster.vms.slice(0, cluster.vms.length - cluster.managementVmCount)
+        const counted = management.counted ? cluster.vms.slice(workloadVms.length) : []
         scopes.push(scope({
           id: cluster.id, label: cluster.name, role: 'workload', architecture: chosen.cfg.architecture,
           hostLines: [hostLine(spec, cluster.result.nodes, node)],
           spareHosts: chosen.cfg.spareNodes, workloadHosts: cluster.result.workloadNodes,
-          vms: countVms(cluster.vms, counted),
+          vms: countVms(workloadVms, counted),
         }))
       })
     } else {

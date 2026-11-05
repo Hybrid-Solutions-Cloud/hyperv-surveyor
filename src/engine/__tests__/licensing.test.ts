@@ -322,6 +322,18 @@ describe('E2: quantities follow the design on every path', () => {
     expect(q.scopes.reduce((sum, item) => sum + item.vms.total, 0)).toBe(3000)
   })
 
+  it('new platform, split: management VMs on a cluster are counted once, as on one cluster', () => {
+    const management = { managementDecision: 'design' as const, managementDeploymentInputs: scvmmScom }
+    const total = (q: LicensingQuantities) => q.scopes.reduce((sum, item) => sum + item.vms.total, 0)
+    const one = designOf(management)
+    const managementVms = one.design.management.countedVms.length
+    expect(managementVms).toBeGreaterThan(0)
+    expect(total(licensingQuantities(one.design, one.vms))).toBe(120 + managementVms)
+    const split = designOf({ ...management, vms: fleet(3000), placementInputs: { ...DEFAULT_PLACEMENT_INPUTS, clusterLayout: 'split', maxNodesPerCluster: 16 } })
+    expect(split.design.status).toBe('split')
+    expect(total(licensingQuantities(split.design, split.vms))).toBe(3000 + split.design.management.countedVms.length)
+  })
+
   it('new platform that does not fit: nothing is priced', () => {
     const { design, vms } = designOf({ vms: fleet(3000) })
     expect(design.feasible).toBe(false)
