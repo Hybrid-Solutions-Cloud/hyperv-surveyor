@@ -25,7 +25,11 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
   const lic = licensableCores(cfg.node)
   const ratio = cacheRatio(cfg.node)
   const growth = resolveGrowthPlan(cfg)
-  const problems = hardwareInputProblems(cfg)
+  // C14: check the inputs each storage type uses, not only the base configuration's.
+  const problems = [...new Set([
+    ...hardwareInputProblems({ ...cfg, architecture: 'san' }),
+    ...hardwareInputProblems({ ...cfg, architecture: 's2d' }).map((problem) => problem.startsWith('S2D') ? `${problem} This affects the S2D and hybrid options that use your own drive layout.` : problem),
+  ])]
   const usableCores = usableCoresPerHost(cfg.node, cfg)
   const usableRam = usableRamPerHost(cfg.node, cfg)
   const sanCalculated = cfg.sanSizingMode === 'calculated'
@@ -39,58 +43,8 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
         </div>
       )}
       <div className="panel">
-        <h2>Resiliency and growth</h2>
-        <Field label="Spare nodes (N+n)" hint="The service-provider default is N+2 — you must survive losing a node while another is draining for patches.">
-          <select value={cfg.spareNodes} onChange={e => set({ spareNodes: parseInt(e.target.value) })}>
-            <option value={0}>N+0 — no spare (not recommended)</option>
-            <option value={1}>N+1 — survive one failure</option>
-            <option value={2}>N+2 — survive a failure during patching</option>
-            <option value={3}>N+3</option>
-          </select>
-        </Field>
-        <h3>Capacity growth plan</h3>
-        <div className="row">
-          <Field label="Immediate headroom %" hint="One-time reserve above today's imported CPU, memory, and consumed storage demand.">
-            <NumberInput value={growth.immediateHeadroomPct} step={5} min={0} max={200} onChange={n => set({ growthFactor: 1 + Math.max(0, n) / 100 })} />
-          </Field>
-          <Field label="Annual workload growth %" hint="Compounded once per forecast year across CPU, memory, and consumed storage.">
-            <NumberInput value={growth.annualGrowthPct * 100} step={1} min={0} max={100} onChange={n => set({ annualGrowthPct: Math.max(0, n) / 100 })} />
-          </Field>
-        </div>
-        <div className="row">
-          <Field label="Planning horizon (years)">
-            <NumberInput value={growth.horizonYears} step={1} min={1} max={10} onChange={n => set({ growthHorizonYears: Math.max(1, Math.min(10, Math.round(n))) })} />
-          </Field>
-          <Field label="Growth deployment strategy">
-            <select value={growth.strategy} onChange={e => set({ growthStrategy: e.target.value as ClusterConfig['growthStrategy'] })}>
-              <option value="phased">Add nodes as growth requires them</option>
-              <option value="build-now">Build forecast capacity into today's design</option>
-            </select>
-          </Field>
-        </div>
-        <div className="note">
-          <strong>{growth.strategy === 'build-now' ? 'Build-now sizing' : 'Phased growth sizing'}</strong>
-          {growth.strategy === 'build-now'
-            ? `Today's node recommendation includes the full Year ${growth.horizonYears} demand forecast (${growth.terminalGrowthFactor.toFixed(2)}× imported demand).`
-            : `Today's node recommendation includes ${growth.baseGrowthFactor.toFixed(2)}× demand; the results page shows node additions through Year ${growth.horizonYears}.`}
-        </div>
-        <h3>Sizing evidence</h3>
-        <Field label="CPU and memory sizing basis">
-          <select value={cfg.sizingBasis ?? 'allocation'} onChange={e => set({ sizingBasis: e.target.value as ClusterConfig['sizingBasis'] })}>
-            <option value="allocation">Allocated vCPU and memory</option>
-            <option value="measured-p95">Measured P95 where available</option>
-          </select>
-        </Field>
-        {(cfg.sizingBasis ?? 'allocation') === 'measured-p95' && (
-          <>
-            <Field label={`Measured-data comfort factor (${(cfg.performanceComfortFactor ?? 1.25).toFixed(2)}x)`} hint="Applied to each VM's CPU and memory P95 measurement. A measured CPU is actual use, so the tier vCPU ratio is not applied to it. VMs without a matching metric remain sized on allocation.">
-              <NumberInput value={cfg.performanceComfortFactor ?? 1.25} min={1} max={2} step={0.05} onChange={n => set({ performanceComfortFactor: Math.max(1, n) })} />
-            </Field>
-            <Field label="Target/source per-core benchmark" hint="1.0 means equal per-core performance; 1.20 means the target benchmark is 20% faster. Use measured benchmark evidence, not clock speed alone.">
-              <NumberInput value={cfg.cpuPerformanceFactor ?? 1} min={0.5} max={3} step={0.05} onChange={n => set({ cpuPerformanceFactor: Math.max(0.1, n) })} />
-            </Field>
-          </>
-        )}
+        <h2>Cluster settings</h2>
+        <p className="small muted" style={{ marginTop: -6 }}>Spare nodes, growth and the sizing basis are set on the Goals page.</p>
         <Field label="Backup method" hint="VSS/volsnap caps CSVs at 10 TiB [MS]. RCT and ReFS block-clone are fine to 32 TiB and beyond.">
           <select value={cfg.backupMethod} onChange={e => set({ backupMethod: e.target.value as any })}>
             <option value="rct">Hyper-V RCT / ReFS block clone / SQL native</option>
@@ -108,11 +62,11 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
       </div>
 
       <div className="panel">
-        <h2>Reference server</h2>
+        <h2>Your own server (optional)</h2>
         <div className="note">
           <strong>This is a starting assumption, not a purchase decision</strong>
-          Surveyor needs a server size to work out how many nodes your workload takes. You do not need to know your final
-          hardware: keep this example, enter your own, or compare other sizes on the results page.
+          You do not need to know your hardware. The Options page compares four reference sizes and this one. Choosing an
+          option sets this server; change it here only if you have a server in mind.
         </div>
         <div className="row">
           <Field label="Sockets"><NumberInput value={cfg.node.sockets} min={1} max={8} onChange={n => setNode({ sockets: n })} /></Field>
@@ -199,9 +153,9 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
       </div>
 
       <div className="panel">
-        <h2>Storage Spaces Direct</h2>
+        <h2>Your own S2D drive layout (optional)</h2>
         <p className="small muted" style={{ marginTop: -6 }}>
-          Used by the S2D and hybrid results. Each result uses its own resiliency: three-way mirror, mirror-accelerated parity, or dual parity. Hybrid uses three-way mirror.
+          The Options page compares a catalog of all-flash NVMe layouts and this one. Each S2D option uses its own resiliency; hybrid uses three-way mirror.
         </p>
         <Field label="Media">
           <select value={cfg.node.media} onChange={e => setNode({ media: e.target.value as any })}>
@@ -344,6 +298,68 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
           RVTools import unless you have measured utilisation — RVTools carries none. Dynamic Memory is a deployment policy shown in the report; it does not reduce the sizing demand unless measured P95 data is selected above.
         </p>
       </div>
+    </div>
+  )
+}
+
+/** Planning policy: spare nodes, growth and the sizing basis. Shown on the Goals page. No hardware here. */
+export function PlanningPolicyPanel({ cfg, setCfg }: { cfg: ClusterConfig; setCfg: (c: ClusterConfig) => void }) {
+  const set = (p: Partial<ClusterConfig>) => setCfg({ ...cfg, ...p })
+  const growth = resolveGrowthPlan(cfg)
+  return (
+    <div className="panel">
+      <h2>Resilience, growth and sizing basis</h2>
+        <Field label="Spare nodes (N+n)" hint="The service-provider default is N+2 — you must survive losing a node while another is draining for patches.">
+          <select value={cfg.spareNodes} onChange={e => set({ spareNodes: parseInt(e.target.value) })}>
+            <option value={0}>N+0 — no spare (not recommended)</option>
+            <option value={1}>N+1 — survive one failure</option>
+            <option value={2}>N+2 — survive a failure during patching</option>
+            <option value={3}>N+3</option>
+          </select>
+        </Field>
+        <h3>Capacity growth plan</h3>
+        <div className="row">
+          <Field label="Immediate headroom %" hint="One-time reserve above today's imported CPU, memory, and consumed storage demand.">
+            <NumberInput value={growth.immediateHeadroomPct} step={5} min={0} max={200} onChange={n => set({ growthFactor: 1 + Math.max(0, n) / 100 })} />
+          </Field>
+          <Field label="Annual workload growth %" hint="Compounded once per forecast year across CPU, memory, and consumed storage.">
+            <NumberInput value={growth.annualGrowthPct * 100} step={1} min={0} max={100} onChange={n => set({ annualGrowthPct: Math.max(0, n) / 100 })} />
+          </Field>
+        </div>
+        <div className="row">
+          <Field label="Planning horizon (years)">
+            <NumberInput value={growth.horizonYears} step={1} min={1} max={10} onChange={n => set({ growthHorizonYears: Math.max(1, Math.min(10, Math.round(n))) })} />
+          </Field>
+          <Field label="Growth deployment strategy">
+            <select value={growth.strategy} onChange={e => set({ growthStrategy: e.target.value as ClusterConfig['growthStrategy'] })}>
+              <option value="phased">Add nodes as growth requires them</option>
+              <option value="build-now">Build forecast capacity into today's design</option>
+            </select>
+          </Field>
+        </div>
+        <div className="note">
+          <strong>{growth.strategy === 'build-now' ? 'Build-now sizing' : 'Phased growth sizing'}</strong>
+          {growth.strategy === 'build-now'
+            ? `Today's node recommendation includes the full Year ${growth.horizonYears} demand forecast (${growth.terminalGrowthFactor.toFixed(2)}× imported demand).`
+            : `Today's node recommendation includes ${growth.baseGrowthFactor.toFixed(2)}× demand; the results page shows node additions through Year ${growth.horizonYears}.`}
+        </div>
+        <h3>Sizing evidence</h3>
+        <Field label="CPU and memory sizing basis">
+          <select value={cfg.sizingBasis ?? 'allocation'} onChange={e => set({ sizingBasis: e.target.value as ClusterConfig['sizingBasis'] })}>
+            <option value="allocation">Allocated vCPU and memory</option>
+            <option value="measured-p95">Measured P95 where available</option>
+          </select>
+        </Field>
+        {(cfg.sizingBasis ?? 'allocation') === 'measured-p95' && (
+          <>
+            <Field label={`Measured-data comfort factor (${(cfg.performanceComfortFactor ?? 1.25).toFixed(2)}x)`} hint="Applied to each VM's CPU and memory P95 measurement. A measured CPU is actual use, so the tier vCPU ratio is not applied to it. VMs without a matching metric remain sized on allocation.">
+              <NumberInput value={cfg.performanceComfortFactor ?? 1.25} min={1} max={2} step={0.05} onChange={n => set({ performanceComfortFactor: Math.max(1, n) })} />
+            </Field>
+            <Field label="Target/source per-core benchmark" hint="1.0 means equal per-core performance; 1.20 means the target benchmark is 20% faster. Use measured benchmark evidence, not clock speed alone.">
+              <NumberInput value={cfg.cpuPerformanceFactor ?? 1} min={0.5} max={3} step={0.05} onChange={n => set({ cpuPerformanceFactor: Math.max(0.1, n) })} />
+            </Field>
+          </>
+        )}
     </div>
   )
 }

@@ -1,30 +1,18 @@
-import { Link } from 'react-router-dom'
-import { ArrowRight } from 'lucide-react'
 import { ConfigPanel } from '../components/ConfigPanel'
-import { JourneyBar } from '../components/JourneyBar'
-import { PageHeader } from '../components/Shared'
-import { WorkflowNav } from '../components/WorkflowNav'
+import { NewPlatformHeader, NewPlatformNav } from '../components/NewPlatformStep'
 import { useSurveyorStore } from '../state/store'
-import { ENGAGEMENT_LABELS } from '../state/journey'
 
+/** Refine assumptions: advanced settings after the options. Every change re-runs the options matrix. */
 export default function ConfigurationPage() {
-  const { cfg, setCfg, tiers, setTiers, engagementMode } = useSurveyorStore()
-  const offPath = engagementMode !== null && engagementMode !== 'new-platform'
-
+  const { cfg, setCfg, tiers, setTiers } = useSurveyorStore()
   return (
     <>
-      <PageHeader
-        eyebrow={offPath ? `Not part of your path (${ENGAGEMENT_LABELS[engagementMode!]}) · Proposed hardware` : 'New platform · Step 2'}
-        title="Hardware and assumptions"
-        description="Starting assumptions for the comparison. You do not need final hardware: Surveyor uses these to work out the node count and the storage you need."
-        actions={<Link className="btn link-btn" to="/results">Calculate designs <ArrowRight size={15} /></Link>}
+      <NewPlatformHeader
+        route="/configuration"
+        description="Advanced settings: host reserves, vCPU ratios, CSV layout, SAN data reduction, and your own server or drive layout if you have one in mind. Every change here re-runs the options and the shortlist."
       />
-      <JourneyBar detail="These are proposed-design assumptions and remain separate from the existing-hardware profile." />
       <ConfigPanel cfg={cfg} setCfg={setCfg} tiers={tiers} setTiers={setTiers} />
-      <WorkflowNav
-        previous={{ to: '/workloads', label: 'Workload inventory' }}
-        next={[{ to: '/results', label: 'Calculate designs', description: 'Compare SAN, S2D, and hybrid options using these assumptions.' }]}
-      />
+      <NewPlatformNav route="/configuration" nextDescription="Turn the selected platform into a management recommendation and deployment bill of materials." />
     </>
   )
 }

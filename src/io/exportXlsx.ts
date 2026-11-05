@@ -124,6 +124,27 @@ function storagePlanSheet(design: PlatformDesign): WorkbookSheet {
   return { name: 'CSV Plan', rows }
 }
 
+/** What to buy for the selected design, from the same bill of materials as the page and report. */
+export function bomSheet(design: PlatformDesign): WorkbookSheet {
+  const bom = design.bom
+  if (!bom.available) return { name: 'What to Buy', rows: [['WHAT TO BUY'], [bom.reason ?? 'Not available.']] }
+  return {
+    name: 'What to Buy',
+    rows: [
+      [bom.title.toUpperCase()],
+      ['Recommended starting points: validate with your vendor and the Windows Server Catalog.'],
+      [],
+      ['Category', 'Item', 'Quantity', 'Detail', 'Basis', 'Source'],
+      ...bom.lines.map((line) => [line.category, line.item, line.quantity, line.detail, line.basis, line.source ?? '']),
+      [],
+      ['SAN connectivity', bom.sanConnectivity.note],
+      [],
+      ['Caveats'],
+      ...bom.caveats.map((caveat) => [caveat]),
+    ],
+  }
+}
+
 function findingsSheet(design: PlatformDesign): WorkbookSheet {
   return {
     name: 'Findings',
@@ -284,10 +305,22 @@ export function designWorkbookSheets(design: PlatformDesign, vms: Vm[], generate
     [],
     ['Notes'],
     ...quality.notes.map((note) => [note]),
+    ...(vms.some((vm) => vm.outlierDecision) ? [
+      [],
+      ['DATA CHECK: STORAGE OUTLIER CHOICES'],
+      ['VM', 'Your choice', 'Imported storage GiB', 'Counted storage GiB'],
+      ...vms.filter((vm) => vm.outlierDecision).map((vm) => [
+        vm.name,
+        vm.outlierDecision!.choice === 'cap' ? `Capped at ${r1(vm.outlierDecision!.capGiB ?? vm.storageGiB)} GiB` : vm.outlierDecision!.choice === 'exclude' ? 'Excluded from sizing' : 'Counted as imported',
+        r1(vm.outlierDecision!.originalStorageGiB),
+        vm.include ? r1(vm.storageGiB) : 0,
+      ]),
+    ] : []),
   ]
 
   return [
     { name: 'Summary', rows: summary },
+    bomSheet(design),
     growthSheet(design),
     storagePlanSheet(design),
     findingsSheet(design),

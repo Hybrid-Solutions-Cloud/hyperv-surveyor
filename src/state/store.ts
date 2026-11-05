@@ -14,6 +14,9 @@ import { DEFAULT_DR_INPUTS, type DrDesignInputs } from '../engine/drDesign'
 import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMode, type ManagementDecision } from './journey'
 import type { Scenario } from './urlState'
 import { normalizeAdvisorAnswers, type AdvisorAnswers } from '../data/managementPlane'
+import { optionSelection, type MatrixOption } from '../engine/optionsMatrix'
+import { applyOutlierDecision } from '../engine/dataQuality'
+import type { OutlierDecision } from '../engine/types'
 
 export interface SurveyorState {
   engagementMode: EngagementMode | null
@@ -50,6 +53,14 @@ export interface SurveyorState {
   setCfg: (cfg: ClusterConfig) => void
   setTiers: (tiers: Record<TierId, TierPolicy>) => void
   setChosenKey: (key: string) => void
+  /**
+   * Applies an option from the options matrix or shortlist: its storage type, server and drives. Only a
+   * click calls this. Ruled-out options are refused (returns false). 'split' also selects the split
+   * layout, and is only possible for an option the split view offers.
+   */
+  selectDesignOption: (option: MatrixOption, mode?: 'one-cluster' | 'split') => boolean
+  /** Records a storage-outlier choice from the Data check page, or undoes it. */
+  setOutlierDecision: (vmId: string, choice: OutlierDecision['choice'] | 'undo', capGiB?: number) => void
   setExistingCapacityCfg: (cfg: ClusterConfig) => void
   setExistingCapacityTiers: (tiers: Record<TierId, TierPolicy>) => void
   setExistingCapacityNodes: (nodes: number) => void
@@ -177,6 +188,18 @@ export const useSurveyorStore = create<SurveyorState>()(
       setCfg: (cfg) => set({ cfg }),
       setTiers: (tiers) => set({ tiers }),
       setChosenKey: (chosenKey) => set({ chosenKey }),
+      selectDesignOption: (option, mode = 'one-cluster') => {
+        const state = useSurveyorStore.getState()
+        const selection = optionSelection(option, state.cfg, mode)
+        if (!selection) return false
+        set({
+          chosenKey: selection.chosenKey,
+          cfg: selection.cfg,
+          placementInputs: { ...state.placementInputs, clusterLayout: mode === 'split' ? 'split' : 'single' },
+        })
+        return true
+      },
+      setOutlierDecision: (vmId, choice, capGiB) => set((state) => ({ vms: applyOutlierDecision(state.vms, vmId, choice, capGiB) })),
       setExistingCapacityCfg: (existingCapacityCfg) => set({ existingCapacityCfg }),
       setExistingCapacityTiers: (existingCapacityTiers) => set({ existingCapacityTiers }),
       setExistingCapacityNodes: (existingCapacityNodes) => set({ existingCapacityNodes }),
@@ -276,7 +299,8 @@ export const useSurveyorStore = create<SurveyorState>()(
       name: 'hyperv-surveyor-state',
       // 6 normalizes saved VMs and scenarios, such as numbers saved as text.
       // 7 keeps the Management Plane Advisor answers and marks who owns the management stack.
-      version: 7,
+      // 8 adds storage-outlier choices on VMs (Data check); malformed ones are dropped on load.
+      version: 8,
       storage: createJSONStorage(() => surveyorStorage),
       onRehydrateStorage: () => () => settleHydration(),
       migrate: (persisted) => migratePersistedState(persisted),

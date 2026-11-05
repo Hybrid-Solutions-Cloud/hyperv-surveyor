@@ -37,7 +37,7 @@ export default function CapacityPage() {
       <PageHeader
         eyebrow={fitGap ? 'Fit and gap · Input 2 of 2' : onExistingPath ? 'Existing capacity · Platform outcome' : `Not part of your path${engagementMode ? ` (${ENGAGEMENT_LABELS[engagementMode]})` : ''} · Existing capacity`}
         title={fitGap ? 'Workload fit and hardware gap' : 'Existing-hardware capacity'}
-        description={fitGap ? 'Test the included workload against fixed hardware, identify every deficit, and determine whether same-spec node expansion can close the gap.' : 'Fix the hardware the customer already owns and calculate its capacity envelope, workload headroom, and first exhausted resource.'}
+        description={fitGap ? 'Test the included workload against fixed hardware, identify every deficit, and determine whether same-spec node expansion can close the gap.' : 'Enter the hardware you already own and calculate its capacity envelope, workload headroom, and first exhausted resource.'}
         actions={<div className="row page-action-row">
           <button className="btn ghost" type="button" onClick={() => exportExistingCapacity(design, vms)}><Download size={15} /> Download workbook</button>
           {included === 0

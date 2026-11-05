@@ -1,4 +1,5 @@
 import { DECISION_QUESTIONS, MANAGEMENT_PLANES, type AdvisorAnswers, type PlaneId } from '../data/managementPlane'
+import { excludedWorkloadCounts, OUTLIER_CHOICE_LABELS } from '../engine/dataQuality'
 import { advisorMatchSentence } from '../engine/managementAdvisor'
 import {
   normalizeManagementDeploymentInputs,
@@ -23,6 +24,7 @@ import { ENGAGEMENT_LABELS, type EngagementMode, type ManagementDecision } from 
 export const REPORT_SECTION_DEFINITIONS = [
   { id: 'executive', label: 'Executive summary' },
   { id: 'architecture', label: 'Solution architecture' },
+  { id: 'bill-of-materials', label: 'What to buy' },
   { id: 'nodes', label: 'Node requirements' },
   { id: 'existing', label: 'Existing capacity and fit' },
   { id: 'deployment', label: 'Multi-cluster implementation plan' },
@@ -118,6 +120,7 @@ export interface SolutionReportInputs {
 export function defaultReportSelection(engagementMode?: EngagementMode | null): ReportSelection {
   const selection = Object.fromEntries(REPORT_SECTION_DEFINITIONS.map(({ id }) => [id, true])) as ReportSelection
   if (engagementMode === 'new-platform') selection.existing = false
+  if (engagementMode === 'existing-capacity' || engagementMode === 'fit-gap') selection['bill-of-materials'] = false
   if (engagementMode === 'management-only') {
     REPORT_SECTION_DEFINITIONS.forEach(({ id }) => { selection[id] = id === 'executive' || id === 'management' || id === 'sources' })
   }
@@ -188,21 +191,8 @@ function storageProtectionMetric(cfg: ClusterConfig): ReportMetric {
   }
 }
 
-/** Excluded workload records by reason, from the inventory and the last import. */
-export function excludedWorkloadCounts(vms: Vm[], lastImport?: ImportSummary | null) {
-  const excluded = vms.filter((vm) => !vm.include)
-  const zeroSpec = excluded.filter((vm) => !(vm.vCpu > 0) || !(vm.ramGiB > 0))
-  const poweredOff = excluded.filter((vm) => (vm.powerState === 'poweredOff' || vm.powerState === 'suspended') && !zeroSpec.includes(vm))
-  const other = excluded.length - zeroSpec.length - poweredOff.length
-  return {
-    poweredOff: poweredOff.length,
-    zeroSpec: zeroSpec.length,
-    other: Math.max(0, other),
-    templates: lastImport?.excludedTemplates ?? 0,
-    placeholders: lastImport?.excludedSrmPlaceholders ?? 0,
-    vcls: lastImport?.excludedVcls ?? 0,
-  }
-}
+/** Excluded workload records by reason. One function, shared with the Data check page. */
+export { excludedWorkloadCounts }
 
 export function buildSolutionReport(input: SolutionReportInputs): SolutionReport {
   const includedVms = input.vms.filter((vm) => vm.include)
@@ -293,6 +283,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   const excludedRows = [
     ['Powered off or suspended', number(excluded.poweredOff), 'In the inventory, excluded by default. Tick Include to size them.'],
     ['No vCPU or memory value', number(excluded.zeroSpec), 'Cannot be sized until corrected.'],
+    ['Storage outlier excluded by your choice', number(excluded.storageOutlier), 'Chosen on the Data check page.'],
     ['Excluded by hand', number(excluded.other), 'Include turned off in the inventory.'],
     ...(input.lastImport ? [
       ['Templates (not imported)', number(excluded.templates), 'Skipped at import.'],
@@ -300,6 +291,14 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       ['vCLS system VMs (not imported)', number(excluded.vcls), 'Skipped at import.'],
     ] : []),
   ]
+
+  const outlierRows = input.vms.filter((vm) => vm.outlierDecision).map((vm) => [
+    vm.name,
+    vm.outlierDecision!.choice === 'cap' ? `${OUTLIER_CHOICE_LABELS.cap} at ${gib(vm.outlierDecision!.capGiB ?? vm.storageGiB)}` : OUTLIER_CHOICE_LABELS[vm.outlierDecision!.choice],
+    gib(vm.outlierDecision!.originalStorageGiB),
+    vm.include ? gib(vm.storageGiB) : 'Not counted',
+  ])
+  const bom = design.bom
 
   const sourceMap = new Map<string, string>()
   if (!managementOnly) {
@@ -445,7 +444,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
           basis: 'User-selected',
           explanation: usesExistingHardware
             ? `This is the hardware entered under Existing hardware & fit. Surveyor tests the workload against the ${existingNodes} entered nodes and does not propose new hardware. ${fitSentence}`
-            : `This is the architecture selected in Sizing Results. Surveyor validates its feasibility and calculates its node count, but it does not silently choose the architecture on the user's behalf. The selected result is ${split ? `split by user choice into ${design.clusters.length} clusters using ${design.totalNodes} nodes` : design.status === 'feasible' ? `feasible at ${design.totalNodes} nodes` : design.status === 'split-failed' ? 'a split that cannot place the workload' : 'not currently feasible in one cluster'} and is ${binding}-bound.`,
+            : `This is the option you selected on the Options or Shortlist page. Surveyor ranks and validates options and calculates the node count, but it never chooses the architecture for you. The selected result is ${split ? `split by user choice into ${design.clusters.length} clusters using ${design.totalNodes} nodes` : design.status === 'feasible' ? `feasible at ${design.totalNodes} nodes` : design.status === 'split-failed' ? 'a split that cannot place the workload' : 'not currently feasible in one cluster'} and is ${binding}-bound.`,
           tradeoff: architectureAlternatives ? `Other modeled outcomes were ${architectureAlternatives}. Node count is only one decision factor; storage ownership, operations, supportability, recovery, and cost still require review.` : undefined,
         },
         {
@@ -493,6 +492,24 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
           .filter((question) => input.storageDecisionAnswers?.[question.id] !== undefined)
           .map((question) => [question.question, yesNo(input.storageDecisionAnswers![question.id]!), question.why]),
       }] : [])] : [],
+    },
+    {
+      id: 'bill-of-materials',
+      title: 'What to buy',
+      paragraphs: bom.available
+        ? [
+          `Class-level bill of materials for ${design.platformLabel}. Recommended starting points: validate with your vendor and the Windows Server Catalog.`,
+          `SAN connectivity: ${bom.sanConnectivity.note}`,
+        ]
+        : [bom.reason ?? 'Not available.'],
+      metrics: [],
+      reasoning: [],
+      bullets: bom.available ? bom.caveats : [],
+      tables: bom.available ? [{
+        title: 'Bill of materials',
+        headers: ['Category', 'Item', 'Quantity', 'Detail', 'Basis'],
+        rows: bom.lines.map((line) => [line.category, line.item, line.quantity, line.detail, line.basis]),
+      }] : [],
     },
     {
       id: 'nodes',
@@ -738,6 +755,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       tables: [
         { title: 'Workloads by tier', headers: ['Tier', 'VMs', 'vCPU', 'Memory', 'Consumed storage'], rows: tierRows },
         { title: 'Excluded workload records', headers: ['Reason', 'Count', 'Note'], rows: excludedRows },
+        ...(outlierRows.length ? [{ title: 'Data check: storage outlier choices', headers: ['VM', 'Your choice', 'Imported storage', 'Counted in sizing'], rows: outlierRows }] : []),
       ],
     },
     {

@@ -140,7 +140,7 @@ export function reportToMarkdown(
   const output = [
     `# ${report.title}`,
     '',
-    `- Customer / scenario: ${report.customerName}`,
+    `- Project or organization: ${report.customerName}`,
     `- Selected architecture: ${report.selectedArchitecture}`,
     `- Author: ${report.metadata.author || 'Not specified'}`,
     `- Organization: ${report.metadata.organization || 'Not specified'}`,
@@ -488,7 +488,7 @@ export async function reportToWordBlob(
           new Paragraph({
             spacing: { before: 1_550, after: 90 },
             border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: CYAN, space: 10 } },
-            children: [new TextRun({ text: 'CUSTOMER SOLUTION REPORT', size: 18, bold: true, color: BLUE, characterSpacing: 80 })],
+            children: [new TextRun({ text: 'SOLUTION REPORT', size: 18, bold: true, color: BLUE, characterSpacing: 80 })],
           }),
           new Paragraph({ text: wordSafeText(report.title), style: 'Title' }),
           new Paragraph({
@@ -540,7 +540,7 @@ function drawPdfCover(doc: jsPDF, report: SolutionReport, sections: ReportSectio
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10)
   doc.setTextColor(101, 214, 219)
-  doc.text('CUSTOMER SOLUTION REPORT', 54, 58)
+  doc.text('SOLUTION REPORT', 54, 58)
   doc.setFontSize(29)
   doc.setTextColor(255, 255, 255)
   const titleLines = (doc.splitTextToSize(pdfText(report.title), width - 108) as string[]).slice(0, 3)
@@ -1077,7 +1077,7 @@ export function reportToHtml(
     </aside>
     <main>
       <header class="cover">
-        <div class="eyebrow">Customer solution report</div>
+        <div class="eyebrow">Solution report</div>
         <h1>${htmlText(report.title)}</h1>
         <div class="subtitle">Sizing, architecture, storage, and management-plane design</div>
         <div class="cover-grid">

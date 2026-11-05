@@ -3,6 +3,7 @@ import { LIMITS, RESILIENCY, SRC } from './rules'
 import { cacheRatio, rawPerServerTB, usesCacheTier } from './capacity'
 import { licensableCores, s2dMetadataRamGiB, totalCores, usableCoresPerHost, usableRamPerHost } from './compute'
 import { assessPerformanceData } from './performance'
+import { cached } from './solveCache'
 import type { ClusterConfig, CsvPlan, Finding, TierId, TierPolicy, Vm } from './types'
 
 const err = (code: string, message: string, basis: Finding['basis'], source?: string): Finding => ({
@@ -41,12 +42,16 @@ export function validateDesign(
   csvPlans: CsvPlan[],
   /** VM count after growth. Defaults to the included VMs. */
   plannedVmCount?: number,
+  /** Identifies this VM list inside a solve cache scope, so per-VM checks run once per server size. */
+  vmSetKey?: string,
 ): Finding[] {
   const f: Finding[] = []
   const node = cfg.node
   const usesS2d = cfg.architecture === 's2d' || cfg.architecture === 'hybrid'
   const cores = totalCores(node)
-  const performance = assessPerformanceData(vms, cfg)
+  const performance = vmSetKey === undefined
+    ? assessPerformanceData(vms, cfg)
+    : cached(() => `perf|${vmSetKey}|${cfg.sizingBasis}`, () => assessPerformanceData(vms, cfg))
 
   if ((cfg.sizingBasis ?? 'allocation') === 'measured-p95') {
     const benchmarkFactor = Math.max(0.1, cfg.cpuPerformanceFactor ?? 1)
@@ -231,7 +236,7 @@ export function validateDesign(
   }
   if (sanPlans.length > 0 && !(sanPlans[0].recoveryGroupingApplied) && granularSanAlternative > sanCsvs) {
     f.push(info('SAN_GRANULAR_ALTERNATIVE',
-      `The selected SAN layout uses ${sanCsvs} CSV/LUNs. Enforcing the editable tier recovery targets would use ${granularSanAlternative}; that alternative remains available in Hardware and assumptions.`,
+      `The selected SAN layout uses ${sanCsvs} CSV/LUNs. Enforcing the editable tier recovery targets would use ${granularSanAlternative}; that alternative remains available under Refine assumptions.`,
       'TOOL'))
   }
 
@@ -278,6 +283,39 @@ export function validateDesign(
   // A VM runs on one host, so demand adding up across hosts does not make it placeable. This uses
   // the allocation: a VM needs its configured vCPU and memory to start, whatever its P95 is.
   const hostRamGiB = usableRamPerHost(node, cfg)
+  f.push(...(vmSetKey === undefined
+    ? perVmFindings(vms, node, logicalProcessors, hostRamGiB)
+    : cached(() => `vmfit|${vmSetKey}|${logicalProcessors}|${hostRamGiB}|${node.coresPerSocket}`, () => perVmFindings(vms, node, logicalProcessors, hostRamGiB))))
+  const dbDynamic = Object.values(tiers).find(t => t.id === 'database' && t.allowDynamicMemory)
+  if (dbDynamic) {
+    f.push(warn('DYNAMIC_MEMORY_DB',
+      'Dynamic Memory is enabled on the Database tier. Surveyor assumes fixed memory for databases, because Dynamic Memory and virtual NUMA cannot be used together: a VM with Dynamic Memory has one virtual NUMA node.',
+      'TOOL', SRC.numa))
+  }
+  const includedVms = plannedVmCount ?? vms.filter(v => v.include).length
+  if (includedVms > LIMITS.MAX_VMS_PER_CLUSTER) {
+    f.push(err('VMS_PER_CLUSTER',
+      `${includedVms} VMs exceeds the ${LIMITS.MAX_VMS_PER_CLUSTER} running VMs per cluster maximum.`,
+      'MS', SRC.maxScale))
+  }
+  const workloadNodes = nodes - cfg.spareNodes
+  if (workloadNodes > 0 && includedVms / workloadNodes > LIMITS.MAX_VMS_PER_HOST) {
+    f.push(err('VMS_PER_HOST',
+      `${includedVms} VMs across ${workloadNodes} workload hosts is above the ${LIMITS.MAX_VMS_PER_HOST} running VMs per host maximum.`,
+      'MS', SRC.maxScale))
+  }
+
+  // ---- Always-on reminders -------------------------------------------------
+  f.push(info('LBFO',
+    'LBFO NIC teaming is not supported for Hyper-V virtual switch binding from Windows Server 2022 onward. Use Switch Embedded Teaming (SET), maximum 8 adapters.',
+    'MS', SRC.removedFeatures))
+
+  return f
+}
+
+/** Checks that depend only on the VMs and the server size, not on storage or node count. */
+function perVmFindings(vms: Vm[], node: ClusterConfig['node'], logicalProcessors: number, hostRamGiB: number): Finding[] {
+  const f: Finding[] = []
   const hostLoad = (vm: Vm) => Math.max(logicalProcessors > 0 ? vm.vCpu / logicalProcessors : Infinity, hostRamGiB > 0 ? vm.ramGiB / hostRamGiB : Infinity)
   const tooLarge = vms.filter((vm) => vm.include && (vm.vCpu > logicalProcessors || vm.ramGiB > hostRamGiB))
   if (tooLarge.length > 0) {
@@ -316,30 +354,6 @@ export function validateDesign(
     f.push(warn('VM_GEN1_LIMIT',
       `${overGen1.length} BIOS VM(s) exceed the Generation 1 maximum of ${LIMITS.MAX_VCPU_PER_GEN1_VM} vCPU and 1 TB. Convert them to UEFI and Generation 2, or reduce them.`, 'MS', SRC.maxScale))
   }
-  const dbDynamic = Object.values(tiers).find(t => t.id === 'database' && t.allowDynamicMemory)
-  if (dbDynamic) {
-    f.push(warn('DYNAMIC_MEMORY_DB',
-      'Dynamic Memory is enabled on the Database tier. Surveyor assumes fixed memory for databases, because Dynamic Memory and virtual NUMA cannot be used together: a VM with Dynamic Memory has one virtual NUMA node.',
-      'TOOL', SRC.numa))
-  }
-  const includedVms = plannedVmCount ?? vms.filter(v => v.include).length
-  if (includedVms > LIMITS.MAX_VMS_PER_CLUSTER) {
-    f.push(err('VMS_PER_CLUSTER',
-      `${includedVms} VMs exceeds the ${LIMITS.MAX_VMS_PER_CLUSTER} running VMs per cluster maximum.`,
-      'MS', SRC.maxScale))
-  }
-  const workloadNodes = nodes - cfg.spareNodes
-  if (workloadNodes > 0 && includedVms / workloadNodes > LIMITS.MAX_VMS_PER_HOST) {
-    f.push(err('VMS_PER_HOST',
-      `${includedVms} VMs across ${workloadNodes} workload hosts is above the ${LIMITS.MAX_VMS_PER_HOST} running VMs per host maximum.`,
-      'MS', SRC.maxScale))
-  }
-
-  // ---- Always-on reminders -------------------------------------------------
-  f.push(info('LBFO',
-    'LBFO NIC teaming is not supported for Hyper-V virtual switch binding from Windows Server 2022 onward. Use Switch Embedded Teaming (SET), maximum 8 adapters.',
-    'MS', SRC.removedFeatures))
-
   return f
 }
 

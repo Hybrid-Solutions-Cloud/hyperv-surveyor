@@ -13,6 +13,10 @@ import {
   Menu,
   Network,
   Workflow,
+  ListChecks,
+  Target,
+  Award,
+  ShoppingCart,
   FileText,
   FolderOpen,
   Server,
@@ -21,7 +25,7 @@ import {
 } from 'lucide-react'
 import { payloadFromState, useSurveyorStore } from '../state/store'
 import { toUrl, urlOmittedInventory } from '../state/urlState'
-import { ENGAGEMENT_LABELS, journeyResumeRoute, type EngagementMode } from '../state/journey'
+import { ENGAGEMENT_LABELS, NEW_PLATFORM_STEPS, journeyResumeRoute, type EngagementMode } from '../state/journey'
 
 type NavItem = { to: string; label: string; icon: typeof Home; end?: boolean }
 
@@ -30,13 +34,14 @@ type NavItem = { to: string; label: string; icon: typeof Home; end?: boolean }
  * their routes still open and say they are not part of the current path.
  */
 const PATH_PAGES: Record<EngagementMode, string[]> = {
-  'new-platform': ['/workloads', '/configuration', '/results'],
+  'new-platform': NEW_PLATFORM_STEPS.map((step) => step.to),
   'existing-capacity': ['/capacity', '/workloads'],
   'fit-gap': ['/workloads', '/capacity'],
   'management-only': [],
 }
 
 const PATH_LABELS: Partial<Record<EngagementMode, Record<string, string>>> = {
+  'new-platform': Object.fromEntries(NEW_PLATFORM_STEPS.map((step) => [step.to, step.label])),
   'existing-capacity': { '/capacity': 'Existing capacity', '/workloads': 'Workloads (optional)' },
   'fit-gap': { '/capacity': 'Fit and gap' },
 }
@@ -50,6 +55,11 @@ export function navGroupsFor(mode: EngagementMode | null): Array<{ label: string
         .filter((item) => PATH_PAGES[mode].includes(item.to))
         .map((item) => ({ ...item, label: PATH_LABELS[mode]?.[item.to] ?? item.label })),
     })
+    .map((group) => mode !== 'new-platform' || group.label !== 'Platform' ? group : {
+      ...group,
+      // The walkthrough order, not the order of the full list.
+      items: [...group.items].sort((a, b) => PATH_PAGES['new-platform'].indexOf(a.to) - PATH_PAGES['new-platform'].indexOf(b.to)),
+    })
     .filter((group) => group.items.length > 0)
 }
 
@@ -57,8 +67,12 @@ const navGroups: Array<{ label: string; items: NavItem[] }> = [
   { label: 'Start', items: [{ to: '/', label: 'Planning paths', icon: Home, end: true }] },
   { label: 'Platform', items: [
     { to: '/workloads', label: 'Workloads', icon: Cpu },
-    { to: '/configuration', label: 'Proposed hardware', icon: Server },
-    { to: '/results', label: 'New-platform results', icon: BarChart3 },
+    { to: '/data-check', label: 'Data check', icon: ListChecks },
+    { to: '/goals', label: 'Goals', icon: Target },
+    { to: '/results', label: 'New-platform options', icon: BarChart3 },
+    { to: '/shortlist', label: 'Shortlist', icon: Award },
+    { to: '/what-to-buy', label: 'What to buy', icon: ShoppingCart },
+    { to: '/configuration', label: 'Refine assumptions', icon: Server },
     { to: '/capacity', label: 'Existing hardware & fit', icon: Calculator },
   ] },
   { label: 'Operate', items: [
@@ -164,7 +178,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <main className="main-area">
         <div className="top-strip">
           <span><ClipboardCheck size={15} /> Runs locally in your browser</span>
-          <span>No telemetry · no customer data upload</span>
+          <span>No telemetry · no data upload</span>
         </div>
         <div className="content-wrap">
           {sharedInventoryOmitted !== null && vms.length > 0 && (

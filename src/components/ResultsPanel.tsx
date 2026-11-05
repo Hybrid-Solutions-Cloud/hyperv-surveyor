@@ -1,5 +1,4 @@
 import React from 'react'
-import type { ArchitectureOption } from '../engine/solve'
 import type { PlatformDesign } from '../engine/platformDesign'
 import { RESILIENCY, TIER_IDS } from '../engine/rules'
 import { giBToTiB } from '../engine/compute'
@@ -9,18 +8,10 @@ import { Card, FindingsList, fmt0, fmt1 } from './Shared'
 interface Props {
   /** The resolved design. Every figure below comes from it. */
   design: PlatformDesign
-  setChosenKey: (k: string) => void
   tiers: Record<TierId, TierPolicy>
   onExport: () => void
-  /** Shown above the comparison: help choosing a storage type. */
-  beforeComparison?: React.ReactNode
   /** Shown after the selected design: cluster layout and server size. */
   designChoices?: React.ReactNode
-}
-
-function nodesNeededText(result: ArchitectureOption['result']): string {
-  if (result.nodesNeeded !== null) return `${result.nodesNeeded.toLocaleString()} needed`
-  return result.computeNodesNeeded === null ? '—' : `${result.computeNodesNeeded.toLocaleString()} for compute`
 }
 
 const driverLabel: Record<string, string> = {
@@ -32,7 +23,7 @@ const driverLabel: Record<string, string> = {
   'custom-target': 'custom target',
 }
 
-export function ResultsPanel({ design, setChosenKey, tiers, onExport, beforeComparison, designChoices }: Props) {
+export function ResultsPanel({ design, tiers, onExport, designChoices }: Props) {
   const options = design.options
   const chosen = design.chosen ?? options[0]
   const r = chosen.result
@@ -60,68 +51,6 @@ export function ResultsPanel({ design, setChosenKey, tiers, onExport, beforeComp
 
   return (
     <div className="stack">
-      {beforeComparison}
-      <div className="panel">
-        <h2>Architecture comparison</h2>
-        <p className="small muted" style={{ marginTop: -6 }}>
-          Same workload, every architecture. The node counts differ because <strong>on SAN the node count is
-          driven by compute alone</strong>, while <strong>on S2D every node is also storage</strong> — and parity
-          efficiency itself improves as nodes are added. Click a row to select it.
-        </p>
-        <div className="scroll" style={{ maxHeight: 'none' }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Architecture</th>
-                <th className="num">Nodes</th>
-                <th className="num">Workload</th>
-                <th>Binding constraint</th>
-                <th className="num">Available TiB</th>
-                <th className="num">Required TiB</th>
-                <th className="num">CSVs</th>
-                <th className="num">Lic. cores</th>
-                <th className="num">N+{spare} overhead</th>
-              </tr>
-            </thead>
-            <tbody>
-              {options.map(o => {
-                const s = o.result
-                return (
-                  <tr key={o.key}
-                    className={`${o.key === chosen.key ? 'chosen' : ''} ${s.feasible ? '' : 'infeasible'}`}
-                    style={{ cursor: 'pointer' }}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Select ${o.label}`}
-                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setChosenKey(o.key) } }}
-                    onClick={() => setChosenKey(o.key)}>
-                    <td>
-                      <strong>{o.label}</strong>
-                      {!s.feasible && <span className="pill err" style={{ marginLeft: 6 }}>not feasible</span>}
-                    </td>
-                    <td className="num">
-                      <strong>{s.feasible ? s.nodes : nodesNeededText(s)}</strong>
-                      {!s.feasible && s.nodesNeeded !== null && s.nodesNeeded > s.clusterNodeLimit && <div className="small muted">limit {s.clusterNodeLimit}</div>}
-                    </td>
-                    <td className="num">{s.feasible ? s.workloadNodes : '—'}</td>
-                    <td>
-                      <span className={`pill ${s.binding === 'storage' ? 'warn' : 'info'}`}>{s.binding}</span>
-                    </td>
-                    <td className="num">
-                      {s.feasible && (s.capacity || s.sanCapacityTiB !== null) ? fmt1((s.capacity?.usableTiB ?? 0) + (s.sanCapacityTiB ?? 0)) : '—'}
-                    </td>
-                    <td className="num">{fmt1(s.requiredStorageTiB)}</td>
-                    <td className="num">{s.feasible ? s.totalCsvs : '—'}</td>
-                    <td className="num">{s.feasible ? fmt0(s.totalLicensableCores) : '—'}</td>
-                    <td className="num">{s.feasible ? `${fmt1(s.resiliencyOverheadPct)}%` : '—'}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
       <div className="panel">
         <h2>{chosen.label}</h2>
         <div className={`note ${designOk ? 'ok' : 'err'}`}>
@@ -129,7 +58,7 @@ export function ResultsPanel({ design, setChosenKey, tiers, onExport, beforeComp
           {design.explanation}
         </div>
         {management.counted && <div className="note"><strong>Includes {management.countedVms.length} management VMs</strong>They share the workload cluster and are counted in this result: {management.impactLabel.toLowerCase()}.</div>}
-        {design.splitRequested && <div className="note"><strong>{split ? 'The comparison above is one cluster per option' : 'Split selected'}</strong>{split ? 'The selected design below is your split. The table above still compares each storage type in one cluster.' : 'The split cannot place the workload yet. Change the split limits below or choose one cluster.'}</div>}
+        {design.splitRequested && <div className="note"><strong>{split ? 'Split by your choice' : 'Split selected'}</strong>{split ? 'This design is your split. The Options page still compares each storage type in one cluster.' : 'The split cannot place the workload yet. Change the split limits on the Options page or choose one cluster.'}</div>}
         <div className={`note ${r.performanceAssessment.confidence === 'high' ? 'ok' : r.performanceAssessment.measuredVms > 0 ? 'warn' : ''}`}>
           <strong>Sizing evidence: {r.performanceAssessment.basis === 'measured-p95' ? 'measured P95 with allocation fallback' : 'allocation'} · {r.performanceAssessment.confidence.replace('-', ' ')} ({r.performanceAssessment.score}/100)</strong>
           CPU coverage {r.performanceAssessment.cpuCoveragePct.toFixed(0)}% · memory {r.performanceAssessment.memoryCoveragePct.toFixed(0)}% · storage performance {r.performanceAssessment.storagePerformanceCoveragePct.toFixed(0)}%.
@@ -212,7 +141,7 @@ export function ResultsPanel({ design, setChosenKey, tiers, onExport, beforeComp
           <strong>{growth.plan.strategy === 'build-now' ? 'Forecast capacity is included now' : 'Nodes are phased with demand'}</strong>
           {growth.plan.annualGrowthPct > 0
             ? `${(growth.plan.annualGrowthPct * 100).toFixed(1)}% annual growth compounds through Year ${growth.plan.horizonYears}. Immediate headroom is ${growth.plan.immediateHeadroomPct.toFixed(1)}%.`
-            : `No annual growth is currently entered. Immediate headroom is ${growth.plan.immediateHeadroomPct.toFixed(1)}%; set an annual percentage under Hardware and assumptions to create a changing forecast.`}
+            : `No annual growth is currently entered. Immediate headroom is ${growth.plan.immediateHeadroomPct.toFixed(1)}%; set an annual percentage on the Goals page to create a changing forecast.`}
         </div>
         <div className="grid cards">
           <Card k="Nodes required today" v={growth.currentRequiredNodes ?? 'Review'} s={`${growth.plan.baseGrowthFactor.toFixed(2)}× imported demand`} />
@@ -369,7 +298,7 @@ export function ResultsPanel({ design, setChosenKey, tiers, onExport, beforeComp
         <h2>Export</h2>
         <button className="btn" onClick={onExport}>Download workbook (.xlsx)</button>
         <p className="small muted" style={{ marginTop: 8 }}>
-          Seven tabs: architecture comparison, growth plan, CSV plan, validation findings, tier policy, data quality, and the full inventory.
+          Eight tabs: summary, what to buy, growth plan, CSV plan, validation findings, tier policy, the full inventory, and data quality with your data check choices.
         </p>
       </div>
     </div>

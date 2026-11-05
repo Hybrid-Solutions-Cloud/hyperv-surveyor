@@ -51,7 +51,7 @@ const indexedDatabase: KeyValueDatabase = {
 }
 
 /**
- * IndexedDB removes the localStorage size ceiling while keeping customer data on-device.
+ * IndexedDB removes the localStorage size ceiling while keeping your data on-device.
  *
  * When an IndexedDB write fails the value goes to localStorage with a marker, and reads prefer a
  * marked localStorage value because it is newer than whatever IndexedDB still holds. A later

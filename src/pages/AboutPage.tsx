@@ -82,7 +82,7 @@ export default function AboutPage() {
           <article className="panel">
             <h2>Local processing and data responsibility</h2>
             <p>
-              The application is designed to process scenario data locally in your browser without telemetry or customer
+              The application is designed to process scenario data locally in your browser without telemetry or
               inventory uploads. Share links carry the design after the # in the link, which browsers do not send to the web server, but anyone who has the link can read it. You are still responsible for protecting source files, browser data, shared scenario
               links, and exported reports according to your organization’s data-handling requirements.
             </p>

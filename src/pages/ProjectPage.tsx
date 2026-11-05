@@ -88,7 +88,7 @@ export default function ProjectPage() {
           {error && <div className="note err" style={{ marginTop: 12 }}><strong>Project could not be opened</strong>{error}</div>}
           <div className="note" style={{ marginTop: 12 }}>
             <strong>Private by design</strong>
-            Automatic recovery state is kept in this browser using IndexedDB. Download a project before switching devices or clearing browser data; no customer inventory is uploaded.
+            Automatic recovery state is kept in this browser using IndexedDB. Download a project before switching devices or clearing browser data; your inventory is not uploaded.
           </div>
         </section>
 

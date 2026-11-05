@@ -6,6 +6,12 @@
  * no vendor publishes them.
  */
 import type { ArchitectureOption } from './solve'
+import { overLimitAdvice } from './advice'
+
+/** The storage family an option key belongs to. */
+export function familyOfOptionKey(key: string): StorageFamily {
+  return key === 'san' ? 'san' : key === 'hybrid' ? 'hybrid' : 's2d'
+}
 
 export type StorageFamily = 'san' | 's2d' | 'hybrid'
 
@@ -21,9 +27,22 @@ export interface StorageDecisionQuestion {
   no: Effect
   /** Answering no rules these out. Reserved for documented requirements. */
   noExcludes?: StorageFamily[]
+  /** Answering yes rules these out. Reserved for hard constraints the user states. */
+  yesExcludes?: StorageFamily[]
+  /** Shown as a statement the user ticks rather than a question. */
+  statement?: string
 }
 
 export const STORAGE_DECISION_QUESTIONS: StorageDecisionQuestion[] = [
+  {
+    id: 'mustUseArray',
+    question: 'Do you already own, or must you use, an external storage array?',
+    statement: 'I already own or must use a storage array',
+    why: 'When an array must be used, designs without one (S2D only) are ruled out, and SAN or hybrid designs reuse or extend the array. Enter its size under Refine assumptions if you know it.',
+    yes: { san: 3, hybrid: 2 },
+    no: {},
+    yesExcludes: ['s2d'],
+  },
   {
     id: 'datacenter',
     question: 'Will every host run Windows Server Datacenter edition?',
@@ -34,8 +53,8 @@ export const STORAGE_DECISION_QUESTIONS: StorageDecisionQuestion[] = [
   },
   {
     id: 'existingArray',
-    question: 'Do you already own, or plan to standardize on, an external storage array?',
-    why: 'An array you are keeping changes the cost comparison and favors SAN.',
+    question: 'Do you plan to standardize on an external storage array, even if you do not have to?',
+    why: 'A preferred array changes the cost comparison and favors SAN.',
     yes: { san: 2, hybrid: 1 },
     no: { s2d: 1 },
   },
@@ -121,6 +140,7 @@ export function assessStorageDecision(answers: StorageDecisionAnswers, options: 
     const effect = answer ? question.yes : question.no
     for (const family of FAMILIES) scores[family] += effect[family] ?? 0
     if (answer === false) question.noExcludes?.forEach((family) => excluded.add(family))
+    if (answer === true) question.yesExcludes?.forEach((family) => excluded.add(family))
   }
 
   const eligible = FAMILIES.filter((family) => !excluded.has(family))
@@ -139,11 +159,13 @@ export function assessStorageDecision(answers: StorageDecisionAnswers, options: 
   const s2d = options.find((option) => option.key === 's2d-3wm')?.result
   if (san && s2d && san.nodesNeeded !== null && s2d.nodesNeeded !== null) {
     evidence.push(`For this workload, SAN needs ${san.nodesNeeded} node${san.nodesNeeded === 1 ? '' : 's'} and S2D three-way mirror needs ${s2d.nodesNeeded}.`)
+    const s2dCfg = options.find((option) => option.key === 's2d-3wm')!.cfg
+    const sanCfg = options.find((option) => option.key === 'san')!.cfg
     if (s2d.nodesNeeded > s2d.clusterNodeLimit) {
-      evidence.push(`One S2D cluster can have ${s2d.clusterNodeLimit} nodes, so S2D at this size needs larger servers or a split you choose.`)
+      evidence.push(`One S2D cluster can have ${s2d.clusterNodeLimit} nodes. ${overLimitAdvice(s2d, s2dCfg)}`)
     }
     if (san.nodesNeeded > san.clusterNodeLimit) {
-      evidence.push(`One SAN cluster can have ${san.clusterNodeLimit} nodes, so SAN at this size also needs larger servers or a split you choose.`)
+      evidence.push(`One SAN cluster can have ${san.clusterNodeLimit} nodes. ${overLimitAdvice(san, sanCfg)}`)
     }
   }
   if (san?.sanSizing) {

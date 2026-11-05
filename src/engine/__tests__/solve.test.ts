@@ -141,7 +141,8 @@ describe('the central claim: SAN and S2D give different node counts for identica
 
   it('compareArchitectures returns one result per architecture', () => {
     const opts = compareArchitectures(makeConfig(), vms, tiers)
-    expect(opts).toHaveLength(5)
+    // C16: two-way mirror and both nested options are compared too.
+    expect(opts).toHaveLength(8)
     expect(opts.map(o => o.key)).toContain('hybrid')
     for (const o of opts) expect(o.result.nodes).toBeGreaterThan(0)
   })

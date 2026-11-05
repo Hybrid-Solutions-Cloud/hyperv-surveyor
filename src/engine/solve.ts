@@ -24,14 +24,16 @@ import { planCsvs, totalCsvCount } from './csv'
 import { growthFactorForYear, resolveGrowthPlan, type GrowthPlan } from './growth'
 import { hasErrors, validateDesign, VM_LARGER_THAN_HOST } from './validate'
 import { assessPerformanceData } from './performance'
+import { cached, refId, solveCacheActive, withSolveCache } from './solveCache'
 import type {
   BindingConstraint, ClusterConfig, ComputeDemand, Finding, ReverseResult, ReverseStatus, SanSizing,
   SizingResult, TierId, TierPolicy, Vm,
 } from './types'
 
 function maxNodesFor(cfg: ClusterConfig): number {
-  if (cfg.architecture === 'san') return LIMITS.CLUSTER_MAX_NODES
-  return Math.min(LIMITS.S2D_MAX_NODES, RESILIENCY[cfg.resiliency].maxNodes)
+  const ceiling = cfg.nodeCeiling && cfg.nodeCeiling > 0 ? cfg.nodeCeiling : Infinity
+  if (cfg.architecture === 'san') return Math.min(LIMITS.CLUSTER_MAX_NODES, ceiling)
+  return Math.min(LIMITS.S2D_MAX_NODES, RESILIENCY[cfg.resiliency].maxNodes, ceiling)
 }
 
 function minNodesFor(cfg: ClusterConfig): number {
@@ -50,6 +52,19 @@ function storagePerformanceDemand(
   tiers: Record<TierId, TierPolicy>,
   growthFactor: number,
   fixedVms: Vm[] = [],
+) {
+  return cached(
+    () => `spd|${refId(vms)}|${refId(fixedVms)}|${refId(tiers)}|${growthFactor}|${cfg.architecture}|${cfg.hybridS2dShare}`,
+    () => storagePerformanceDemandUncached(cfg, vms, tiers, growthFactor, fixedVms),
+  )
+}
+
+function storagePerformanceDemandUncached(
+  cfg: ClusterConfig,
+  vms: Vm[],
+  tiers: Record<TierId, TierPolicy>,
+  growthFactor: number,
+  fixedVms: Vm[],
 ) {
   let requiredS2dIops = 0
   let requiredS2dThroughputMBps = 0
@@ -144,9 +159,17 @@ function combinedDemand(
   tiers: Record<TierId, TierPolicy>,
   growthFactor: number,
 ): ComputeDemand {
-  const grown = computeDemand(vms, tiers, growthFactor, cfg)
-  return fixedVms.length > 0 ? mergeDemand(grown, computeDemand(fixedVms, tiers, 1, cfg)) : grown
+  return cached(
+    () => `demand|${refId(vms)}|${refId(fixedVms)}|${refId(tiers)}|${growthFactor}|${cfg.sizingBasis}|${cfg.performanceComfortFactor}|${cfg.cpuPerformanceFactor}`,
+    () => {
+      const grown = computeDemand(vms, tiers, growthFactor, cfg)
+      return fixedVms.length > 0 ? mergeDemand(grown, computeDemand(fixedVms, tiers, 1, cfg)) : grown
+    },
+  )
 }
+
+/** Key for the workload and fixed VM lists together, for per-VM checks in the cache scope. */
+const vmSetKey = (vms: Vm[], fixedVms: Vm[]) => `${refId(vms)}+${refId(fixedVms)}`
 
 const plannedVmTotal = (demand: ComputeDemand) => TIER_IDS.reduce((sum, id) => sum + demand.byTier[id].plannedVms, 0)
 
@@ -334,7 +357,7 @@ function solveForwardAtGrowthFactor(
     const computeNote = !sanOk && computeNodesNeeded !== null
       ? ` Compute alone needs ${computeNodesNeeded} nodes; adding hosts does not change the array.`
       : ''
-    bindingExplanation = `Not feasible${nodeLimited ? ' in a single cluster' : ''}: ${reasons.join('; ')}.${nodeLimited ? ` Ceiling is ${max} nodes${usesS2d ? ' because S2D is enabled' : ''}.` : ''} To resolve this: ${[...new Set(options)].join('; ')}.${computeNote}`
+    bindingExplanation = `Not feasible${nodeLimited ? ' in a single cluster' : ''}: ${reasons.join('; ')}.${nodeLimited ? ` Ceiling is ${max} nodes${usesS2d ? max < LIMITS.S2D_MAX_NODES ? ' for this resiliency' : ' because S2D is enabled' : ''}.` : ''} To resolve this: ${[...new Set(options)].join('; ')}.${computeNote}`
   } else {
     switch (binding) {
       case 'cpu':
@@ -357,7 +380,8 @@ function solveForwardAtGrowthFactor(
   }
 
   const csvPlans = planCsvs(cfg, demand, tiers, finalNodes)
-  const findings = validateDesign(cfg, finalNodes, allVms, tiers, csvPlans, plannedVms)
+  const vmKey = solveCacheActive() ? vmSetKey(vms, fixedVms) : undefined
+  const findings = validateDesign(cfg, finalNodes, allVms, tiers, csvPlans, plannedVms, vmKey)
   const storagePerformance = {
     ...storagePerformanceDemandValue,
     ...performanceCapability,
@@ -411,7 +435,7 @@ function solveForwardAtGrowthFactor(
     resiliencyOverheadPct: finalNodes > 0 ? (spare / finalNodes) * 100 : 0,
     licensableCoresPerNode: licensableCores(cfg.node),
     totalLicensableCores: licensableCores(cfg.node) * finalNodes,
-    performanceAssessment: assessPerformanceData(allVms, cfg),
+    performanceAssessment: cached(() => `perf|${vmKey}|${cfg.sizingBasis}`, () => assessPerformanceData(allVms, cfg)),
     storagePerformance,
   }
 }
@@ -592,7 +616,7 @@ export function solveReverse(
     bindingExplanation = `${resourceLabel} binds first at ${pct(worst)} consumed. ${usageSummary} ${worst >= 1 ? 'No headroom remains.' : `Headroom before the first constraint is exhausted: ${pct(1 - worst)}.`}`
   }
 
-  // "How many more VMs of profile X fit" — the question an SE is actually asked mid-call.
+  // "How many more VMs of profile X fit" — the question you are most often asked about existing hardware.
   const additionalVmsByTier = {} as Record<TierId, number>
   // Room for more VMs stops at the free-space target: going past it is allowed, but not planned for.
   const domainHeadroom = (domain: 's2d' | 'san') => storageDomains.find((item) => item.domain === domain)?.headroomToTargetTiB ?? 0
@@ -724,13 +748,26 @@ export function compareReferenceServers(
   }))
 }
 
+/**
+ * Every storage option compared. Two-way mirror and the nested options are two-node designs: Microsoft
+ * recommends three-way mirror above two servers, and nested resiliency needs exactly two servers.
+ */
 export const ARCHITECTURE_VARIANTS: ReadonlyArray<{ key: string; label: string; patch: Partial<ClusterConfig> }> = [
   { key: 'san', label: 'SAN', patch: { architecture: 'san' } },
   { key: 's2d-3wm', label: 'S2D — three-way mirror', patch: { architecture: 's2d', resiliency: 'three-way-mirror' } },
   { key: 's2d-map', label: 'S2D — mirror-accelerated parity', patch: { architecture: 's2d', resiliency: 'mirror-accelerated-parity' } },
   { key: 's2d-dp', label: 'S2D — dual parity', patch: { architecture: 's2d', resiliency: 'dual-parity' } },
+  { key: 's2d-2wm', label: 'S2D — two-way mirror (2 nodes)', patch: { architecture: 's2d', resiliency: 'two-way-mirror', nodeCeiling: 2 } },
+  { key: 's2d-nested-2wm', label: 'S2D — nested two-way mirror (2 nodes)', patch: { architecture: 's2d', resiliency: 'nested-two-way-mirror' } },
+  { key: 's2d-nested-map', label: 'S2D — nested mirror-accelerated parity (2 nodes)', patch: { architecture: 's2d', resiliency: 'nested-map' } },
   { key: 'hybrid', label: 'Hybrid — S2D + SAN', patch: { architecture: 'hybrid', resiliency: 'three-way-mirror' } },
 ]
+
+/** Options that are two-node designs only. Above two nodes they are not offered. */
+export const TWO_NODE_ONLY_KEYS: ReadonlySet<string> = new Set(['s2d-2wm', 's2d-nested-2wm', 's2d-nested-map'])
+
+/** Microsoft recommends three-way mirror instead of two-way mirror with more than two servers. [MS-REC] */
+export const TWO_WAY_MIRROR_REASON = 'Two-way mirror is offered for two nodes only: with more than two servers Microsoft recommends three-way mirror.'
 
 export function compareArchitectures(
   base: ClusterConfig,
@@ -738,21 +775,39 @@ export function compareArchitectures(
   tiers: Record<TierId, TierPolicy>,
   fixedVms: Vm[] = [],
 ): ArchitectureOption[] {
-  return ARCHITECTURE_VARIANTS.map(v => {
-    const variant = { ...base, ...v.patch } as ClusterConfig
-    // A disk witness chosen for a SAN design must not rule S2D out of the comparison. Say so plainly.
-    const swapWitness = variant.architecture !== 'san' && variant.witnessType === 'disk'
-    const cfg: ClusterConfig = swapWitness ? { ...variant, witnessType: 'cloud' } : variant
-    const result = solveForward(cfg, vms, tiers, fixedVms)
-    if (swapWitness) {
-      result.findings.push({
-        severity: 'info',
-        code: 'DISK_WITNESS_COMPARISON',
-        message: 'The disk witness selected for SAN is not supported with Storage Spaces Direct, so this option is sized with a cloud witness.',
-        basis: 'MS',
-        source: SRC.quorum,
-      })
-    }
-    return { key: v.key, label: v.label, cfg, result }
-  })
+  return withSolveCache(() => compareArchitecturesUncached(base, vms, tiers, fixedVms))
+}
+
+/** A storage option applied to a base configuration, sized the same way everywhere it is compared. */
+export function sizeVariant(
+  base: ClusterConfig,
+  variant: { key: string; label: string; patch: Partial<ClusterConfig> },
+  vms: Vm[],
+  tiers: Record<TierId, TierPolicy>,
+  fixedVms: Vm[] = [],
+): ArchitectureOption {
+  const merged = { ...base, ...variant.patch } as ClusterConfig
+  // A disk witness chosen for a SAN design must not rule S2D out of the comparison. Say so plainly.
+  const swapWitness = merged.architecture !== 'san' && merged.witnessType === 'disk'
+  const cfg: ClusterConfig = swapWitness ? { ...merged, witnessType: 'cloud' } : merged
+  const result = solveForward(cfg, vms, tiers, fixedVms)
+  if (swapWitness) {
+    result.findings.push({
+      severity: 'info',
+      code: 'DISK_WITNESS_COMPARISON',
+      message: 'The disk witness selected for SAN is not supported with Storage Spaces Direct, so this option is sized with a cloud witness.',
+      basis: 'MS',
+      source: SRC.quorum,
+    })
+  }
+  return { key: variant.key, label: variant.label, cfg, result }
+}
+
+function compareArchitecturesUncached(
+  base: ClusterConfig,
+  vms: Vm[],
+  tiers: Record<TierId, TierPolicy>,
+  fixedVms: Vm[],
+): ArchitectureOption[] {
+  return ARCHITECTURE_VARIANTS.map((variant) => sizeVariant(base, variant, vms, tiers, fixedVms))
 }

@@ -95,6 +95,20 @@ export interface Vm {
   /** True when a large VM stayed in General and a person should confirm its tier. */
   sizeReview?: boolean
   notes?: string
+  /** The user's choice for a storage outlier on the Data check page. Only set by a click. */
+  outlierDecision?: OutlierDecision
+}
+
+/**
+ * keep     count the consumed storage as imported.
+ * cap      count capGiB instead; originalStorageGiB is restored if the choice is undone.
+ * exclude  leave the VM out of sizing; originalInclude is restored if the choice is undone.
+ */
+export interface OutlierDecision {
+  choice: 'keep' | 'cap' | 'exclude'
+  originalStorageGiB: number
+  originalInclude: boolean
+  capGiB?: number
 }
 
 /** Per-tier policy. Every numeric default here is a [TOOL] assumption — see rules.ts. */
@@ -160,6 +174,11 @@ export interface ClusterConfig {
    */
   sanFreeSpaceTargetPct?: number
   spareNodes: number
+  /**
+   * A planning ceiling below the platform limit, set only by storage options that are two-node
+   * designs (two-way mirror in a new design). Absent everywhere else.
+   */
+  nodeCeiling?: number
   resiliency: Resiliency
   /** Fraction of a nested-MAP volume that is mirror. Only used for nested-map. */
   nestedMapMirrorPct: 0.1 | 0.2 | 0.3

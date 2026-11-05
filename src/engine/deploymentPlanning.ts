@@ -1,5 +1,6 @@
-import { LIMITS } from './rules'
+import { LIMITS, RESILIENCY } from './rules'
 import { solveForward } from './solve'
+import { overLimitAdvice } from './advice'
 import type { ClusterConfig, SizingResult, TierId, TierPolicy, Vm } from './types'
 
 /** One cluster is the default. Surveyor splits a design only when the user selects split. */
@@ -63,7 +64,10 @@ export function normalizePlacementInputs(value: unknown): PlacementInputs {
 
 /** Most nodes one cluster may have for this storage type. */
 export function clusterNodeLimitFor(cfg: ClusterConfig): number {
-  return cfg.architecture === 'san' ? LIMITS.CLUSTER_MAX_NODES : LIMITS.S2D_MAX_NODES
+  const ceiling = cfg.nodeCeiling && cfg.nodeCeiling > 0 ? cfg.nodeCeiling : Infinity
+  return cfg.architecture === 'san'
+    ? Math.min(LIMITS.CLUSTER_MAX_NODES, ceiling)
+    : Math.min(LIMITS.S2D_MAX_NODES, RESILIENCY[cfg.resiliency].maxNodes, ceiling)
 }
 
 /** The node count the rest of the plan should use for the selected layout. */
@@ -148,7 +152,7 @@ function planSingleCluster(
   const warnings: string[] = []
   if (!result.feasible) {
     warnings.push(result.nodesNeeded !== null && result.nodesNeeded > result.clusterNodeLimit
-      ? `One cluster needs ${result.nodesNeeded} nodes, above the ${result.clusterNodeLimit}-node limit. Nothing has been split: use a larger server, another storage type, or choose Split into multiple clusters.`
+      ? `One cluster needs ${result.nodesNeeded} nodes, above the ${result.clusterNodeLimit}-node limit. Nothing has been split. ${overLimitAdvice(result, cfg)}`
       : result.bindingExplanation)
   }
   if (result.performanceAssessment.confidence !== 'high') warnings.push('At least one target cluster has less than high measured-data confidence; retain allocation fallback until coverage improves.')

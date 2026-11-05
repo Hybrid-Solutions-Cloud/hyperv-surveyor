@@ -4,6 +4,10 @@ import HomePage from './pages/HomePage'
 import WorkloadsPage from './pages/WorkloadsPage'
 import ConfigurationPage from './pages/ConfigurationPage'
 import ResultsPage from './pages/ResultsPage'
+import DataCheckPage from './pages/DataCheckPage'
+import GoalsPage from './pages/GoalsPage'
+import ShortlistPage from './pages/ShortlistPage'
+import WhatToBuyPage from './pages/WhatToBuyPage'
 import CapacityPage from './pages/CapacityPage'
 import ManagementPlanePage from './pages/ManagementPlanePage'
 import MethodPage from './pages/MethodPage'
@@ -20,7 +24,11 @@ export default function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/workloads" element={<WorkloadsPage />} />
         <Route path="/configuration" element={<ConfigurationPage />} />
+        <Route path="/data-check" element={<DataCheckPage />} />
+        <Route path="/goals" element={<GoalsPage />} />
         <Route path="/results" element={<ResultsPage />} />
+        <Route path="/shortlist" element={<ShortlistPage />} />
+        <Route path="/what-to-buy" element={<WhatToBuyPage />} />
         <Route path="/capacity" element={<CapacityPage />} />
         <Route path="/management-plane" element={<ManagementPlanePage />} />
         <Route path="/deployment" element={<DeploymentPage />} />

@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { resolvePlatformDesign, type PlatformDesign, type PlatformDesignInputs } from '../engine/platformDesign'
+import { buildOptionsMatrix, type OptionsMatrix } from '../engine/optionsMatrix'
 import type { ManagementDeploymentInputs } from '../engine/managementDeployment'
 import { useSurveyorStore, type SurveyorState } from './store'
 import type { EngagementMode } from './journey'
@@ -59,4 +60,25 @@ export function usePlatformDesign(options: { management?: ManagementDeploymentIn
     includeManagementInSizing,
     managementAdvisorAnswers,
   })), [engagementMode, cfg, tiers, vms, chosenKey, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, placementInputs, managementDecision, managementDeploymentInputs, includeManagementInSizing, managementAdvisorAnswers, overridden])
+}
+
+/**
+ * The options matrix for the new-platform design, built lazily and memoized: it only runs on the
+ * pages that call this hook, and only again when an input changes. It uses the same management VMs
+ * the resolved design counts.
+ */
+export function useOptionsMatrix(design: PlatformDesign): OptionsMatrix | null {
+  const cfg = useSurveyorStore((state) => state.cfg)
+  const tiers = useSurveyorStore((state) => state.tiers)
+  const vms = useSurveyorStore((state) => state.vms)
+  const answers = useSurveyorStore((state) => state.storageDecisionAnswers)
+  const counted = design.management.countedVms
+  // The design rebuilds its management VM list on every change; key on its content, not its identity.
+  const countedKey = JSON.stringify(counted.map((vm) => [vm.name, vm.tier, vm.vCpu, vm.ramGiB, vm.storageGiB]))
+  const enabled = design.path === 'new-platform'
+  return useMemo(
+    () => enabled ? buildOptionsMatrix({ cfg, vms, tiers, fixedVms: counted, answers }) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [enabled, cfg, vms, tiers, answers, countedKey],
+  )
 }

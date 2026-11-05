@@ -31,3 +31,35 @@ export function journeyResumeRoute(mode: EngagementMode, workloadCount: number):
   if (mode === 'fit-gap') return workloadCount > 0 ? '/capacity' : '/workloads'
   return '/management-plane'
 }
+
+/**
+ * The new-platform walkthrough, in order. You do not need to know your hardware: the questions that
+ * assume known hardware come last, under Refine assumptions.
+ */
+export const NEW_PLATFORM_STEPS = [
+  { to: '/workloads', label: 'Workloads', title: 'Workload inventory' },
+  { to: '/data-check', label: 'Data check', title: 'Check the data before sizing' },
+  { to: '/goals', label: 'Goals', title: 'Planning goals' },
+  { to: '/results', label: 'Options', title: 'Every option your workload allows' },
+  { to: '/shortlist', label: 'Shortlist', title: 'Recommended starting points' },
+  { to: '/what-to-buy', label: 'What to buy', title: 'What to buy' },
+  { to: '/configuration', label: 'Refine assumptions', title: 'Refine assumptions' },
+] as const
+
+export type NewPlatformRoute = typeof NEW_PLATFORM_STEPS[number]['to']
+
+/** Step position, previous and next for a new-platform page. After the last step comes Management. */
+export function newPlatformStep(route: NewPlatformRoute) {
+  const index = NEW_PLATFORM_STEPS.findIndex((step) => step.to === route)
+  const step = NEW_PLATFORM_STEPS[index]
+  const previous = index > 0 ? NEW_PLATFORM_STEPS[index - 1] : { to: '/', label: 'Choose planning path', title: '' }
+  const next = index < NEW_PLATFORM_STEPS.length - 1 ? NEW_PLATFORM_STEPS[index + 1] : { to: '/management-plane', label: 'Management Plane Advisor', title: '' }
+  return {
+    number: index + 1,
+    total: NEW_PLATFORM_STEPS.length,
+    step,
+    previous,
+    next,
+    eyebrow: `New platform · Step ${index + 1} of ${NEW_PLATFORM_STEPS.length} · ${step.label}`,
+  }
+}

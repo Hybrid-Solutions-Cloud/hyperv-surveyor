@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { clusterNodeLimitFor, planMultipleClusters, type PlacementInputs } from '../engine/deploymentPlanning'
 import type { ArchitectureOption } from '../engine/solve'
+import { overLimitAdvice } from '../engine/advice'
 import type { TierId, TierPolicy, Vm } from '../engine/types'
 import { Field, NumberInput, fmt0 } from './Shared'
 
@@ -31,7 +32,7 @@ export function ClusterLayoutPanel({ option, vms, tiers, inputs, setInputs, mana
 
   return (
     <div className="panel">
-      <h2>Cluster layout: {option.label}</h2>
+      <h2>Cluster layout for the option in use: {option.label}</h2>
       <p className="small muted" style={{ marginTop: -6 }}>
         One {option.cfg.architecture === 'san' ? 'SAN' : 'S2D or hybrid'} cluster can have up to <strong>{limit} nodes</strong>.
         Surveyor keeps one cluster unless you choose to split.
@@ -39,7 +40,7 @@ export function ClusterLayoutPanel({ option, vms, tiers, inputs, setInputs, mana
       {overLimit && inputs.clusterLayout === 'single' && (
         <div className="note warn">
           <strong>One cluster needs {needed} nodes, above the {limit}-node limit</strong>
-          Nothing has been split. Your options are a larger reference server, another storage type, or Split into multiple clusters below.
+          Nothing has been split. {overLimitAdvice(result, option.cfg)}
         </div>
       )}
       <div className="row">

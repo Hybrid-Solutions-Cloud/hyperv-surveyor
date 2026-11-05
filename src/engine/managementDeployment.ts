@@ -142,9 +142,11 @@ const SRC = {
 /**
  * Operations Manager 2025 capacity limits, from the "Capacity limits for Operations Manager" table at
  * https://learn.microsoft.com/system-center/scom/system-requirements?view=sc-om-2025 (checked 2026-11-05).
- * Microsoft labels the table "Recommended Limit". Surveyor treats the largest management-group figure and
- * the per-management-server figure as limits a plan must not exceed, and the 50-console figure as a warning.
+ * Microsoft labels every figure in the table "Recommended Limit", so Surveyor warns above each one, tagged
+ * MS-REC, and never blocks the plan on them.
  */
+export const SCOM_LIMITS_SOURCE = 'https://learn.microsoft.com/system-center/scom/system-requirements?view=sc-om-2025'
+
 export const SCOM_LIMITS = {
   agentsPerManagementServer: 3_000,
   agentsPerManagementGroupWith50Consoles: 6_000,
@@ -546,9 +548,9 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
     const monitoredComputers = scomFeaturesOnly ? hosts + vmmServers : hosts + vms
     scomAgentManagedComputers = monitoredComputers
     if (monitoredComputers > SCOM_LIMITS.agentsPerManagementGroupWith25Consoles) {
-      errors.push(`SCOM: ${monitoredComputers.toLocaleString()} agent-managed computers exceed the ${SCOM_LIMITS.agentsPerManagementGroupWith25Consoles.toLocaleString()} Microsoft publishes for one management group (with 25 open consoles). Split the estate across management groups.`)
+      cautions.push(`[MS-REC] SCOM: ${monitoredComputers.toLocaleString()} agent-managed computers are above the ${SCOM_LIMITS.agentsPerManagementGroupWith25Consoles.toLocaleString()} Microsoft lists as the Recommended Limit for one management group (with 25 open consoles). Plan to split the estate across management groups. Source: ${SCOM_LIMITS_SOURCE}`)
     } else if (monitoredComputers > SCOM_LIMITS.agentsPerManagementGroupWith50Consoles) {
-      cautions.push(`SCOM: ${monitoredComputers.toLocaleString()} agent-managed computers are above the ${SCOM_LIMITS.agentsPerManagementGroupWith50Consoles.toLocaleString()} Microsoft publishes for one management group with 50 open consoles. Up to ${SCOM_LIMITS.agentsPerManagementGroupWith25Consoles.toLocaleString()} is published with no more than 25 open consoles.`)
+      cautions.push(`[MS-REC] SCOM: ${monitoredComputers.toLocaleString()} agent-managed computers are above the ${SCOM_LIMITS.agentsPerManagementGroupWith50Consoles.toLocaleString()} Microsoft lists as the Recommended Limit for one management group with 50 open consoles. Up to ${SCOM_LIMITS.agentsPerManagementGroupWith25Consoles.toLocaleString()} is listed with no more than 25 open consoles. Source: ${SCOM_LIMITS_SOURCE}`)
     }
     const publishedManagementServers = Math.max(1, Math.ceil(monitoredComputers / 3_000))
     const managementSize = scaledSize(scale, {
@@ -590,7 +592,7 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
         ],
       }))
       if (monitoredComputers > SCOM_LIMITS.agentsPerManagementServer) {
-        errors.push(`SCOM single server: ${monitoredComputers.toLocaleString()} agent-managed computers exceed the ${SCOM_LIMITS.agentsPerManagementServer.toLocaleString()} Microsoft publishes for one management server. Turn on SCOM high availability to plan more management servers.`)
+        cautions.push(`[MS-REC] SCOM single server: ${monitoredComputers.toLocaleString()} agent-managed computers are above the ${SCOM_LIMITS.agentsPerManagementServer.toLocaleString()} Microsoft lists as the Recommended Limit for one management server. Turn on SCOM high availability to plan more management servers. Source: ${SCOM_LIMITS_SOURCE}`)
       }
       if (scale !== 'small') {
         cautions.push(`The SCOM single-server topology is planned for a ${scale === 'beyond-tested-scale' ? 'very large' : scale} estate (${monitoredComputers.toLocaleString()} agent-managed computers). Microsoft positions it for evaluation and only the smallest production loads, so use the distributed topology with SCOM high availability.`)

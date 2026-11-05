@@ -115,8 +115,8 @@ export default function ManagementPlanePage() {
       )}
       <WorkflowNav
         previous={{
-          to: managementOnly ? '/' : usesExistingHardware ? '/capacity' : '/results',
-          label: managementOnly ? 'Choose planning path' : usesExistingHardware ? 'Existing-hardware outcome' : 'New-platform results',
+          to: managementOnly ? '/' : usesExistingHardware ? '/capacity' : '/configuration',
+          label: managementOnly ? 'Choose planning path' : usesExistingHardware ? 'Existing-hardware outcome' : 'Refine assumptions',
         }}
         next={[
           {
@@ -867,7 +867,7 @@ function FieldGuidePanel() {
 
       {section === 'objections' && (
         <section className="panel">
-          <h2>Objection handling for VMware-native customers</h2>
+          <h2>Common VMware objections</h2>
           <div className="objection-list">
             {MANAGEMENT_WORKBOOK.objections.map((item) => (
               <details className="library-details" key={item.objection}>
@@ -959,7 +959,7 @@ function SourcesPanel() {
 
       {section === 'sources' && (
         <section className="panel">
-          <h2>Caveats before customer use</h2>
+          <h2>Caveats before you rely on this</h2>
           <div className="callout-list caveat-grid">
             {MANAGEMENT_WORKBOOK.caveats.map((item) => <article className="note warn" key={item.topic}><strong>{item.topic}</strong>{item.detail}</article>)}
           </div>

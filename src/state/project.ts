@@ -130,7 +130,27 @@ function normalizeVm(value: unknown, index: number): Vm | null {
     provisionedGiB: Math.max(0, number(value.provisionedGiB, number(value.storageGiB))),
     powerState: ['poweredOn', 'poweredOff', 'suspended'].includes(String(value.powerState)) ? value.powerState as Vm['powerState'] : 'poweredOn',
     include: typeof value.include === 'boolean' ? value.include : true,
+    outlierDecision: normalizeOutlierDecision(value.outlierDecision),
   }
+}
+
+/** A storage-outlier choice from the Data check page. Anything malformed is dropped, never guessed. */
+export function normalizeOutlierDecision(value: unknown): Vm['outlierDecision'] {
+  if (!record(value)) return undefined
+  const choice = value.choice
+  if (choice !== 'keep' && choice !== 'cap' && choice !== 'exclude') return undefined
+  const originalStorageGiB = typeof value.originalStorageGiB === 'number' && Number.isFinite(value.originalStorageGiB) ? Math.max(0, value.originalStorageGiB) : null
+  if (originalStorageGiB === null) return undefined
+  const decision: NonNullable<Vm['outlierDecision']> = {
+    choice,
+    originalStorageGiB,
+    originalInclude: typeof value.originalInclude === 'boolean' ? value.originalInclude : true,
+  }
+  if (choice === 'cap') {
+    if (!(typeof value.capGiB === 'number' && Number.isFinite(value.capGiB))) return undefined
+    decision.capGiB = Math.max(0, value.capGiB)
+  }
+  return decision
 }
 
 export function normalizeStorageDecisionAnswers(value: unknown): StorageDecisionAnswers {

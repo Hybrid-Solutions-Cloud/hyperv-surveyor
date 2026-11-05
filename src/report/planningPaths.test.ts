@@ -58,7 +58,7 @@ describe('design a new platform', () => {
   })
 
   it.each([
-    ['all designs by default', undefined, 5],
+    ['all designs by default (C16: two-way and nested options included)', undefined, 8],
     ['SAN and S2D', ['san', 's2d-3wm'], 2],
     ['the selected design only', [], 1],
     ['hybrid with the selected SAN design', ['hybrid'], 2],

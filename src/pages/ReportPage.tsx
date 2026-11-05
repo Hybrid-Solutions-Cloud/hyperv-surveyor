@@ -100,7 +100,7 @@ export default function ReportPage() {
       <PageHeader
         eyebrow="Final deliverable"
         title="Solution report"
-        description="Build a complete customer-ready record of the selected architecture, workloads, node requirements, storage plan, and management-plane deployment."
+        description="Build a complete record of the selected architecture, workloads, node requirements, storage plan, and management-plane deployment."
       />
       <JourneyBar detail="The report records the selected planning path, supplied evidence, platform outcome, and management decision." />
 
@@ -187,7 +187,7 @@ export default function ReportPage() {
             </div>
           </details>
           {exportError && <div className="note warn">{exportError}</div>}
-          <p className="small muted report-local-note">Exports are generated locally in this browser. Customer inventory is not uploaded.</p>
+          <p className="small muted report-local-note">Exports are generated locally in this browser. Your inventory is not uploaded.</p>
         </aside>
 
         <div className="report-preview" aria-label="Solution report preview">

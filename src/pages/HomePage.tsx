@@ -87,7 +87,7 @@ export default function HomePage() {
       <section className="hero journey-hero">
         <div className="hero-copy">
           <div className="hero-badge"><ShieldCheck size={15} /> Local-first infrastructure planning</div>
-          <h1>Start with the question the customer is actually asking.</h1>
+          <h1>Start with the question you need answered.</h1>
           <p>
             Design new Hyper-V infrastructure, assess hardware already owned, test a workload against an existing estate,
             or go directly to the management-plane decision. Surveyor exposes the depth only when it is needed.
@@ -103,7 +103,7 @@ export default function HomePage() {
         <div className="scenario-card">
           <div className="scenario-title">Current engagement</div>
           <label className="field">
-            <span>Customer or scenario name</span>
+            <span>Project or organization name</span>
             <input
               value={store.customerName}
               onChange={(event) => store.setCustomerName(event.target.value)}
@@ -117,7 +117,7 @@ export default function HomePage() {
           </div>
           <div className="privacy-callout">
             <FileSearch size={18} />
-            <div><strong>Customer data stays here.</strong><span>Imports and saved work remain on this device unless you export them.</span></div>
+            <div><strong>Your data stays here.</strong><span>Imports and saved work remain on this device unless you export them.</span></div>
           </div>
         </div>
       </section>

@@ -23,6 +23,8 @@ import { resolveManagementInputs, type ManagementAdvisorSummary, type Management
 import type { AdvisorAnswers } from '../data/managementPlane'
 import { sanCapacityTiB, sanFreeSpaceTarget } from './capacity'
 import { licensableCores } from './compute'
+import { overLimitAdvice } from './advice'
+import { buildBillOfMaterials, type BillOfMaterials } from './billOfMaterials'
 import type { ClusterConfig, CsvPlan, Finding, SizingResult, TierId, TierPolicy, Vm } from './types'
 
 export type DesignEngagementMode = 'new-platform' | 'existing-capacity' | 'fit-gap' | 'management-only'
@@ -191,6 +193,8 @@ export interface PlatformDesign {
   network: { nodes: number | null; reason: string | null }
   findings: Finding[]
   errors: string[]
+  /** Class-level bill of materials for a new-platform design that fits; otherwise unavailable with a reason. */
+  bom: BillOfMaterials
 }
 
 const fmt = (value: number, digits = 1) => value.toLocaleString('en-US', { maximumFractionDigits: digits })
@@ -497,7 +501,7 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
         ? `One cluster needs ${r.nodesNeeded} nodes; the limit is ${r.clusterNodeLimit}`
         : r.nodesNeeded === null ? 'No node count works with these inputs' : 'This design is blocked'
       explanation = status === 'over-limit'
-        ? `${r.bindingExplanation} Nothing has been split: use a larger server, another storage type, or choose Split into multiple clusters.`
+        ? `${r.bindingExplanation} Nothing has been split. ${overLimitAdvice(r, chosen.cfg)}`
         : r.bindingExplanation
       licensableCoresDetail = 'Not calculated: the design does not fit'
     }
@@ -701,7 +705,7 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
     ...(status === 'does-not-fit' && findings.every((finding) => finding.severity !== 'error') ? [headline] : []),
   ]
 
-  return {
+  const design: Omit<PlatformDesign, 'bom'> = {
     path,
     engagementMode,
     platformLabel,
@@ -752,6 +756,7 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
     findings,
     errors: [...new Set(errors)],
   }
+  return { ...design, bom: buildBillOfMaterials(design as PlatformDesign) }
 }
 
 /** One-word outcome for tables that compare designs. */

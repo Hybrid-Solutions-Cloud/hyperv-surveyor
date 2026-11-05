@@ -1,5 +1,5 @@
 /**
- * Scenario -> URL. An SE builds a design on a call, sends the link, and the customer opens the
+ * Scenario -> URL. You build a design, send the link, and the person you send it to opens the
  * same design.
  *
  * The link carries the whole design: path, hardware, tiers, existing capacity, management,
@@ -7,7 +7,7 @@
  * thing it can leave out is a large VM inventory, which is replaced by a count.
  *
  * Everything travels in the URL fragment, after #, as #/route?s=<payload>. Browsers never send
- * the fragment to the web server, so customer and VM data do not leave the browser. The app uses
+ * the fragment to the web server, so your design and VM data do not leave the browser. The app uses
  * HashRouter, so the fragment is also the route; the payload sits in the route's query, which the
  * router ignores. It is read once at start-up and then removed from the address bar.
  *

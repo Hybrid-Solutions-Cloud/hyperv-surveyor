@@ -139,22 +139,25 @@ describe('D2 SCOM daily data follows the managed estate', () => {
 })
 
 describe('D3 SCOM limits from Microsoft', () => {
-  it('blocks one management group above 15,000 agent-managed computers', () => {
+  it('warns (MS-REC, not blocking) above the 15,000 Recommended Limit for one management group', () => {
     const plan = planManagementDeployment(base({ monitoring: 'scom', scomHighAvailability: true, managedHosts: 900, managedVms: 20_000 }))
     expect(plan.scomAgentManagedComputers).toBe(20_900)
-    expect(plan.errors.join(' ')).toMatch(/exceed the 15,000/)
+    expect(plan.errors).toEqual([])
+    expect(plan.cautions.join(' ')).toMatch(/\[MS-REC\] SCOM: 20,900 .*15,000 Microsoft lists as the Recommended Limit/)
+    expect(plan.cautions.join(' ')).toMatch(/system-requirements\?view=sc-om-2025/)
     expect(SCOM_LIMITS.agentsPerManagementGroupWith25Consoles).toBe(15_000)
   })
 
   it('warns between 6,000 and 15,000 agents', () => {
     const plan = planManagementDeployment(base({ monitoring: 'scom', scomHighAvailability: true, managedHosts: 200, managedVms: 8_000 }))
     expect(plan.errors).toEqual([])
-    expect(plan.cautions.join(' ')).toMatch(/above the 6,000 Microsoft publishes for one management group with 50 open consoles/)
+    expect(plan.cautions.join(' ')).toMatch(/\[MS-REC\].*above the 6,000 Microsoft lists as the Recommended Limit for one management group with 50 open consoles/)
   })
 
-  it('blocks a single SCOM server above 3,000 agents and warns beyond small estates', () => {
+  it('warns (MS-REC) on a single SCOM server above 3,000 agents and beyond small estates', () => {
     const big = planManagementDeployment(base({ monitoring: 'scom', scomHighAvailability: false, managedHosts: 200, managedVms: 10_000 }))
-    expect(big.errors.join(' ')).toMatch(/exceed the 3,000 Microsoft publishes for one management server/)
+    expect(big.errors).toEqual([])
+    expect(big.cautions.join(' ')).toMatch(/\[MS-REC\] SCOM single server: .*3,000 Microsoft lists as the Recommended Limit for one management server/)
     const medium = planManagementDeployment(base({ monitoring: 'scom', scomHighAvailability: false, managedHosts: 60, managedVms: 900 }))
     expect(medium.errors).toEqual([])
     expect(medium.cautions.join(' ')).toMatch(/single-server topology is planned for a medium estate/)
@@ -233,8 +236,9 @@ describe('D9 management-only dedicated placement', () => {
     expect(result.management.warnings.join(' ')).toMatch(/Managed workload VMs are 0/)
   })
 
-  it('surfaces SCOM limit errors on the design', () => {
+  it('surfaces SCOM Recommended Limit warnings on the design without blocking it', () => {
     const result = design(withStackChoice(base({ managedHosts: 900, managedVms: 20_000 }), { monitoring: 'scom', scomHighAvailability: true }))
-    expect(result.management.errors.join(' ')).toMatch(/15,000/)
+    expect(result.management.errors.join(' ')).not.toMatch(/15,000/)
+    expect(result.management.plan.cautions.join(' ')).toMatch(/\[MS-REC\].*15,000/)
   })
 })

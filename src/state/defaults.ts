@@ -15,7 +15,7 @@ export const DEFAULT_CONFIG: ClusterConfig = {
   witnessType: 'cloud',
   // Representative modern 2U node — dual 48-core EPYC class, 1.5 TiB RAM, all-NVMe.
   // Not a Dell BOM: the tool derives a reference architecture from the workload rather than
-  // picking from a catalogue, because customers frequently reuse hardware they already own.
+  // picking from a catalogue, because people frequently reuse hardware they already own.
   node: {
     sockets: 2,
     coresPerSocket: 48,
