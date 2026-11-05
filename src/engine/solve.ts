@@ -656,6 +656,8 @@ export function solveReverse(
       fit(throughput * (1 - s2dShare), performanceDemand.requiredSanThroughputMBps, performanceCapability.availableSanThroughputMBps),
     )
   }
+  // The VMs-per-host and per-cluster maximums cap the count too, as in the existing-hardware profile fit.
+  const vmCountRoom = Math.min(workloadNodes * LIMITS.MAX_VMS_PER_HOST, LIMITS.MAX_VMS_PER_CLUSTER) - plannedVmTotal(demand)
   for (const id of TIER_IDS) {
     const t = workloadDemand.byTier[id]
     const policy = tiers[id]
@@ -669,7 +671,7 @@ export function solveReverse(
       const cpuFit = headroomPCores / (4 / policy.oversubscription)
       const ramFit = headroomRamGiB / 16
       const stoFit = (storageHeadroomForTier(policy) * 1024) / 200
-      additionalVmsByTier[id] = Math.max(0, Math.floor(Math.min(cpuFit, ramFit, stoFit)))
+      additionalVmsByTier[id] = Math.max(0, Math.floor(Math.min(cpuFit, ramFit, stoFit, vmCountRoom)))
       continue
     }
     const avgCores = t.pCores / t.vms
@@ -678,7 +680,7 @@ export function solveReverse(
     const cpuFit = avgCores > 0 ? headroomPCores / avgCores : Infinity
     const ramFit = avgRam > 0 ? headroomRamGiB / avgRam : Infinity
     const stoFit = avgSto > 0 ? (storageHeadroomForTier(policy) * 1024) / avgSto : Infinity
-    additionalVmsByTier[id] = Math.max(0, Math.floor(Math.min(cpuFit, ramFit, stoFit, performanceFitForTier(id))))
+    additionalVmsByTier[id] = Math.max(0, Math.floor(Math.min(cpuFit, ramFit, stoFit, performanceFitForTier(id), vmCountRoom)))
   }
 
   return {

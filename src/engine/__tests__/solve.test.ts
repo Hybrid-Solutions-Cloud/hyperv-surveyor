@@ -309,6 +309,14 @@ describe('reverse solve', () => {
     const r = solveReverse(cfg, 8, vms, tiers)
     expect(r.additionalVmsByTier.general).toBeGreaterThan(0)
   })
+  it('caps how many more VMs fit at the VMs-per-host maximum', () => {
+    // Two workload hosts with room for thousands of tiny VMs by CPU, memory and storage.
+    const cfg = makeConfig({ architecture: 'san', spareNodes: 1, node: { sockets: 4, coresPerSocket: 96, ramGiB: 16384 }, san: { usableTiB: 10000 } })
+    const vms = Array.from({ length: 1500 }, () => vm({ vCpu: 1, ramGiB: 1, storageGiB: 1 }))
+    const r = solveReverse(cfg, 3, vms, tiers)
+    expect(r.additionalVmsByTier.general).toBeLessThanOrEqual(2 * LIMITS.MAX_VMS_PER_HOST - 1500)
+    expect(r.additionalVmsByTier.infrastructure).toBeLessThanOrEqual(2 * LIMITS.MAX_VMS_PER_HOST - 1500)
+  })
   it('flags an over-committed cluster rather than reporting negative headroom as fine', () => {
     const cfg = makeConfig({ architecture: 'san', node: { ramGiB: 64, sockets: 1, coresPerSocket: 8 } })
     const vms = Array.from({ length: 500 }, () => vm({ vCpu: 8, ramGiB: 64, storageGiB: 500 }))
