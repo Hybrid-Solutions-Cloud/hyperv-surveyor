@@ -1297,8 +1297,10 @@ export function additionalVmsByTier(assessment: Pick<ExistingAssessment, 'cluste
 function sanRemedy(scope: string, usedTiB: number, effectiveTiB: number, cfg: Pick<ClusterConfig, 'san' | 'sanFreeSpaceTargetPct'>): StorageRemedy {
   const drr = Math.max(1, cfg.san.drr)
   const target = sanFreeSpaceTarget(cfg)
-  const toFit = Math.max(0, (usedTiB - effectiveTiB) / drr)
-  const toTarget = Math.max(0, (usedTiB / (1 - target) - effectiveTiB) / drr)
+  // Rounded up to 0.1 TiB once, so every page shows the same amount and it is enough to close the gap.
+  const roundUp = (value: number) => Math.ceil(value * 10 - 1e-9) / 10
+  const toFit = roundUp(Math.max(0, (usedTiB - effectiveTiB) / drr))
+  const toTarget = roundUp(Math.max(0, (usedTiB / (1 - target) - effectiveTiB) / drr))
   return {
     scope,
     domain: 'san',

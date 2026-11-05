@@ -237,7 +237,7 @@ describe('multi-cluster placement', () => {
     expect(result.findings.some((finding) => finding.code === 'SHARED_SAN_CAPACITY')).toBe(true)
     expect(result.verdict).toBe('does-not-fit')
     const shared = result.remedies.storage.find((item) => item.scope === 'Shared array')!
-    expect(shared.sanUsableToAddTiB).toBeCloseTo(60 * 250 / 1024 - 10, 1)
+    expect(shared.sanUsableToAddTiB).toBe(Math.ceil((60 * 250 / 1024 - 10) * 10) / 10)
   })
 })
 
@@ -253,7 +253,10 @@ describe('separate remedies', () => {
     expect(compute.spec).toMatchObject({ sockets: 2, coresPerSocket: 16, ramGiB: 512 })
     const [storage] = result.remedies.storage
     expect(storage.domain).toBe('san')
-    expect(storage.sanUsableToAddTiB).toBeCloseTo(60 * 200 / 1024 - 5, 1)
+    // Rounded up to 0.1 TiB once, so the card, the detail and What to add agree and the amount is enough.
+    expect(storage.sanUsableToAddTiB).toBe(Math.ceil((60 * 200 / 1024 - 5) * 10) / 10)
+    expect(storage.detail).toContain(`Add ${storage.sanUsableToAddTiB} TiB usable to fit`)
+    expect(result.whatToAdd.find((item) => item.item === 'SAN capacity')!.quantity).toBe(storage.sanUsableToAddTiB)
     expect(storage.sanUsableToTargetTiB!).toBeGreaterThan(storage.sanUsableToAddTiB!)
     const iops = result.remedies.performance.find((item) => item.metric === 'iops')!
     expect(iops.shortfall).toBeCloseTo(6000 - 1000, 0)
