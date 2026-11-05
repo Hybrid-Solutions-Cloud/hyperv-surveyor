@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react'
-import { Download, FolderOpen, Save, Trash2, Upload } from 'lucide-react'
+import { Download, FolderOpen, RotateCcw, Save, Trash2, Upload } from 'lucide-react'
 import { compareArchitectures, solveForward } from '../engine/solve'
 import { planMultipleClusters } from '../engine/deploymentPlanning'
 import { PageHeader } from '../components/Shared'
+import { useResetEverything } from '../components/useResetEverything'
 import { createProject, downloadProject, parseProject, type ProjectPayload } from '../state/project'
 import { useSurveyorStore } from '../state/store'
 import { ENGAGEMENT_LABELS } from '../state/journey'
@@ -64,6 +65,8 @@ export default function ProjectPage() {
     return { scenario, result, architecture, nodes }
   }), [store.engagementMode, store.managementDecision, store.cfg, store.vms, store.tiers, store.chosenKey, store.customerName, store.existingCapacityCfg, store.existingCapacityTiers, store.existingCapacityNodes, store.managementDeploymentInputs, store.includeManagementInSizing, store.placementInputs, store.networkDesignInputs, store.drDesignInputs, store.reportMetadata, store.dataSources, store.storageDecisionAnswers, store.savedScenarios])
 
+  const resetEverything = useResetEverything()
+
   async function openProject(file: File) {
     setError('')
     try {
@@ -81,6 +84,7 @@ export default function ProjectPage() {
         eyebrow="Design workspace"
         title="Project & scenarios"
         description="Save a complete design, reopen it later, and compare named alternatives without losing the workload inventory or management choices."
+        actions={<button className="btn danger" type="button" onClick={resetEverything}><RotateCcw size={15} /> Clear everything and start fresh</button>}
       />
 
       <div className="grid two">

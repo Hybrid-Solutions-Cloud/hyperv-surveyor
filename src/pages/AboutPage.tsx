@@ -1,6 +1,7 @@
-import { AlertTriangle, CheckCircle2, ExternalLink, Info, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ExternalLink, Info, RotateCcw, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/Shared'
+import { useResetEverything } from '../components/useResetEverything'
 
 const validationItems = [
   'Confirm that inventory data, utilization evidence, growth assumptions, failure reserves, and workload classifications are complete and accurate.',
@@ -10,6 +11,7 @@ const validationItems = [
 ]
 
 export default function AboutPage() {
+  const resetEverything = useResetEverything()
   return (
     <>
       <PageHeader
@@ -107,6 +109,16 @@ export default function AboutPage() {
             <strong>Legal review is still appropriate.</strong>
             This is a general project notice, not a substitute for counsel reviewing the terms needed for a particular
             organization, jurisdiction, or commercial use.
+          </div>
+        </section>
+
+        <section className="panel about-links">
+          <div>
+            <h2>Start fresh</h2>
+            <p>Clear all workloads, settings, answers, and saved scenarios from this browser and return every value to its default. Download a project file first if you need this design.</p>
+          </div>
+          <div className="page-action-row">
+            <button className="btn danger" type="button" onClick={resetEverything}><RotateCcw size={14} /> Clear everything</button>
           </div>
         </section>
 

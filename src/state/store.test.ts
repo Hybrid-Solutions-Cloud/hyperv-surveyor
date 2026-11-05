@@ -40,6 +40,48 @@ describe('existing-capacity workspace', () => {
   })
 })
 
+describe('starting fresh', () => {
+  beforeEach(() => {
+    useSurveyorStore.getState().resetScenario()
+  })
+
+  it('clears workloads, settings, answers, and saved scenarios back to the defaults', () => {
+    const store = useSurveyorStore.getState()
+    const clean = structuredClone({ cfg: store.cfg, tiers: store.tiers, placementInputs: store.placementInputs, existingCapacityCfg: store.existingCapacityCfg, existingCapacityNodes: store.existingCapacityNodes })
+
+    store.setEngagementMode('new-platform')
+    store.setManagementDecision('design')
+    store.setCustomerName('Contoso')
+    store.loadDemo()
+    store.setCfg({ ...store.cfg, spareNodes: 0, node: { ...store.cfg.node, ramGiB: 1024 } })
+    store.setTiers({ ...store.tiers, general: { ...store.tiers.general, oversubscription: 2 } })
+    store.setChosenKey('hybrid')
+    store.setPlacementInputs({ ...store.placementInputs, clusterLayout: 'split' })
+    store.setExistingCapacityNodes(40)
+    store.setStorageDecisionAnswers({ existingArray: true })
+    store.setReportMetadata({ ...store.reportMetadata, author: 'Someone', architectureKeys: [] })
+    store.addDataSource({ kind: 'rvtools', fileName: 'estate.xlsx', rows: 700 })
+    store.saveNamedScenario('Keep me')
+
+    useSurveyorStore.getState().resetScenario()
+
+    const reset = useSurveyorStore.getState()
+    expect(reset.vms).toEqual([])
+    expect(reset.engagementMode).toBeNull()
+    expect(reset.managementDecision).toBe('unassessed')
+    expect(reset.customerName).toBe('')
+    expect(reset.chosenKey).toBe('san')
+    expect(reset.savedScenarios).toEqual([])
+    expect(reset.dataSources).toEqual([])
+    expect(reset.lastImport).toBeNull()
+    expect(reset.storageDecisionAnswers).toEqual({})
+    expect(reset.managementDeploymentInputs).toBeNull()
+    expect(reset.reportMetadata.author).toBe('')
+    expect(reset.reportMetadata.architectureKeys).toBeUndefined()
+    expect({ cfg: reset.cfg, tiers: reset.tiers, placementInputs: reset.placementInputs, existingCapacityCfg: reset.existingCapacityCfg, existingCapacityNodes: reset.existingCapacityNodes }).toEqual(clean)
+  })
+})
+
 describe('management deployment state', () => {
   beforeEach(() => {
     useSurveyorStore.getState().resetScenario()
