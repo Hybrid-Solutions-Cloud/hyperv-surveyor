@@ -265,16 +265,21 @@ export const useSurveyorStore = create<SurveyorState>()(
       loadNamedScenario: (id) => set((state) => {
         const snapshot = state.savedScenarios.find((item) => item.id === id)
         // The import banner describes the previous inventory, so it goes with it.
-        return snapshot ? { ...normalizeProjectPayload(snapshot), managementAdvisorAnswers: normalizeAdvisorAnswers(snapshot.managementAdvisorAnswers), sharedInventoryOmitted: null, lastImport: null } : {}
+        const payload = snapshot ? normalizeProjectPayload(snapshot) : null
+        return snapshot && payload ? { ...payload, costModel: payload.costModel ?? state.costModel, managementAdvisorAnswers: normalizeAdvisorAnswers(snapshot.managementAdvisorAnswers), sharedInventoryOmitted: null, lastImport: null } : {}
       }),
       deleteNamedScenario: (id) => set((state) => ({ savedScenarios: state.savedScenarios.filter((item) => item.id !== id) })),
-      loadProject: (payload, savedScenarios) => set((state) => ({
-        ...normalizeProjectPayload(payload),
-        managementAdvisorAnswers: normalizeAdvisorAnswers(payload.managementAdvisorAnswers),
-        savedScenarios: savedScenarios ? normalizeScenarioSnapshots(savedScenarios) : state.savedScenarios,
-        sharedInventoryOmitted: null,
-        lastImport: null,
-      })),
+      loadProject: (payload, savedScenarios) => set((state) => {
+        const normalized = normalizeProjectPayload(payload)
+        return {
+          ...normalized,
+          costModel: normalized.costModel ?? state.costModel,
+          managementAdvisorAnswers: normalizeAdvisorAnswers(payload.managementAdvisorAnswers),
+          savedScenarios: savedScenarios ? normalizeScenarioSnapshots(savedScenarios) : state.savedScenarios,
+          sharedInventoryOmitted: null,
+          lastImport: null,
+        }
+      }),
       setPlacementInputs: (placementInputs) => set({ placementInputs }),
       setNetworkDesignInputs: (networkDesignInputs) => set({ networkDesignInputs: normalizeNetworkDesignInputs(networkDesignInputs) }),
       setDrDesignInputs: (drDesignInputs) => set({ drDesignInputs: normalizeDrDesignInputs(drDesignInputs) }),

@@ -217,7 +217,8 @@ export function normalizeProjectPayload(value: unknown): ProjectPayload {
     drDesignInputs: normalizeDrDesignInputs(value.drDesignInputs),
     reportMetadata: { ...DEFAULT_REPORT_METADATA, ...(record(value.reportMetadata) ? value.reportMetadata : {}) },
     storageDecisionAnswers: normalizeStorageDecisionAnswers(value.storageDecisionAnswers),
-    costModel: normalizeCostModelInputs(value.costModel),
+    // Absent means the file or link carries no Cost Model: the current one is kept, like other missing fields.
+    costModel: record(value.costModel) ? normalizeCostModelInputs(value.costModel) : undefined,
     dataSources: Array.isArray(value.dataSources) ? value.dataSources.filter(record).map((source, index) => ({
       id: typeof source.id === 'string' ? source.id : `source-${index + 1}`,
       kind: source.kind === 'performance' || source.kind === 'inventory' ? source.kind : 'rvtools',

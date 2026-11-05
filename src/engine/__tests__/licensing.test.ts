@@ -14,7 +14,7 @@ import { MANAGEMENT_WORKBOOK } from '../../data/managementWorkbook.generated'
 import { DEFAULT_CONFIG, DEFAULT_PROPOSED_CONFIG, defaultTiers, newVm } from '../../state/defaults'
 import { platformDesignInputs } from '../../state/usePlatformDesign'
 import { DEFAULT_REPORT_METADATA, createProject, parseProject, type ProjectPayload } from '../../state/project'
-import { migratePersistedState } from '../../state/store'
+import { migratePersistedState, useSurveyorStore } from '../../state/store'
 import { readSharedLink, toUrl } from '../../state/urlState'
 import { DEFAULT_PLACEMENT_INPUTS } from '../deploymentPlanning'
 import { DEFAULT_NETWORK_INPUTS } from '../networkDesign'
@@ -458,11 +458,25 @@ describe('Cost Model inputs persist', () => {
     expect(odd.selectedPlane).toBeNull()
   })
 
-  it('round-trips through a project file and opens older files with the defaults', () => {
+  it('round-trips through a project file; an older file carries no Cost Model', () => {
     const project = parseProject(JSON.stringify(createProject({ ...payload(), costModel: custom })))
     expect(project.payload.costModel).toEqual(custom)
     const old = { kind: 'hyperv-surveyor-project', schemaVersion: 7, payload: payload() }
-    expect(parseProject(JSON.stringify(old)).payload.costModel).toEqual(DEFAULT_COST_MODEL_INPUTS)
+    expect(parseProject(JSON.stringify(old)).payload.costModel).toBeUndefined()
+  })
+
+  it('a project file or share link with no Cost Model keeps your current one', () => {
+    useSurveyorStore.getState().setCostModel(custom)
+    const old = parseProject(JSON.stringify({ kind: 'hyperv-surveyor-project', schemaVersion: 7, payload: payload() }))
+    useSurveyorStore.getState().loadProject(old.payload)
+    expect(useSurveyorStore.getState().costModel).toEqual(custom)
+    const link = readSharedLink(toUrl(payload(), '/report', 'http://localhost/'))!
+    expect(link.scenario.costModel).toBeUndefined()
+    useSurveyorStore.getState().loadScenario(link.scenario)
+    expect(useSurveyorStore.getState().costModel).toEqual(custom)
+    // A file that does carry one replaces it.
+    useSurveyorStore.getState().loadProject({ ...payload(), costModel: structuredClone(DEFAULT_COST_MODEL_INPUTS) })
+    expect(useSurveyorStore.getState().costModel).toEqual(DEFAULT_COST_MODEL_INPUTS)
   })
 
   it('travels in share links and migrates older browser state', () => {
