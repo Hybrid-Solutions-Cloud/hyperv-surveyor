@@ -1,7 +1,7 @@
 import { Activity, Boxes, Network, ShieldCheck } from 'lucide-react'
 import { Field, NumberInput, PageHeader } from '../components/Shared'
 import { clusterNodeLimitFor } from '../engine/deploymentPlanning'
-import type { IntentType, NetworkIntent, SanConnectivityInputs, SanProtocol } from '../engine/networkDesign'
+import { RDMA_RECOMMENDATION_NOTE, type IntentType, type NetworkIntent, type SanConnectivityInputs, type SanProtocol } from '../engine/networkDesign'
 import { useSurveyorStore } from '../state/store'
 import { JourneyBar } from '../components/JourneyBar'
 import { usePlatformDesign } from '../state/usePlatformDesign'
@@ -117,6 +117,7 @@ export default function DeploymentPage() {
           <div className="form-grid two-column">
             <Field label="BMC ports / host" hint="Out-of-band management, on its own network."><NumberInput value={netInputs.bmcPortsPerNode} min={0} max={4} onChange={(value) => setNetwork({ bmcPortsPerNode: Math.round(value) })} /></Field>
             <Field label="RDMA protocol" hint="Microsoft lists iWARP as recommended for 4 or more S2D nodes; RoCE needs DCB."><select value={netInputs.rdmaProtocol} onChange={(event) => setNetwork({ rdmaProtocol: event.target.value as typeof netInputs.rdmaProtocol })}><option value="iwarp">iWARP</option><option value="roce-v2">RoCE v2</option><option value="none">None / TCP</option></select></Field>
+            <p className="small muted" style={{ alignSelf: 'end' }}>{RDMA_RECOMMENDATION_NOTE.text} <a href={RDMA_RECOMMENDATION_NOTE.source} target="_blank" rel="noreferrer">Source</a></p>
             <Field label="Live migration networks"><NumberInput value={netInputs.liveMigrationNetworks} min={1} max={8} onChange={(value) => setNetwork({ liveMigrationNetworks: Math.round(value) })} /></Field>
             <Field label="Management VLAN" hint="1 to 4094."><input value={netInputs.managementVlan} onChange={(event) => setNetwork({ managementVlan: event.target.value })} /></Field>
             <Field label="Compute VLANs" hint="A list or range, such as 100-199."><input value={netInputs.computeVlans} onChange={(event) => setNetwork({ computeVlans: event.target.value })} /></Field>

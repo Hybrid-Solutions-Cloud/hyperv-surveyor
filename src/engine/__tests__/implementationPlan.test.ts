@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { assessMigrationReadiness, guestOsSupport } from '../readiness'
-import { designNetwork, DEFAULT_NETWORK_INPUTS, normalizeNetworkDesignInputs, parseVlans, type NetworkDesignInputs } from '../networkDesign'
+import { designNetwork, DEFAULT_NETWORK_INPUTS, NETWORK_SOURCES, RDMA_RECOMMENDATION_NOTE, normalizeNetworkDesignInputs, parseVlans, type NetworkDesignInputs } from '../networkDesign'
 import { designDisasterRecovery, normalizeDrDesignInputs } from '../drDesign'
 import { planMultipleClusters } from '../deploymentPlanning'
 import { assessExistingHardware, additionalVmsByTier, blankCluster, blankExistingHardware, type ExistingCluster, type ExistingHardware } from '../existingHardware'
@@ -410,5 +410,13 @@ describe('persistence and cross-surface agreement', () => {
     const design = resolvePlatformDesign(platformDesignInputs(state))
     expect(design.status).toBe('split')
     expect(design.implementation.recovery!.protectedStorageTiB).toBeCloseTo(design.storage!.requiredTiB, 6)
+  })
+})
+
+describe('RDMA recommendation beside the selector', () => {
+  it('says Microsoft recommends iWARP for S2D and cites Microsoft Learn', () => {
+    expect(RDMA_RECOMMENDATION_NOTE.text).toMatch(/Microsoft recommends iWARP for Storage Spaces Direct/)
+    expect(RDMA_RECOMMENDATION_NOTE.source).toBe(NETWORK_SOURCES.s2dHardware)
+    expect(RDMA_RECOMMENDATION_NOTE.source).toMatch(/^https:\/\/learn\.microsoft\.com\//)
   })
 })

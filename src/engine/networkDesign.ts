@@ -231,6 +231,12 @@ export const NETWORK_SOURCES = {
   clustering: 'https://learn.microsoft.com/windows-server/failover-clustering/clustering-requirements',
 } as const
 
+/** Shown beside the RDMA selector: older saves may carry RoCE v2 as a default, which cannot be told from a choice. */
+export const RDMA_RECOMMENDATION_NOTE = {
+  text: 'Microsoft recommends iWARP for Storage Spaces Direct; RoCE is supported with Data Center Bridging on every switch. If RoCE v2 came from an earlier save, confirm it is your choice.',
+  source: NETWORK_SOURCES.s2dHardware,
+} as const
+
 /** Parses "10", "100-199" or "30,31". Returns the bad parts, so a VLAN like "abc" is reported. */
 export function parseVlans(value: string): { ids: number[]; invalid: string[] } {
   const ids: number[] = []
