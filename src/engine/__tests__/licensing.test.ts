@@ -187,6 +187,16 @@ describe('E4: Software Assurance years', () => {
     expect(one.sa.confidence).toBe('tool')
     expect(one.estimate.assumptions.join(' ')).toMatch(/TOOL assumption, not Microsoft-published/)
   })
+  it('keeps SA at the unverified tool rate out of the priced total until you enter your rate', () => {
+    const tool = windows(3)
+    expect(tool.sa.quoteRequired).toBe(true)
+    expect(tool.estimate.quoteRequired.some((item) => item.id === 'windows-w-sa')).toBe(true)
+    expect(tool.estimate.pricedTotal).toBeCloseTo(tool.estimate.pricedPerYear.reduce((a, b) => a + b, 0), 6)
+    expect(tool.estimate.pricedTotal).toBeLessThan(tool.estimate.total)
+    const entered = estimateLicensing(simpleQuantities(fleet(60)), inputs({ termYears: 3, windowsEdition: 'datacenter', rateOverrides: { softwareAssuranceAnnualRate: 0.2 } }))
+    expect(line(entered, 'windows-w-sa')!.quoteRequired).toBe(false)
+  })
+
   it('has no SA under SPLA', () => {
     const estimate = estimateLicensing(simpleQuantities(fleet(60)), inputs({ basis: 'spla' }))
     expect(estimate.lines.some((item) => item.category === 'sa')).toBe(false)

@@ -739,7 +739,9 @@ export function estimateLicensing(quantities: LicensingQuantities, inputs: CostM
       lines.push({
         id: `${args.id}-sa`, category: 'sa', product: `Software Assurance on ${args.product}`, scope: args.scope,
         quantity: `${(sa.value * 100).toFixed(0)}% of ${money(purchase)} a year, from year 1`,
-        unitPrice: null, unitLabel: 'per year', confidence: sa.confidence === 'entered' ? 'entered' : 'tool', quoteRequired: r.quoteRequired,
+        unitPrice: null, unitLabel: 'per year', confidence: sa.confidence === 'entered' ? 'entered' : 'tool',
+        // SA follows its own rate: the unverified tool rate needs a quote and stays out of the priced total.
+        quoteRequired: r.quoteRequired || sa.quoteRequired,
         years: saYears, total: annual * years,
         note: 'TOOL assumption, not a Microsoft-published rate. Replace it with your agreement\'s SA price.', source: sa.source,
       })
