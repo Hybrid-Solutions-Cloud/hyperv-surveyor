@@ -33,7 +33,7 @@ const SHARE_PARAM = 's'
 const DESIGN_KEYS = [
   'engagementMode', 'managementDecision', 'customerName', 'chosenKey',
   'existingCapacityCfg', 'existingCapacityTiers', 'existingCapacityNodes',
-  'managementDeploymentInputs', 'includeManagementInSizing', 'placementInputs',
+  'managementDeploymentInputs', 'managementAdvisorAnswers', 'includeManagementInSizing', 'placementInputs',
   'networkDesignInputs', 'drDesignInputs', 'reportMetadata', 'dataSources', 'storageDecisionAnswers',
 ] as const satisfies ReadonlyArray<keyof ProjectPayload>
 

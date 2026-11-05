@@ -12,7 +12,6 @@ import { DEFAULT_PLACEMENT_INPUTS, planMultipleClusters, type MultiClusterPlan, 
 import { assessFitGap, type FitGapAssessment } from './fitGap'
 import {
   deploymentComponentsToVms,
-  deploymentInputsFromStack,
   normalizeManagementDeploymentInputs,
   planManagementDeployment,
   type ManagementDeploymentInputs,
@@ -20,6 +19,8 @@ import {
   type ResolvedManagementDeploymentInputs,
 } from './managementDeployment'
 import { growthFactorForYear, resolveGrowthPlan, type GrowthPlan } from './growth'
+import { resolveManagementInputs, type ManagementAdvisorSummary, type ManagementInputsSource } from './managementAdvisor'
+import type { AdvisorAnswers } from '../data/managementPlane'
 import { sanCapacityTiB, sanFreeSpaceTarget } from './capacity'
 import { licensableCores } from './compute'
 import type { ClusterConfig, CsvPlan, Finding, SizingResult, TierId, TierPolicy, Vm } from './types'
@@ -41,6 +42,8 @@ export interface PlatformDesignInputs {
   managementDecision?: DesignManagementDecision
   managementDeploymentInputs: ManagementDeploymentInputs | null
   includeManagementInSizing: boolean
+  /** Management Plane Advisor answers. The stack follows them until the user picks stack fields. */
+  managementAdvisorAnswers?: AdvisorAnswers
 }
 
 export type PlatformPath = 'new-platform' | 'existing' | 'management-only'
@@ -127,6 +130,15 @@ export interface DesignManagement {
   decision: DesignManagementDecision
   designed: boolean
   inputs: ResolvedManagementDeploymentInputs
+  /** The inputs before defaults are filled in. Edits start from these, so values that follow the estate keep following it. */
+  rawInputs: ManagementDeploymentInputs
+  /** saved: the user's stack choices. advisor: a ready advisor result. starting-point: labelled default while the advisor is not ready. */
+  source: ManagementInputsSource
+  advisor: ManagementAdvisorSummary
+  /** Breaches of a published limit in the management plan. */
+  errors: string[]
+  /** Missing scale inputs, such as 0 managed hosts or VMs on the management-only path. */
+  warnings: string[]
   plan: ManagementDeploymentPlan
   vms: Vm[]
   /** True when management VMs exist and share the workload hardware in this result. */
@@ -135,7 +147,8 @@ export interface DesignManagement {
   /** The host count management defaults are based on. Never the cluster ceiling. */
   contextNodes: number
   contextNote: string | null
-  dedicated: { nodes: number | null; sizing: SizingResult | null; reason: string | null } | null
+  /** basis says which hardware profile the node count uses. */
+  dedicated: { nodes: number | null; sizing: SizingResult | null; reason: string | null; basis: string | null } | null
   /** Nodes the management VMs add. Null when not counted or not comparable. */
   hostDelta: number | null
   impactLabel: string
@@ -391,9 +404,13 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
   }
 
   // Step 2: management, by one rule.
-  const managementInputs = normalizeManagementDeploymentInputs(input.managementDeploymentInputs
-    ? { ...input.managementDeploymentInputs, monitoring: input.managementDeploymentInputs.monitoring ?? 'none' }
-    : deploymentInputsFromStack(contextNodes <= 4 ? ['classic', 'wac-admin'] : ['scvmm', 'wac-admin'], contextNodes, includedVmCount))
+  const resolvedManagement = resolveManagementInputs({
+    stored: input.managementDeploymentInputs,
+    answers: input.managementAdvisorAnswers,
+    contextNodes,
+    includedVmCount,
+  })
+  const managementInputs = normalizeManagementDeploymentInputs(resolvedManagement.inputs)
   const managementPlan = planManagementDeployment(managementInputs)
   const managementVms = deploymentComponentsToVms(managementPlan.components)
   const designed = decision === 'design'
@@ -615,12 +632,18 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
   // Dedicated management cluster.
   let dedicated: DesignManagement['dedicated'] = null
   if (designed && managementInputs.managementPlacement === 'dedicated-management-cluster' && managementVms.length > 0) {
-    if (path === 'management-only') {
-      dedicated = { nodes: null, sizing: null, reason: 'Not calculated: a management-only engagement has no hardware profile, so the dedicated management cluster host count is not sized. Add a platform path or size the cluster separately.' }
-    } else {
-      const result = solveForward(cfg, [], tiers, managementVms)
-      dedicated = { nodes: result.feasible ? result.nodes : null, sizing: result, reason: result.feasible ? null : result.bindingExplanation }
-    }
+    // Management-only has no workload hardware, so the reference server is the stated basis.
+    const result = solveForward(cfg, [], tiers, managementVms)
+    const basis = path === 'management-only'
+      ? `Sized on the reference server (${cfg.node.sockets} × ${cfg.node.coresPerSocket} cores, ${cfg.node.ramGiB} GiB RAM) with N+${cfg.spareNodes}. It is a starting assumption: change it on the reference server page.`
+      : null
+    dedicated = { nodes: result.feasible ? result.nodes : null, sizing: result, reason: result.feasible ? null : result.bindingExplanation, basis }
+  }
+
+  const managementWarnings: string[] = []
+  if (path === 'management-only' && designed) {
+    if (managementInputs.managedHosts <= 0) managementWarnings.push('Managed hosts are 0. Enter the hosts this management plane will manage; the bill of materials is not sized for a host count until then.')
+    if (managementInputs.managedVms <= 0) managementWarnings.push('Managed workload VMs are 0. Enter the workload VMs this management plane will manage; SCOM and Arc sizing depend on them.')
   }
 
   // Host impact, attributed to management only when management VMs exist and cause it.
@@ -691,6 +714,11 @@ export function resolvePlatformDesign(input: PlatformDesignInputs): PlatformDesi
       decision,
       designed,
       inputs: managementInputs,
+      rawInputs: resolvedManagement.inputs,
+      source: resolvedManagement.source,
+      advisor: resolvedManagement.advisor,
+      errors: designed ? managementPlan.errors : [],
+      warnings: managementWarnings,
       plan: managementPlan,
       vms: managementVms,
       counted,

@@ -3,7 +3,7 @@
 
 export const MANAGEMENT_WORKBOOK = {
   "generatedFrom": "HyperV_Management_Plane_Comparison.xlsx",
-  "decisionQuestionsVerified": "2026-08-22",
+  "decisionQuestionsVerified": "2026-08-22; WAC vMode, SCOM, and lifecycle items rechecked 2026-11-05",
   "decisionQuestionsBasis": "Fact-checked decision overlay for the Management Plane Advisor. The supplied workbook remains the source for the broader capability, commercial, and evidence libraries.",
   "decisionQuestions": [
     {
@@ -90,7 +90,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "pureIntegration",
       "question": "Do you require array-aware integration with Pure Storage for classification, placement, or rapid provisioning?",
-      "ifYes": "Use SCVMM's SMI-S storage-provider path and validate the exact Purity, SMI-S, and SCVMM versions. Either WAC mode can remain a complementary day-two tool where its own requirements are met.",
+      "ifYes": "Use SCVMM's SMI-S storage-provider path and validate the exact Purity, SMI-S, and SCVMM versions. WAC vMode is not selected, because neither Microsoft nor Pure Storage documents a Pure integration for it; WAC Administration Mode remains the day-two tool.",
       "ifNo": "The storage vendor does not force the management-plane selection.",
       "why": "Pure documents SMI-S integration with SCVMM for capacity visibility, LUN creation, and VM deployment. Do not assume every Pure workflow or WAC extension is supported in every WAC mode or release without a current compatibility check.",
       "sources": [
@@ -128,7 +128,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "migration",
       "question": "Is VMware-to-Hyper-V conversion part of the project?",
-      "ifYes": "Create a separately sized and costed migration workstream using SCVMM V2V or a qualified third-party tool.",
+      "ifYes": "Create a separately sized and costed migration workstream using SCVMM V2V or a qualified third-party tool. This answer does not change the steady-state stack.",
       "ifNo": "Migration tooling does not affect the steady-state management-plane recommendation.",
       "why": "VMM provides native offline V2V, but migration is a project capability rather than a reason by itself to keep SCVMM as the permanent fabric manager.",
       "sources": [
@@ -186,10 +186,27 @@ export const MANAGEMENT_WORKBOOK = {
       ]
     },
     {
+      "id": "vmodeHostEligible",
+      "question": "Are all hosts WAC Virtualization Mode would manage running Windows Server 2025 Datacenter, joined to the same Active Directory domain as the gateway with FQDN DNS resolution, and able to take Network ATC with Hyper-V, Data Center Bridging, and Failover Clustering, plus a reboot during onboarding?",
+      "ifYes": "The hosts meet the documented vMode host prerequisites, so vMode stays a candidate when its other gates are accepted.",
+      "ifNo": "Exclude WAC vMode for these hosts and use WAC Administration Mode. Until this is answered, vMode cannot be part of a final recommendation.",
+      "why": "Microsoft lists these host prerequisites for adding resources to vMode: Windows Server 2025 or later, Datacenter edition only; domain-joined with FQDN DNS resolution and on the same domain as the vMode gateway; Network ATC, Data Center Bridging, Hyper-V, and Failover Clustering; at least one management, compute, and storage intent; and no other vMode instance managing the host. Onboarding installs the required features and reboots the hosts, with a rolling reboot for existing clusters.",
+      "sources": [
+        {
+          "label": "Add resources in WAC Virtualization Mode",
+          "url": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/add-virtualization-mode-resources"
+        },
+        {
+          "label": "Install WAC Virtualization Mode",
+          "url": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/install-virtualization-mode"
+        }
+      ]
+    },
+    {
       "id": "smallEdge",
       "question": "Is this a small dedicated stack where simpler operations matter more than tenant and fabric-management features?",
-      "ifYes": "Prefer a Classic Hyper-V foundation unless a hard requirement still justifies SCVMM. Prefer WAC vMode when its Preview, HA, and capability gates are accepted; otherwise use WAC aMode.",
-      "ifNo": "Do not select SCVMM based on footprint alone; continue evaluating the actual operating requirements.",
+      "ifYes": "Recorded as a weighting factor; it does not change the recommended stack by itself. Without a hard SCVMM requirement the foundation is already Classic, and the WAC mode still follows the Preview, HA, and host-eligibility answers.",
+      "ifNo": "Footprint alone does not change the stack; the actual operating requirements decide it.",
       "why": "A small footprint is a weighting factor, not a licensing verdict. Bare-metal provisioning, quotas, array integration, or optimization can still justify SCVMM on a small cluster; model cost separately.",
       "sources": []
     },
@@ -277,7 +294,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "automation",
       "question": "Must the platform integrate with service catalogs, CI/CD, or infrastructure-as-code through supported APIs?",
-      "ifYes": "Map each required workflow to a documented interface before selecting the stack. Hyper-V and SCVMM expose PowerShell; Azure Arc-enabled servers add Azure surfaces for guest management, not VM lifecycle. Do not assume WAC provides a supported general-purpose automation API.",
+      "ifYes": "Map each required workflow to a documented interface; this answer is recorded and does not change the stack by itself. Hyper-V and SCVMM expose PowerShell; Azure Arc-enabled servers add Azure surfaces for guest management, not VM lifecycle. Do not assume WAC provides a supported general-purpose automation API.",
       "ifNo": "Operator UI and standard administrative scripting may be sufficient.",
       "why": "An API checkbox is not enough: provisioning, networking, storage, approvals, secrets, rollback, and tenant isolation must all be covered by the chosen automation path.",
       "sources": [
@@ -295,7 +312,7 @@ export const MANAGEMENT_WORKBOOK = {
       "id": "operationsOwnership",
       "question": "Can the operations team own database maintenance, certificates, backups, patching, and management-plane upgrades?",
       "ifYes": "The team can consider the full stack when its capabilities justify the operational overhead.",
-      "ifNo": "Prefer the simplest stack that meets hard requirements, or assign those lifecycle responsibilities to a managed service with explicit SLAs.",
+      "ifNo": "The advisor does not remove components that a hard requirement needs. It flags the lifecycle work the stack adds, such as SQL or PostgreSQL databases, certificates, and upgrades, so you can assign it to a managed service with explicit SLAs or revisit the requirements that add it.",
       "why": "Management-plane VMs are production workloads. Their operational ownership, recovery testing, certificate renewal, database care, and upgrade cadence must be designed and staffed.",
       "sources": []
     }
@@ -832,11 +849,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only (REST SDK)",
         "scvmm": "Full (SMI-S/SMP provider)",
         "wac-admin": "Full (WAC extension)",
-        "wac-virtual": "None yet"
+        "wac-virtual": "None documented"
       },
       "vmwareVsphere8": "Pure vSphere Plugin / VASA",
       "vmwareVcf9": "FC VMFS safe; next-gen vVols still maturing",
-      "note": "CRITICAL FOR SERVICE PROVIDERS: Pure integrates via SCVMM SMI-S OR the WAC aMode extension. Neither works in vMode preview yet."
+      "note": "CRITICAL FOR SERVICE PROVIDERS: Pure integrates via SCVMM SMI-S OR the WAC aMode extension. Neither is documented for vMode Preview, so the advisor does not select vMode when Pure integration is required."
     },
     {
       "category": "Networking",
@@ -1018,7 +1035,7 @@ export const MANAGEMENT_WORKBOOK = {
       },
       "vmwareVsphere8": "(n/a)",
       "vmwareVcf9": "(n/a)",
-      "note": "MOST IMPORTANT ROW FOR SERVICE PROVIDERS: Classic has ZERO native V2V. SCVMM V2V is 4x faster in 2025."
+      "note": "MOST IMPORTANT ROW FOR SERVICE PROVIDERS: Classic has ZERO native V2V. Microsoft documents faster SCVMM V2V beginning with VMM 2022 UR2."
     },
     {
       "category": "Security & Multi-tenancy",
@@ -1317,7 +1334,7 @@ export const MANAGEMENT_WORKBOOK = {
       },
       "vmwareVsphere8": "vCenter HA / VCHA",
       "vmwareVcf9": "vCenter HA / VCHA",
-      "note": "BIGGEST vMode RISK: no HA story published as of Aug 2026."
+      "note": "BIGGEST vMode RISK: no HA design published (rechecked November 2026)."
     },
     {
       "category": "Platform / Operational",
@@ -1382,14 +1399,14 @@ export const MANAGEMENT_WORKBOOK = {
       },
       "vmwareVsphere8": "GA",
       "vmwareVcf9": "GA - VCF 9.1 (May 2026)",
-      "note": "vMode is NOT production-ready as of Aug 2026. Plan for it, don't sell it."
+      "note": "vMode is still Preview (rechecked November 2026). Plan for it, don't sell it."
     },
     {
       "category": "Platform / Operational",
       "capability": "Support lifecycle end date",
       "values": {
-        "classic": "Tied to Windows Server 2025 (2034/2035)",
-        "scvmm": "Mainstream 2030-01-09, Extended 2035-01-10",
+        "classic": "Tied to Windows Server 2025 (mainstream to Nov 2029, extended to Nov 2034)",
+        "scvmm": "Mainstream to 2030-01-08, Extended to 2035-01-09",
         "wac-admin": "Modern Lifecycle - upgrade within 30 days",
         "wac-virtual": "Modern Lifecycle (preview, unsupported)"
       },
@@ -2199,7 +2216,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "topic": "System Center lifecycle",
-      "finding": "System Center 2025 VMM: mainstream support ends 9 Jan 2030; extended support ends 10 Jan 2035. All System Center 2025 components share these dates.",
+      "finding": "System Center 2025 VMM: mainstream support ends 8 Jan 2030; extended support ends 9 Jan 2035. All System Center 2025 components share these dates.",
       "source": "https://learn.microsoft.com/lifecycle/products/system-center-2025-virtual-machine-manager"
     },
     {
@@ -2209,7 +2226,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "topic": "SCVMM 2025 changes",
-      "finding": "SPF (Service Provider Foundation) is DISCONTINUED. Azure VM management from VMM and Azure Update Management v1 are no longer supported — Microsoft directed customers to Arc-enabled SCVMM, which closed to new deployments in October 2026. ESXi→Hyper-V conversion is ~4x faster.",
+      "finding": "SPF (Service Provider Foundation) is DISCONTINUED. Azure VM management from VMM and Azure Update Management v1 are no longer supported — Microsoft directed customers to Arc-enabled SCVMM, which closed to new deployments in October 2026. Microsoft documents faster VMware conversion beginning with VMM 2022 UR2.",
       "source": "https://learn.microsoft.com/system-center/vmm/whats-new-in-vmm?view=sc-vmm-2025"
     },
     {
@@ -2244,7 +2261,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "topic": "WAC vMode — the two gaps",
-      "finding": "(1) NO HA deployment guidance published as of Aug 2026 — unlike Administration Mode, which has Deploy-GatewayV2Ha. (2) Certificates: self-signed 60-day ONLY; 'preinstalled certificates aren't available at this time.' Both are production blockers.",
+      "finding": "(1) NO HA deployment guidance published (rechecked November 2026) — unlike Administration Mode, which has Deploy-GatewayV2Ha. (2) Certificates: self-signed 60-day ONLY; 'preinstalled certificates aren't available at this time.' Both are production blockers.",
       "source": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/install-virtualization-mode"
     },
     {
@@ -2280,7 +2297,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "topic": "Arc is not air-gap capable",
       "finding": "Azure Arc-enabled servers require an outbound connection to Azure; enabled services have their own connectivity and billing-state requirements. True disconnected operation exists only in Azure Local's separate disconnected-operations feature.",
-      "source": "https://learn.microsoft.com/azure/azure-arc/resource-bridge/network-requirements"
+      "source": "https://learn.microsoft.com/azure/azure-arc/servers/network-requirements"
     },
     {
       "topic": "Azure Lighthouse",
@@ -2334,7 +2351,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "topic": "Pure Storage — WAC",
-      "finding": "Pure ships a Windows Admin Center extension giving a single-pane view of FlashArray: real-time IOPS/bandwidth/latency, data reduction, space management, volume and initiator management, host groups including CSV access. Built with the WAC engineering team. Not available in the Azure-portal WAC experience, and no vMode support yet.",
+      "finding": "Pure ships a Windows Admin Center extension giving a single-pane view of FlashArray: real-time IOPS/bandwidth/latency, data reduction, space management, volume and initiator management, host groups including CSV access. Built with the WAC engineering team. Not available in the Azure-portal WAC experience, and no vMode support is documented.",
       "source": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/extend/case-studies/purestorage"
     },
     {
@@ -2667,7 +2684,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "topic": "vMode is a moving target",
-      "detail": "Everything documented here about Virtualization Mode reflects Public Preview 2 as of Aug 2026. The HA gap, the certificate limitation, and the missing storage/networking host profiles are all preview-stage issues that Microsoft may close. Re-verify before the 2027 planning cycle."
+      "detail": "Everything documented here about Virtualization Mode reflects the Preview documentation rechecked in November 2026. The HA gap, the certificate limitation, and the missing storage/networking host profiles are all preview-stage issues that Microsoft may close. Re-verify before design approval."
     },
     {
       "topic": "Feature verdicts are documentation-based",
@@ -2867,7 +2884,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "objection": "\"Microsoft is killing System Center.\"",
       "verdict": "FALSE",
-      "answer": "System Center 2025 GA'd November 2024 with an active Update Rollup cadence. Mainstream support runs to 9 Jan 2030, extended support to 10 Jan 2035.",
+      "answer": "System Center 2025 GA'd November 2024 with an active Update Rollup cadence. Mainstream support runs to 8 Jan 2030, extended support to 9 Jan 2035.",
       "concede": "Concede the real trend: Microsoft IS narrowing System Center's Azure-facing surface. SPF is discontinued and native Azure VM management was removed in 2025, redirected to Arc. The product is supported; its Azure path now runs through Arc-enabled servers and Azure Local."
     },
     {
@@ -2885,7 +2902,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "objection": "\"Migration is too risky.\"",
       "verdict": "ADDRESS WITH TOOLING, NOT RISK DENIAL",
-      "answer": "SCVMM V2V is ~4x faster in the 2025 release. Azure Migrate, the WAC VM Conversion extension (preview), and third parties (Veeam, Zerto, Carbonite, NAKIVO) all have paths. Shared-nothing live migration removes the identical-shared-storage blocker during transition.",
+      "answer": "Microsoft documents faster SCVMM V2V beginning with VMM 2022 UR2. Azure Migrate, the WAC VM Conversion extension (preview), and third parties (Veeam, Zerto, Carbonite, NAKIVO) all have paths. Shared-nothing live migration removes the identical-shared-storage blocker during transition.",
       "concede": "Frame as 'de-risked by phased coexistence', never 'risk-free'. Note the Classic plane has NO native V2V — the migration tool is a separate decision from the management plane."
     },
     {

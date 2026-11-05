@@ -89,7 +89,35 @@ const publicCopyReplacements = [
   ['its cloud ambitions moved to Arc.', 'its Azure path now runs through Arc-enabled servers and Azure Local.'],
   ['SCVMM self-service, or Azure RBAC via Arc', 'SCVMM self-service'],
   ['SCVMM Cloud, or Azure subscription via Arc', 'SCVMM Cloud'],
+  // Rechecked on Microsoft Learn on 2026-11-05.
+  // Lifecycle: System Center 2025 mainstream support ends January 8, 2030 and extended support January 9, 2035
+  // (https://learn.microsoft.com/lifecycle/products/system-center-2025-virtual-machine-manager, dates shown in PT).
+  // Windows Server 2025: mainstream to November 13, 2029, extended to November 14, 2034
+  // (https://learn.microsoft.com/lifecycle/products/windows-server-2025).
+  ['Mainstream 2030-01-09, Extended 2035-01-10', 'Mainstream to 2030-01-08, Extended to 2035-01-09'],
+  ['mainstream support ends 9 Jan 2030; extended support ends 10 Jan 2035', 'mainstream support ends 8 Jan 2030; extended support ends 9 Jan 2035'],
+  ['Mainstream support runs to 9 Jan 2030, extended support to 10 Jan 2035.', 'Mainstream support runs to 8 Jan 2030, extended support to 9 Jan 2035.'],
+  ['Tied to Windows Server 2025 (2034/2035)', 'Tied to Windows Server 2025 (mainstream to Nov 2029, extended to Nov 2034)'],
+  // WAC vMode: still Preview, no HA design, 60-day self-signed certificate
+  // (https://learn.microsoft.com/windows-server/manage/windows-admin-center/install-virtualization-mode).
+  ['no HA story published as of Aug 2026.', 'no HA design published (rechecked November 2026).'],
+  ['vMode is NOT production-ready as of Aug 2026.', 'vMode is still Preview (rechecked November 2026).'],
+  ['NO HA deployment guidance published as of Aug 2026', 'NO HA deployment guidance published (rechecked November 2026)'],
+  ['reflects Public Preview 2 as of Aug 2026.', 'reflects the Preview documentation rechecked in November 2026.'],
+  ['Re-verify before the 2027 planning cycle.', 'Re-verify before design approval.'],
+  // The 4x figure has no current Microsoft source; keep the documented statement only.
+  ['ESXi→Hyper-V conversion is ~4x faster.', 'Microsoft documents faster VMware conversion beginning with VMM 2022 UR2.'],
+  ['SCVMM V2V is 4x faster in 2025.', 'Microsoft documents faster SCVMM V2V beginning with VMM 2022 UR2.'],
+  ['SCVMM V2V is ~4x faster in the 2025 release.', 'Microsoft documents faster SCVMM V2V beginning with VMM 2022 UR2.'],
+  // Pure Storage: no Microsoft or Pure documentation of a vMode integration was found, so the advisor
+  // excludes vMode when Pure integration is required. The workbook says the same.
+  ['Pure integrates via SCVMM SMI-S OR the WAC aMode extension. Neither works in vMode preview yet.', 'Pure integrates via SCVMM SMI-S OR the WAC aMode extension. Neither is documented for vMode Preview, so the advisor does not select vMode when Pure integration is required.'],
+  ['and no vMode support yet.', 'and no vMode support is documented.'],
 ]
+
+/** Values replaced only in one field, where a general text replacement would be too broad. */
+const PURE_VMODE_VALUE = 'None documented'
+const ARC_SERVERS_NETWORK_SOURCE = 'https://learn.microsoft.com/azure/azure-arc/servers/network-requirements'
 
 const neutralizePublicCopy = (value) => {
   if (typeof value !== 'string') return value
@@ -143,7 +171,7 @@ const data = {
       classic: String(row[2]),
       scvmm: String(row[3]),
       'wac-admin': String(row[4]),
-      'wac-virtual': String(row[5]),
+      'wac-virtual': String(row[1]) === 'Pure Storage FlashArray integration' && String(row[5]) === 'None yet' ? PURE_VMODE_VALUE : String(row[5]),
     },
     vmwareVsphere8: String(row[7]),
     vmwareVcf9: String(row[8]),
@@ -174,7 +202,10 @@ const data = {
         finding: 'Microsoft stopped new onboarding in October 2026 and retires the service in September 2029. Existing deployments keep working until then. Azure Arc-enabled servers are the recommended path for Azure management services and do not provide VM lifecycle operations.',
         source: 'https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/transition-guidance',
       }
-      : { topic: String(row[0]), finding: String(row[1]), source: String(row[2]) }
+      : String(row[0]) === 'Arc is not air-gap capable'
+        // The finding is about Arc-enabled servers, so it cites their network requirements, not the resource bridge.
+        ? { topic: String(row[0]), finding: String(row[1]), source: ARC_SERVERS_NETWORK_SOURCE }
+        : { topic: String(row[0]), finding: String(row[1]), source: String(row[2]) }
   )),
   platformLimits: sheetRows('Platform Limits').slice(4).filter((row) => row[0] && row[2] && row[0] !== 'Arc-enabled SCVMM').map((row) => ({
     category: String(row[0]),

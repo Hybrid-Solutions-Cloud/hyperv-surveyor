@@ -1,5 +1,5 @@
 {
-  "verified": "2026-08-22",
+  "verified": "2026-08-22; WAC vMode, SCOM, and lifecycle items rechecked 2026-11-05",
   "basis": "Fact-checked decision overlay for the Management Plane Advisor. The supplied workbook remains the source for the broader capability, commercial, and evidence libraries.",
   "questions": [
     {
@@ -59,7 +59,7 @@
     {
       "id": "pureIntegration",
       "question": "Do you require array-aware integration with Pure Storage for classification, placement, or rapid provisioning?",
-      "ifYes": "Use SCVMM's SMI-S storage-provider path and validate the exact Purity, SMI-S, and SCVMM versions. Either WAC mode can remain a complementary day-two tool where its own requirements are met.",
+      "ifYes": "Use SCVMM's SMI-S storage-provider path and validate the exact Purity, SMI-S, and SCVMM versions. WAC vMode is not selected, because neither Microsoft nor Pure Storage documents a Pure integration for it; WAC Administration Mode remains the day-two tool.",
       "ifNo": "The storage vendor does not force the management-plane selection.",
       "why": "Pure documents SMI-S integration with SCVMM for capacity visibility, LUN creation, and VM deployment. Do not assume every Pure workflow or WAC extension is supported in every WAC mode or release without a current compatibility check.",
       "sources": [
@@ -82,7 +82,7 @@
     {
       "id": "migration",
       "question": "Is VMware-to-Hyper-V conversion part of the project?",
-      "ifYes": "Create a separately sized and costed migration workstream using SCVMM V2V or a qualified third-party tool.",
+      "ifYes": "Create a separately sized and costed migration workstream using SCVMM V2V or a qualified third-party tool. This answer does not change the steady-state stack.",
       "ifNo": "Migration tooling does not affect the steady-state management-plane recommendation.",
       "why": "VMM provides native offline V2V, but migration is a project capability rather than a reason by itself to keep SCVMM as the permanent fabric manager.",
       "sources": [
@@ -122,10 +122,21 @@
       ]
     },
     {
+      "id": "vmodeHostEligible",
+      "question": "Are all hosts WAC Virtualization Mode would manage running Windows Server 2025 Datacenter, joined to the same Active Directory domain as the gateway with FQDN DNS resolution, and able to take Network ATC with Hyper-V, Data Center Bridging, and Failover Clustering, plus a reboot during onboarding?",
+      "ifYes": "The hosts meet the documented vMode host prerequisites, so vMode stays a candidate when its other gates are accepted.",
+      "ifNo": "Exclude WAC vMode for these hosts and use WAC Administration Mode. Until this is answered, vMode cannot be part of a final recommendation.",
+      "why": "Microsoft lists these host prerequisites for adding resources to vMode: Windows Server 2025 or later, Datacenter edition only; domain-joined with FQDN DNS resolution and on the same domain as the vMode gateway; Network ATC, Data Center Bridging, Hyper-V, and Failover Clustering; at least one management, compute, and storage intent; and no other vMode instance managing the host. Onboarding installs the required features and reboots the hosts, with a rolling reboot for existing clusters.",
+      "sources": [
+        { "label": "Add resources in WAC Virtualization Mode", "url": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/add-virtualization-mode-resources" },
+        { "label": "Install WAC Virtualization Mode", "url": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/install-virtualization-mode" }
+      ]
+    },
+    {
       "id": "smallEdge",
       "question": "Is this a small dedicated stack where simpler operations matter more than tenant and fabric-management features?",
-      "ifYes": "Prefer a Classic Hyper-V foundation unless a hard requirement still justifies SCVMM. Prefer WAC vMode when its Preview, HA, and capability gates are accepted; otherwise use WAC aMode.",
-      "ifNo": "Do not select SCVMM based on footprint alone; continue evaluating the actual operating requirements.",
+      "ifYes": "Recorded as a weighting factor; it does not change the recommended stack by itself. Without a hard SCVMM requirement the foundation is already Classic, and the WAC mode still follows the Preview, HA, and host-eligibility answers.",
+      "ifNo": "Footprint alone does not change the stack; the actual operating requirements decide it.",
       "why": "A small footprint is a weighting factor, not a licensing verdict. Bare-metal provisioning, quotas, array integration, or optimization can still justify SCVMM on a small cluster; model cost separately.",
       "sources": []
     },
@@ -186,7 +197,7 @@
     {
       "id": "automation",
       "question": "Must the platform integrate with service catalogs, CI/CD, or infrastructure-as-code through supported APIs?",
-      "ifYes": "Map each required workflow to a documented interface before selecting the stack. Hyper-V and SCVMM expose PowerShell; Azure Arc-enabled servers add Azure surfaces for guest management, not VM lifecycle. Do not assume WAC provides a supported general-purpose automation API.",
+      "ifYes": "Map each required workflow to a documented interface; this answer is recorded and does not change the stack by itself. Hyper-V and SCVMM expose PowerShell; Azure Arc-enabled servers add Azure surfaces for guest management, not VM lifecycle. Do not assume WAC provides a supported general-purpose automation API.",
       "ifNo": "Operator UI and standard administrative scripting may be sufficient.",
       "why": "An API checkbox is not enough: provisioning, networking, storage, approvals, secrets, rollback, and tenant isolation must all be covered by the chosen automation path.",
       "sources": [
@@ -198,7 +209,7 @@
       "id": "operationsOwnership",
       "question": "Can the operations team own database maintenance, certificates, backups, patching, and management-plane upgrades?",
       "ifYes": "The team can consider the full stack when its capabilities justify the operational overhead.",
-      "ifNo": "Prefer the simplest stack that meets hard requirements, or assign those lifecycle responsibilities to a managed service with explicit SLAs.",
+      "ifNo": "The advisor does not remove components that a hard requirement needs. It flags the lifecycle work the stack adds, such as SQL or PostgreSQL databases, certificates, and upgrades, so you can assign it to a managed service with explicit SLAs or revisit the requirements that add it.",
       "why": "Management-plane VMs are production workloads. Their operational ownership, recovery testing, certificate renewal, database care, and upgrade cadence must be designed and staffed.",
       "sources": []
     }

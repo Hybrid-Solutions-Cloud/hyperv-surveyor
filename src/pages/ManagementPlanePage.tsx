@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   AlertTriangle,
   BookOpen,
@@ -14,16 +14,16 @@ import {
   ServerCog,
   ShieldAlert,
 } from 'lucide-react'
-import type { ArchitectureOption } from '../engine/solve'
 import { usePlatformDesign } from '../state/usePlatformDesign'
 import {
   ARC_SERVICE_CATALOG,
-  deploymentInputsFromStack,
   normalizeManagementDeploymentInputs,
   planManagementDeployment,
   type ArcServiceId,
   type ManagementDeploymentInputs,
 } from '../engine/managementDeployment'
+import { advisorMatchSentence, applyAdvisorResult, withScaleChange, withStackChoice } from '../engine/managementAdvisor'
+import type { PlatformDesign } from '../engine/platformDesign'
 import {
   calculatePlaneCost,
   calculateProviderEconomics,
@@ -44,25 +44,24 @@ import {
   type PlaneId,
 } from '../data/managementPlane'
 import { MANAGEMENT_WORKBOOK } from '../data/managementWorkbook.generated'
-import type { TierId, TierPolicy, Vm } from '../engine/types'
 import { JourneyBar } from '../components/JourneyBar'
 import { WorkflowNav } from '../components/WorkflowNav'
 
 type AdvisorTab = 'recommend' | 'deploy' | 'compare' | 'cost' | 'vmware' | 'field' | 'sources'
 export default function ManagementPlanePage() {
   const [tab, setTab] = useState<AdvisorTab>('recommend')
-  const [answers, setAnswers] = useState<AdvisorAnswers>({})
-  const { vms, managementDeploymentInputs, setManagementDecision } = useSurveyorStore()
+  // Answers are saved with the project, so they reach the deployment, the plan and the report.
+  const answers = useSurveyorStore((state) => state.managementAdvisorAnswers)
+  const setAnswers = useSurveyorStore((state) => state.setManagementAdvisorAnswers)
+  const { vms, setManagementDecision } = useSurveyorStore()
   // The same design the report and the Implementation plan use: the chosen option, not the base config.
   const design = usePlatformDesign()
   const includedVms = vms.filter((vm) => vm.include).length
-  const recommendation = recommendManagementPlane(answers)
   const usesExistingHardware = design.path === 'existing'
   const managementOnly = design.path === 'management-only'
   const platformCfg = design.cfg
-  const platformTiers = design.tiers
   // Defaults follow the design's node count, or the nodes it needs when it does not fit: never the cluster limit.
-  const platformNodes = managementOnly ? (managementDeploymentInputs?.managedHosts ?? 0) : design.totalNodes ?? design.management.contextNodes
+  const platformNodes = managementOnly ? design.management.inputs.managedHosts : design.totalNodes ?? design.management.contextNodes
   const platformLabel = design.platformLabel
 
   return (
@@ -94,15 +93,10 @@ export default function ManagementPlanePage() {
       {tab === 'recommend' && <RecommendationPanel answers={answers} setAnswers={setAnswers} />}
       {tab === 'deploy' && (
         <DeploymentDesignerPanel
-          recommendationStack={recommendation.stack}
-          recommendationMonitoring={recommendation.monitoring}
-          recommendationHighAvailability={recommendation.highAvailability}
-          recommendationArcServers={recommendation.arcServers}
+          design={design}
           platformKind={managementOnly ? 'management-only' : usesExistingHardware ? 'existing' : 'new'}
-          platformCfg={platformCfg}
           platformNodes={platformNodes}
-          vms={vms}
-          tiers={platformTiers}
+          onReviewAdvisor={() => setTab('recommend')}
         />
       )}
       {tab === 'compare' && <ComparisonPanel />}
@@ -116,7 +110,7 @@ export default function ManagementPlanePage() {
           initialCoresPerSocket={platformCfg.node.coresPerSocket}
           initialVms={includedVms || 320}
           spareHosts={platformCfg.spareNodes}
-          initialManagementInputs={managementDeploymentInputs}
+          initialManagementInputs={design.management.designed ? design.management.rawInputs : null}
         />
       )}
       <WorkflowNav
@@ -334,61 +328,38 @@ function RecommendationPanel({
   )
 }
 
+/** Stack fields: picking one of these makes the stack the user's, so it stops following the advisor. */
+type StackPatch = Partial<Pick<ManagementDeploymentInputs, 'foundation' | 'wac' | 'monitoring' | 'includeArc' | 'arcServices' | 'highAvailability' | 'fabricHighAvailability' | 'scomHighAvailability' | 'scomSqlPlacement'>>
+
 function DeploymentDesignerPanel({
-  recommendationStack,
-  recommendationMonitoring,
-  recommendationHighAvailability,
-  recommendationArcServers,
+  design,
   platformKind,
-  platformCfg,
   platformNodes,
-  vms,
-  tiers,
+  onReviewAdvisor,
 }: {
-  recommendationStack: PlaneId[]
-  recommendationMonitoring: ManagementDeploymentInputs['monitoring']
-  recommendationHighAvailability: boolean
-  recommendationArcServers: boolean
+  design: PlatformDesign
   platformKind: 'new' | 'existing' | 'management-only'
-  platformCfg: ArchitectureOption['cfg']
   platformNodes: number
-  vms: Vm[]
-  tiers: Record<TierId, TierPolicy>
+  onReviewAdvisor: () => void
 }) {
-  const includedVms = vms.filter((vm) => vm.include).length
-  const suggestedStack: PlaneId[] = recommendationStack.length > 0
-    ? recommendationStack
-    : platformNodes <= 4
-      ? ['classic', 'wac-admin']
-      : ['scvmm', 'wac-admin']
-  const makeSuggestedInputs = () => deploymentInputsFromStack(
-    suggestedStack,
-    platformNodes,
-    includedVms,
-    {
-      monitoring: recommendationMonitoring,
-      highAvailability: recommendationHighAvailability,
-      includeArc: recommendationArcServers,
-    },
-  )
-  const storedInputs = useSurveyorStore((state) => state.managementDeploymentInputs)
   const persistInputs = useSurveyorStore((state) => state.setManagementDeploymentInputs)
   const setManagementDecision = useSurveyorStore((state) => state.setManagementDecision)
-  const setInputs = (next: ManagementDeploymentInputs) => {
+  const storedInputs = useSurveyorStore((state) => state.managementDeploymentInputs)
+  const management = design.management
+  const advisor = management.advisor
+  // Edits start from the unfilled inputs, so a value that follows the estate keeps following it.
+  const save = (next: ManagementDeploymentInputs) => {
     persistInputs(next)
     setManagementDecision('design')
   }
+  const setStack = (patch: StackPatch) => save(withStackChoice(management.rawInputs, patch))
+  const setScale = (patch: Partial<ManagementDeploymentInputs>) => save(withScaleChange(management.rawInputs, patch))
+  const applyAdvisor = () => save(applyAdvisorResult(storedInputs ?? management.rawInputs, advisor.recommendation))
   const includeInSizing = useSurveyorStore((state) => state.includeManagementInSizing)
   const setIncludeInSizing = useSurveyorStore((state) => state.setIncludeManagementInSizing)
-  const inputs = normalizeManagementDeploymentInputs(storedInputs
-    ? { ...storedInputs, monitoring: storedInputs.monitoring ?? 'none' }
-    : makeSuggestedInputs())
-  const inputsKey = JSON.stringify(inputs)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const stableInputs = useMemo(() => inputs, [inputsKey])
-  const plan = useMemo(() => planManagementDeployment(stableInputs), [stableInputs])
-  // Host impact by the same rule every other page uses, for the inputs shown here.
-  const impactDesign = usePlatformDesign({ management: stableInputs })
+  const inputs = management.inputs
+  const plan = management.plan
+  const impactDesign = design
   const hostDelta = impactDesign.management.hostDelta
   const fitText = platformKind === 'existing' && impactDesign.fitGap?.fits !== null && impactDesign.fitGap
     ? impactDesign.fitGap.fits ? ` Fits on the ${platformNodes} entered nodes.` : ` Does not fit the ${platformNodes} entered nodes.`
@@ -401,14 +372,23 @@ function DeploymentDesignerPanel({
   const scomPlanned = inputs.monitoring === 'scom' || (inputs.monitoring === 'scom-features' && inputs.foundation === 'scvmm')
 
   const setNumber = (key: keyof ManagementDeploymentInputs, value: number) => {
-    setInputs({ ...inputs, [key]: Math.max(0, value) })
+    setScale({ [key]: Math.max(0, value) })
   }
   const setArcService = (id: ArcServiceId, checked: boolean) => {
     const arcServices = checked
       ? [...new Set([...inputs.arcServices, id])]
       : inputs.arcServices.filter((service) => service !== id)
-    setInputs({ ...inputs, arcServices })
+    setScale({ arcServices })
   }
+  const advisorReady = advisor.status === 'ready'
+  const showApply = advisorReady && advisor.matches === false
+  const statusNote = management.source === 'advisor'
+    ? { tone: 'ok', title: 'Following the advisor', text: `The stack below is the advisor recommendation: ${advisor.recommendedStack}. It updates when the answers change, until you pick a stack field here.` }
+    : management.source === 'starting-point'
+      ? { tone: 'warn', title: advisor.status === 'not-started' ? 'Starting point, not a recommendation' : advisor.status === 'conflict' ? 'Advisor answers conflict' : 'Advisor incomplete', text: `${advisorMatchSentence(management.source, advisor)} It uses the components the answers confirm and the host-count default for the rest.` }
+      : showApply
+        ? { tone: 'warn', title: 'The advisor now recommends something else', text: advisorMatchSentence(management.source, advisor) }
+        : { tone: '', title: 'Your saved stack', text: advisorMatchSentence(management.source, advisor) }
 
   return (
     <div className="deployment-layout">
@@ -416,11 +396,15 @@ function DeploymentDesignerPanel({
         <div className="panel-heading-row">
           <div>
             <h2>Deployment choices</h2>
-            <p className="small muted">The advisor supplies the starting stack. Every choice remains editable.</p>
+            <p className="small muted">The stack follows the advisor until you pick a stack field. Hosts, VMs, placement, and retention are always yours.</p>
           </div>
-          <button className="btn ghost compact" onClick={() => setInputs(makeSuggestedInputs())}>
-            <RotateCcw size={14} /> Use advisor
-          </button>
+        </div>
+        <div className={`note ${statusNote.tone}`}>
+          <strong>{statusNote.title}</strong>{statusNote.text}
+          {showApply && (
+            <div><button className="btn compact" type="button" onClick={applyAdvisor}><RotateCcw size={14} /> Apply advisor result</button> <small>Changes only the stack. Managed hosts, VMs, clusters, placement, and retention stay as entered.</small></div>
+          )}
+          {!advisorReady && <div><button className="btn ghost compact" type="button" onClick={onReviewAdvisor}>Open the advisor questions</button></div>}
         </div>
 
         <label className="field">
@@ -428,19 +412,19 @@ function DeploymentDesignerPanel({
           <div className="license-toggle deployment-choice-toggle">
             <button
               className={inputs.foundation === 'classic' ? 'active' : ''}
-              onClick={() => setInputs({ ...inputs, foundation: 'classic', includeArc: false, arcServices: [] })}
+              onClick={() => setStack({ foundation: 'classic' })}
               type="button"
             >Classic</button>
             <button
               className={inputs.foundation === 'scvmm' ? 'active' : ''}
-              onClick={() => setInputs({ ...inputs, foundation: 'scvmm' })}
+              onClick={() => setStack({ foundation: 'scvmm' })}
               type="button"
             >SCVMM 2025</button>
           </div>
         </label>
 
         <Field label="Windows Admin Center experience">
-          <select value={inputs.wac} onChange={(event) => setInputs({ ...inputs, wac: event.target.value as ManagementDeploymentInputs['wac'] })}>
+          <select value={inputs.wac} onChange={(event) => setStack({ wac: event.target.value as ManagementDeploymentInputs['wac'] })}>
             <option value="none">None</option>
             <option value="wac-admin">Administration Mode</option>
             <option value="wac-virtual">Virtualization Mode (preview)</option>
@@ -448,7 +432,7 @@ function DeploymentDesignerPanel({
         </Field>
 
         <Field label="System Center Operations Manager (SCOM)" hint="Capacity reporting, forecasting, and PRO come from connecting SCVMM to SCOM, even if another product does your monitoring.">
-          <select value={inputs.monitoring} onChange={(event) => setInputs({ ...inputs, monitoring: event.target.value as ManagementDeploymentInputs['monitoring'] })}>
+          <select value={inputs.monitoring} onChange={(event) => setStack({ monitoring: event.target.value as ManagementDeploymentInputs['monitoring'] })}>
             <option value="none">No SCOM</option>
             <option value="scom-features">SCOM for reporting and forecasting only, not monitoring</option>
             <option value="scom">SCOM for monitoring, reporting, and forecasting</option>
@@ -462,7 +446,7 @@ function DeploymentDesignerPanel({
         )}
 
         <Field label="Management VM placement" hint="Choose whether the management plane shares the workload failure domain or runs on independent infrastructure.">
-          <select value={inputs.managementPlacement} onChange={(event) => setInputs({ ...inputs, managementPlacement: event.target.value as ManagementDeploymentInputs['managementPlacement'] })}>
+          <select value={inputs.managementPlacement} onChange={(event) => setScale({ managementPlacement: event.target.value as ManagementDeploymentInputs['managementPlacement'] })}>
             <option value="workload-cluster">Same cluster as workload VMs</option>
             <option value="dedicated-management-cluster">Dedicated management cluster</option>
             <option value="external-fabric">External virtualization fabric</option>
@@ -470,17 +454,17 @@ function DeploymentDesignerPanel({
         </Field>
 
         <div className="meter-toggles deployment-toggles">
-          <CostToggle label={`${inputs.foundation === 'scvmm' ? 'SCVMM / WAC' : 'WAC'} high availability`} checked={inputs.fabricHighAvailability} onChange={(checked) => setInputs({ ...inputs, fabricHighAvailability: checked, highAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />
-          {scomPlanned && <CostToggle label="SCOM high availability" checked={inputs.scomHighAvailability} onChange={(checked) => setInputs({ ...inputs, scomHighAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />}
-          <CostToggle label="Add Azure Arc-enabled servers" checked={inputs.includeArc} onChange={(checked) => setInputs({ ...inputs, includeArc: checked, arcServices: checked ? inputs.arcServices : [] })} />
-          <CostToggle label="Add dedicated AD DS / DNS VMs" checked={inputs.includeIdentityServices} onChange={(checked) => setInputs({ ...inputs, includeIdentityServices: checked })} />
+          <CostToggle label={`${inputs.foundation === 'scvmm' ? 'SCVMM / WAC' : 'WAC'} high availability`} checked={inputs.fabricHighAvailability} onChange={(checked) => setStack({ fabricHighAvailability: checked, highAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />
+          {scomPlanned && <CostToggle label="SCOM high availability" checked={inputs.scomHighAvailability} onChange={(checked) => setStack({ scomHighAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />}
+          <CostToggle label="Add Azure Arc-enabled servers" checked={inputs.includeArc} onChange={(checked) => setStack({ includeArc: checked, arcServices: checked ? inputs.arcServices : [] })} />
+          <CostToggle label="Add dedicated AD DS / DNS VMs" checked={inputs.includeIdentityServices} onChange={(checked) => setScale({ includeIdentityServices: checked })} />
           {inputs.managementPlacement === 'workload-cluster' && platformKind !== 'management-only' && <CostToggle label="Include management VMs in workload-cluster sizing" checked={includeInSizing} onChange={setIncludeInSizing} />}
         </div>
         {inputs.managementPlacement !== 'workload-cluster' && <div className="note"><strong>Separate capacity domain</strong>Management VMs remain in the BOM but do not consume workload-cluster capacity for dedicated-cluster or external-fabric placement.</div>}
         {inputs.managementPlacement === 'workload-cluster' && platformKind === 'management-only' && <div className="note warn"><strong>Workload capacity not supplied</strong>The BOM is complete, but host impact cannot be calculated until a platform or existing-hardware profile is added.</div>}
         {scomPlanned && inputs.scomHighAvailability && inputs.foundation === 'scvmm' && inputs.fabricHighAvailability && (
           <Field label="SCOM database placement">
-            <select value={inputs.scomSqlPlacement} onChange={(event) => setInputs({ ...inputs, scomSqlPlacement: event.target.value as ManagementDeploymentInputs['scomSqlPlacement'] })}>
+            <select value={inputs.scomSqlPlacement} onChange={(event) => setScale({ scomSqlPlacement: event.target.value as ManagementDeploymentInputs['scomSqlPlacement'] })}>
               <option value="dedicated">Dedicated SCOM SQL Always On pair</option>
               <option value="shared-vmm">Share VMM SQL Always On infrastructure</option>
             </select>
@@ -496,14 +480,17 @@ function DeploymentDesignerPanel({
           <>
             <h3>SCOM workload and retention</h3>
             <div className="form-grid two-column deployment-scale-inputs">
-              <Field label="Expected management packs"><NumberInput value={inputs.scomManagementPackCount} min={0} onChange={(value) => setNumber('scomManagementPackCount', value)} /></Field>
-              <Field label="Collected data GiB / day"><NumberInput value={inputs.scomDailyDataGiB} min={0.1} step={0.1} onChange={(value) => setNumber('scomDailyDataGiB', value)} /></Field>
+              <Field label="Expected management packs" hint="Recorded for the Sizing Helper. Microsoft publishes no per-pack figure, so it does not change sizing."><NumberInput value={inputs.scomManagementPackCount} min={0} onChange={(value) => setNumber('scomManagementPackCount', value)} /></Field>
+              <Field label="Collected data GiB / day" hint={inputs.scomDailyDataUserSet ? 'Set by you. It no longer follows the managed hosts and VMs.' : `Calculated from ${plan.scomAgentManagedComputers.toLocaleString()} agent-managed computers. It follows the managed hosts and VMs until you change it.`}>
+                <NumberInput value={inputs.scomDailyDataGiB} min={0.1} step={0.1} onChange={(value) => setScale({ scomDailyDataGiB: Math.max(0.1, value) })} />
+                {inputs.scomDailyDataUserSet && <button className="btn ghost compact" type="button" onClick={() => setScale({ scomDailyDataGiB: undefined })}>Calculate from the estate</button>}
+              </Field>
               <Field label="Operational retention days"><NumberInput value={inputs.scomOperationalRetentionDays} min={1} onChange={(value) => setNumber('scomOperationalRetentionDays', value)} /></Field>
               <Field label="Warehouse retention days"><NumberInput value={inputs.scomWarehouseRetentionDays} min={1} onChange={(value) => setNumber('scomWarehouseRetentionDays', value)} /></Field>
             </div>
             {inputs.scomHighAvailability && (
               <Field label="Reporting and web-console recovery">
-                <select value={inputs.scomAuxiliaryRecovery} onChange={(event) => setInputs({ ...inputs, scomAuxiliaryRecovery: event.target.value as ManagementDeploymentInputs['scomAuxiliaryRecovery'] })}>
+                <select value={inputs.scomAuxiliaryRecovery} onChange={(event) => setScale({ scomAuxiliaryRecovery: event.target.value as ManagementDeploymentInputs['scomAuxiliaryRecovery'] })}>
                   <option value="rebuild">Documented rebuild recovery</option>
                   <option value="warm-standby">Warm standby instances</option>
                 </select>
@@ -517,13 +504,13 @@ function DeploymentDesignerPanel({
             <p className="small muted">Connects the guest operating systems to Azure management services. It needs no management VM and does not provide VM lifecycle operations from Azure.</p>
             <div className="form-grid two-column deployment-scale-inputs">
               <Field label="Azure connectivity">
-                <select value={inputs.arcConnectivity} onChange={(event) => setInputs({ ...inputs, arcConnectivity: event.target.value as ManagementDeploymentInputs['arcConnectivity'] })}>
+                <select value={inputs.arcConnectivity} onChange={(event) => setScale({ arcConnectivity: event.target.value as ManagementDeploymentInputs['arcConnectivity'] })}>
                   <option value="public">Direct outbound public endpoints</option>
                   <option value="proxy">Outbound proxy</option>
                   <option value="private-link">Azure Private Link</option>
                 </select>
               </Field>
-              <Field label="Azure region"><input value={inputs.arcRegion} onChange={(event) => setInputs({ ...inputs, arcRegion: event.target.value })} placeholder="Example: East US 2" /></Field>
+              <Field label="Azure region"><input value={inputs.arcRegion} onChange={(event) => setScale({ arcRegion: event.target.value })} placeholder="Example: East US 2" /></Field>
               <Field label="Servers to connect (% of workload VMs)"><NumberInput value={inputs.arcGuestScopePct} min={0} max={100} onChange={(value) => setNumber('arcGuestScopePct', value)} /></Field>
               <Field label="Log Analytics retention days"><NumberInput value={inputs.logAnalyticsRetentionDays} min={30} max={2555} onChange={(value) => setNumber('logAnalyticsRetentionDays', value)} /></Field>
             </div>
@@ -552,7 +539,7 @@ function DeploymentDesignerPanel({
           <Field label="Managed workload VMs">
             <NumberInput value={inputs.managedVms} min={0} onChange={(value) => setNumber('managedVms', value)} />
           </Field>
-          <Field label="Managed clusters">
+          <Field label="Managed clusters" hint="Recorded in the design. It does not change component sizing.">
             <NumberInput value={inputs.managedClusters} min={1} onChange={(value) => setNumber('managedClusters', value)} />
           </Field>
           <Field label="Library content (GiB)">
@@ -560,6 +547,7 @@ function DeploymentDesignerPanel({
           </Field>
         </div>
 
+        {management.warnings.map((warning) => <div className="note warn" key={warning}><strong>Missing input</strong>{warning}</div>)}
         <div className="deployment-basis-note">
           <BasisPill basis="MS" /> published requirement
           <BasisPill basis="MS-REC" /> published recommendation
@@ -582,6 +570,8 @@ function DeploymentDesignerPanel({
             </div>
           </div>
 
+          {plan.errors.map((error) => <div className="note err" key={error}><strong>Above a published limit</strong>{error}</div>)}
+          {management.dedicated && <div className={`note ${management.dedicated.nodes !== null ? '' : 'warn'}`}><strong>Dedicated management cluster</strong>{management.dedicated.nodes !== null ? `${management.dedicated.nodes} hosts for ${management.vms.length} management instances, including the failure reserve. ${management.dedicated.basis ?? ''}` : management.dedicated.reason}</div>}
           <div className="deployment-kpis">
             <article><span>VM instances</span><strong>{plan.totalInstances}</strong><small>Management components</small></article>
             <article><span>Total vCPU</span><strong>{plan.totalVCpu.toLocaleString()}</strong><small>Allocated</small></article>

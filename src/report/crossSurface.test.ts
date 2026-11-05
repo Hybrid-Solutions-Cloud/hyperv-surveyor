@@ -298,8 +298,11 @@ describe('management solution only', () => {
     expect(design.network.nodes).toBeNull()
     expect(project.nodes).toBe('—')
     expect(section(report, 'management').paragraphs.join(' ')).toMatch(/managed hosts are not entered/i)
-    expect(design.management.dedicated?.nodes).toBeNull()
-    expect(metric(report, 'deployment', 'Dedicated management nodes')?.value).toBe('Not calculated')
+    // D9: the dedicated management cluster gets a host count from the reference server, with the basis stated.
+    expect(design.management.dedicated?.nodes).toBeGreaterThan(0)
+    expect(design.management.dedicated?.basis).toMatch(/reference server/i)
+    expect(design.management.warnings.join(' ')).toMatch(/managed hosts are 0/i)
+    expect(metric(report, 'deployment', 'Dedicated management nodes')?.value).toBe(String(design.management.dedicated?.nodes))
   })
 
   it('does not claim a topology when no management design is saved', () => {

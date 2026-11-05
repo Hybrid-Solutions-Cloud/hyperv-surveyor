@@ -18,6 +18,12 @@ export type ManagementScale = 'small' | 'medium' | 'large' | 'beyond-tested-scal
 export type DeploymentBasis = 'MS' | 'MS-REC' | 'TOOL'
 
 export interface ManagementDeploymentInputs {
+  /**
+   * Who owns the stack fields (foundation, WAC, SCOM, Arc and the HA choices). 'advisor': they follow
+   * the Management Plane Advisor whenever it gives a ready result. 'user': the user picked them and
+   * they stay. Absent in saves made before the advisor answers were kept, which are treated as 'user'.
+   */
+  stackSource?: 'advisor' | 'user'
   foundation: ManagementFoundation
   wac: WacExperience
   includeArc: boolean
@@ -38,7 +44,9 @@ export interface ManagementDeploymentInputs {
   arcRegion?: string
   arcGuestScopePct?: number
   logAnalyticsRetentionDays?: number
+  /** Recorded for the Sizing Helper. Microsoft publishes no per-pack sizing figure, so it does not change the estimate. */
   scomManagementPackCount?: number
+  /** Absent means calculated from the current managed hosts and VMs; a number is a value the user set. */
   scomDailyDataGiB?: number
   scomOperationalRetentionDays?: number
   scomWarehouseRetentionDays?: number
@@ -65,6 +73,10 @@ export interface ManagementComponent {
 
 export interface ManagementDeploymentPlan {
   scale: ManagementScale
+  /** Breaches of a limit Microsoft publishes. The plan cannot be approved as shown. */
+  errors: string[]
+  /** Computers SCOM agents report from, or 0 when no SCOM servers are planned. */
+  scomAgentManagedComputers: number
   scaleLabel: string
   components: ManagementComponent[]
   arcServices: ArcServicePlan[]
@@ -98,6 +110,8 @@ export type ResolvedManagementDeploymentInputs = ManagementDeploymentInputs & {
   logAnalyticsRetentionDays: number
   scomManagementPackCount: number
   scomDailyDataGiB: number
+  /** True when the user set the daily data value; false when it follows the managed estate. */
+  scomDailyDataUserSet: boolean
   scomOperationalRetentionDays: number
   scomWarehouseRetentionDays: number
   scomAuxiliaryRecovery: ScomAuxiliaryRecovery
@@ -122,6 +136,42 @@ const SRC = {
   scomHa: 'https://learn.microsoft.com/system-center/scom/plan-hadr-design?view=sc-om-2025',
   scomSql: 'https://learn.microsoft.com/system-center/scom/plan-sqlserver-design?view=sc-om-2025',
   scomDesign: 'https://learn.microsoft.com/system-center/scom/plan-mgmt-group-design?view=sc-om-2025',
+  wacVirtualHosts: 'https://learn.microsoft.com/windows-server/manage/windows-admin-center/add-virtualization-mode-resources',
+}
+
+/**
+ * Operations Manager 2025 capacity limits, from the "Capacity limits for Operations Manager" table at
+ * https://learn.microsoft.com/system-center/scom/system-requirements?view=sc-om-2025 (checked 2026-11-05).
+ * Microsoft labels the table "Recommended Limit". Surveyor treats the largest management-group figure and
+ * the per-management-server figure as limits a plan must not exceed, and the 50-console figure as a warning.
+ */
+export const SCOM_LIMITS = {
+  agentsPerManagementServer: 3_000,
+  agentsPerManagementGroupWith50Consoles: 6_000,
+  agentsPerManagementGroupWith25Consoles: 15_000,
+} as const
+
+/**
+ * SQL Server versions Operations Manager 2025 supports for its databases, from
+ * https://learn.microsoft.com/system-center/scom/plan-sqlserver-design?view=sc-om-2025 (checked 2026-11-05).
+ */
+export const SCOM_SQL_MINIMUMS = 'SQL Server 2022 with Cumulative Update 11 (CU11) or later, or SQL Server 2019 with Cumulative Update 8 (CU8) or later. SQL Server 2025 is supported from SCOM 2025 Update Rollup 1.'
+
+/** Computers with SCOM agents: hosts and VMM servers for features only, hosts and workload VMs for monitoring. */
+export function scomAgentCount(inputs: Pick<ManagementDeploymentInputs, 'monitoring' | 'foundation' | 'managedHosts' | 'managedVms' | 'fabricHighAvailability' | 'highAvailability'>): number {
+  const hosts = Math.max(0, Math.round(inputs.managedHosts))
+  const vms = Math.max(0, Math.round(inputs.managedVms))
+  if (inputs.monitoring === 'scom') return hosts + vms
+  if (inputs.monitoring === 'scom-features' && inputs.foundation === 'scvmm') {
+    const vmmServers = (inputs.fabricHighAvailability ?? inputs.highAvailability ?? true) ? 2 : 1
+    return hosts + vmmServers
+  }
+  return 0
+}
+
+/** Surveyor's starting allowance: 1 GiB per day per 500 agent-managed computers, at least 1 GiB. */
+export function defaultScomDailyDataGiB(inputs: Parameters<typeof scomAgentCount>[0]): number {
+  return Math.max(1, scomAgentCount(inputs) / 500)
 }
 
 export const ARC_SERVICE_CATALOG: readonly ArcServicePlan[] = [
@@ -192,7 +242,9 @@ export function normalizeManagementDeploymentInputs(inputs: ManagementDeployment
     arcGuestScopePct: Math.min(100, Math.max(0, inputs.arcGuestScopePct ?? 100)),
     logAnalyticsRetentionDays: Math.max(30, inputs.logAnalyticsRetentionDays ?? 30),
     scomManagementPackCount: Math.max(0, inputs.scomManagementPackCount ?? 20),
-    scomDailyDataGiB: Math.max(0.1, inputs.scomDailyDataGiB ?? Math.max(1, inputs.managedVms / 500)),
+    // Follows the current managed hosts and VMs unless the user set it.
+    scomDailyDataGiB: Math.max(0.1, inputs.scomDailyDataGiB ?? defaultScomDailyDataGiB(inputs)),
+    scomDailyDataUserSet: typeof inputs.scomDailyDataGiB === 'number',
     scomOperationalRetentionDays: Math.max(1, inputs.scomOperationalRetentionDays ?? 7),
     scomWarehouseRetentionDays: Math.max(1, inputs.scomWarehouseRetentionDays ?? 400),
     scomAuxiliaryRecovery: inputs.scomAuxiliaryRecovery ?? 'rebuild',
@@ -230,6 +282,7 @@ export function deploymentInputsFromStack(
 ): ManagementDeploymentInputs {
   const highAvailability = recommendations.highAvailability ?? true
   return {
+    stackSource: 'advisor',
     foundation: stack.includes('scvmm') ? 'scvmm' : 'classic',
     wac: stack.includes('wac-virtual') ? 'wac-virtual' : stack.includes('wac-admin') ? 'wac-admin' : 'none',
     includeArc: recommendations.includeArc ?? false,
@@ -250,7 +303,7 @@ export function deploymentInputsFromStack(
     arcGuestScopePct: 100,
     logAnalyticsRetentionDays: 30,
     scomManagementPackCount: 20,
-    scomDailyDataGiB: Math.max(1, managedVms / 500),
+    // scomDailyDataGiB is left out so it follows the managed estate until the user sets it.
     scomOperationalRetentionDays: 7,
     scomWarehouseRetentionDays: 400,
     scomAuxiliaryRecovery: 'rebuild',
@@ -269,6 +322,8 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
   const arcServices: ArcServicePlan[] = []
   const dependencies = new Set<string>()
   const cautions: string[] = []
+  const errors: string[] = []
+  let scomAgentManagedComputers = 0
   const placementLabel = resolved.managementPlacement === 'workload-cluster'
     ? 'the workload cluster'
     : resolved.managementPlacement === 'dedicated-management-cluster'
@@ -440,9 +495,22 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
       operatingSystem: 'Windows Server 2025 Standard or Datacenter',
       licensing: 'Windows Admin Center is included at no additional charge',
       source: SRC.wacVirtual,
-      notes: ['PostgreSQL is installed as part of the gateway deployment.', 'Administration Mode must be installed on a separate system.'],
+      notes: [
+        'PostgreSQL is installed as part of the gateway deployment.',
+        'Administration Mode must be installed on a separate system.',
+        'The preview installer generates a self-signed TLS certificate that expires after 60 days; preinstalled certificates are not available. Plan its renewal.',
+      ],
     }))
     dependencies.add('FQDN DNS resolution and TLS for gateway-to-agent communication')
+    // Host prerequisites Microsoft lists for adding resources to Virtualization Mode.
+    dependencies.add('vMode hosts: Windows Server 2025 or later, Datacenter edition only')
+    dependencies.add('vMode hosts: domain-joined with FQDN DNS resolution, in the same domain as the Virtualization Mode gateway')
+    dependencies.add('vMode hosts: Network ATC, Data Center Bridging, Hyper-V, and Failover Clustering, with at least one management, compute, and storage intent')
+    dependencies.add('vMode hosts: File and Printer Sharing (SMB-In) and Windows Remote Management firewall rules, a local Administrator account, and no other Virtualization Mode instance managing the host')
+    dependencies.add('vMode onboarding installs the required host features and reboots the hosts; existing clusters get a rolling reboot that drains VMs from each node')
+    dependencies.add('vMode gateway TLS: the preview installer generates a self-signed certificate that expires after 60 days, and preinstalled certificates are not available yet')
+    cautions.push('Hyperconverged (Storage Spaces Direct) storage configuration is not available in the vMode preview, and the storage and networking host profiles are not available yet.')
+    if (inputs.foundation === 'scvmm') cautions.push('Validate before relying on it: Microsoft does not document SCVMM and WAC vMode managing the same hosts. vMode configures host networking through Network ATC during onboarding, so pilot the combination and decide which tool owns each host setting.')
     if (fabricHa) cautions.push('Virtualization Mode is still preview and Microsoft has not published an HA deployment. The plan keeps one gateway and flags the availability gap.')
   }
 
@@ -476,6 +544,12 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
     // Features only needs agents on the VMM servers and hosts, not on every guest.
     const vmmServers = components.find((item) => item.id === 'vmm')?.count ?? 0
     const monitoredComputers = scomFeaturesOnly ? hosts + vmmServers : hosts + vms
+    scomAgentManagedComputers = monitoredComputers
+    if (monitoredComputers > SCOM_LIMITS.agentsPerManagementGroupWith25Consoles) {
+      errors.push(`SCOM: ${monitoredComputers.toLocaleString()} agent-managed computers exceed the ${SCOM_LIMITS.agentsPerManagementGroupWith25Consoles.toLocaleString()} Microsoft publishes for one management group (with 25 open consoles). Split the estate across management groups.`)
+    } else if (monitoredComputers > SCOM_LIMITS.agentsPerManagementGroupWith50Consoles) {
+      cautions.push(`SCOM: ${monitoredComputers.toLocaleString()} agent-managed computers are above the ${SCOM_LIMITS.agentsPerManagementGroupWith50Consoles.toLocaleString()} Microsoft publishes for one management group with 50 open consoles. Up to ${SCOM_LIMITS.agentsPerManagementGroupWith25Consoles.toLocaleString()} is published with no more than 25 open consoles.`)
+    }
     const publishedManagementServers = Math.max(1, Math.ceil(monitoredComputers / 3_000))
     const managementSize = scaledSize(scale, {
       small: { vCpu: 4, ramGiB: 8, diskGiB: 100 },
@@ -512,8 +586,15 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
           'Includes the OperationsManager, OperationsManagerDW, reporting, management server, and web console roles on one VM.',
           'No management-server agent failover or database failover is provided.',
           'Use SSRS native mode and validate SQL collation, Full-Text Search, retention, growth, and storage IOPS.',
+          `Supported SQL Server: ${SCOM_SQL_MINIMUMS}`,
         ],
       }))
+      if (monitoredComputers > SCOM_LIMITS.agentsPerManagementServer) {
+        errors.push(`SCOM single server: ${monitoredComputers.toLocaleString()} agent-managed computers exceed the ${SCOM_LIMITS.agentsPerManagementServer.toLocaleString()} Microsoft publishes for one management server. Turn on SCOM high availability to plan more management servers.`)
+      }
+      if (scale !== 'small') {
+        cautions.push(`The SCOM single-server topology is planned for a ${scale === 'beyond-tested-scale' ? 'very large' : scale} estate (${monitoredComputers.toLocaleString()} agent-managed computers). Microsoft positions it for evaluation and only the smallest production loads, so use the distributed topology with SCOM high availability.`)
+      }
       cautions.push('Microsoft positions the SCOM single-server topology mainly for evaluation, testing, management-pack development, and only the smallest production loads. Use distributed SCOM with HA for a production service that requires redundancy or meaningful scale.')
       if (resolved.scomSqlPlacement === 'shared-vmm') cautions.push('The shared VMM SQL selection is ignored for single-server SCOM because the all-in-one topology keeps the SCOM databases on the SCOM server.')
     } else {
@@ -552,6 +633,7 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
           sharedSql.basisDetail = 'Additive consolidated Surveyor profile. Microsoft documents Always On for both products but does not publish a universal combined VMM/SCOM SQL sizing profile.'
           sharedSql.source = SRC.scomSql
           sharedSql.notes.push(
+            `SCOM needs ${SCOM_SQL_MINIMUMS}`,
             'Validate a SQL version and collation supported by both products, combined CPU/RAM/IOPS, backup windows, and the AG/listener design.',
             'Keep the VMM and SCOM application databases separate; do not share the SCOM SSRS instance with other reporting applications.',
           )
@@ -573,7 +655,7 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
           operatingSystem: 'Windows Server 2025 + supported SQL Server',
           licensing: 'SQL Server licensing must be confirmed with the licensing provider',
           source: SRC.scomSql,
-          notes: ['SQL Server Full-Text Search and a supported collation are required.', 'Validate database growth, retention, management packs, and storage IOPS with the Operations Manager Sizing Helper.'],
+          notes: ['SQL Server Full-Text Search and a supported collation are required.', `Supported SQL Server: ${SCOM_SQL_MINIMUMS}`, 'Validate database growth, retention, management packs, and storage IOPS with the Operations Manager Sizing Helper.'],
         }))
       }
 
@@ -602,7 +684,8 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
         vCpu: 4,
         ramGiB: 8,
         diskGiB: 100,
-        availability: resolved.scomAuxiliaryRecovery === 'warm-standby' ? 'Primary plus warm standby · DNS/load-balancer change' : 'Rebuild from documented configuration',
+        // Microsoft does not support Network Load Balancing for the web console server, so failover is a DNS change.
+        availability: resolved.scomAuxiliaryRecovery === 'warm-standby' ? 'Primary plus warm standby · DNS alias change, no load balancer' : 'Rebuild from documented configuration',
         basis: 'TOOL',
         basisDetail: 'Microsoft-published 4-core, 8 GiB minimum with a Surveyor 100 GiB OS/application disk allowance.',
         operatingSystem: 'Windows Server 2025 Desktop Experience + IIS',
@@ -632,8 +715,9 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
       if (hosts > 400 || vms > 8_000) cautions.push('Microsoft states the VMM monitoring packs support up to 400 hosts and 8,000 VMs. This estate exceeds that, so validate the integration design.')
     }
     dependencies.add('SQL Server Full-Text Search, supported collation, SSRS native mode, and current SQL client drivers')
+    dependencies.add(`SCOM SQL Server version: ${SCOM_SQL_MINIMUMS}`)
     if (!inputs.includeIdentityServices) dependencies.add('Existing healthy Active Directory and DNS services for SCOM authentication and discovery')
-    cautions.push(`SCOM database allowance uses ${resolved.scomDailyDataGiB.toFixed(1)} GiB/day, ${resolved.scomOperationalRetentionDays} operational days, ${resolved.scomWarehouseRetentionDays} warehouse days, and ${resolved.scomManagementPackCount} expected management packs. Validate these inputs and storage IOPS with the Sizing Helper.`)
+    cautions.push(`SCOM database allowance uses ${resolved.scomDailyDataGiB.toFixed(1)} GiB/day (${resolved.scomDailyDataUserSet ? 'set by you' : `calculated from ${monitoredComputers.toLocaleString()} agent-managed computers`}), ${resolved.scomOperationalRetentionDays} operational days, and ${resolved.scomWarehouseRetentionDays} warehouse days. The ${resolved.scomManagementPackCount} expected management packs are recorded for the Sizing Helper and do not change this estimate. Validate these inputs and storage IOPS with the Sizing Helper.`)
     cautions.push('Do not checkpoint, pause, or save-state virtual machines running SCOM components; Microsoft does not support those virtualization operations.')
   }
 
@@ -658,6 +742,8 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
   return {
     scale,
     scaleLabel,
+    errors,
+    scomAgentManagedComputers,
     components,
     arcServices,
     dependencies: [...dependencies],

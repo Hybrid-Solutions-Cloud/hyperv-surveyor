@@ -10,6 +10,7 @@ import { JourneyBar } from '../components/JourneyBar'
 import { usePlatformDesign } from '../state/usePlatformDesign'
 import { ENGAGEMENT_LABELS } from '../state/journey'
 import { WorkflowNav } from '../components/WorkflowNav'
+import { advisorMatchSentence } from '../engine/managementAdvisor'
 
 export default function DeploymentPage() {
   const store = useSurveyorStore()
@@ -44,9 +45,11 @@ export default function DeploymentPage() {
         <section className="panel">
           <h2>Management-only implementation</h2>
           <p className="muted">The management bill of materials is available without a workload design. Add a platform path later if host placement, network ports, workload fit, or disaster recovery must also be calculated.</p>
-          {management.contextNote && <div className="note warn"><strong>Managed hosts</strong>{management.contextNote}</div>}
-          {dedicatedManagement?.reason && <div className="note warn"><strong>Dedicated management cluster</strong>{dedicatedManagement.reason}</div>}
-          <div className="grid cards"><div className="card"><div className="k">Management instances</div><div className="v">{managementPlan.totalInstances}</div></div><div className="card"><div className="k">Management vCPU</div><div className="v">{managementPlan.totalVCpu}</div></div><div className="card"><div className="k">Management memory</div><div className="v">{managementPlan.totalRamGiB}<span style={{ fontSize: 15 }}> GiB</span></div></div><div className="card"><div className="k">Management disk</div><div className="v">{managementPlan.totalDiskGiB}<span style={{ fontSize: 15 }}> GiB</span></div></div></div>
+          {management.designed && <div className={`note ${management.source === 'starting-point' || management.advisor.matches === false ? 'warn' : ''}`}><strong>Management stack</strong>{advisorMatchSentence(management.source, management.advisor)}</div>}
+          {management.warnings.map((warning) => <div className="note warn" key={warning}><strong>Missing input</strong>{warning}</div>)}
+          {management.errors.map((error) => <div className="note err" key={error}><strong>Above a published limit</strong>{error}</div>)}
+          {dedicatedManagement && <div className={`note ${dedicatedManagement.nodes !== null ? 'ok' : 'warn'}`}><strong>Dedicated management cluster</strong>{dedicatedManagement.nodes !== null ? `${dedicatedManagement.nodes} hosts are required for ${management.vms.length} management instances, including the failure reserve. ${dedicatedManagement.basis ?? ''}` : dedicatedManagement.reason}</div>}
+          <div className="grid cards"><div className="card"><div className="k">Management instances</div><div className="v">{managementPlan.totalInstances}</div></div><div className="card"><div className="k">Management vCPU</div><div className="v">{managementPlan.totalVCpu}</div></div><div className="card"><div className="k">Management memory</div><div className="v">{managementPlan.totalRamGiB}<span style={{ fontSize: 15 }}> GiB</span></div></div><div className="card"><div className="k">Management disk</div><div className="v">{managementPlan.totalDiskGiB}<span style={{ fontSize: 15 }}> GiB</span></div></div>{dedicatedManagement && <div className="card"><div className="k">Dedicated management hosts</div><div className="v">{dedicatedManagement.nodes ?? '—'}</div></div>}</div>
         </section>
       </div> : store.vms.filter((vm) => vm.include).length === 0 ? <div className="panel"><h2>Add workloads first</h2><p className="muted">Import or enter workloads before building the implementation plan.</p></div> : <div className="stack">
         <section className="panel">

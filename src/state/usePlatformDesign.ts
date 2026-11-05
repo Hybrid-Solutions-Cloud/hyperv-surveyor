@@ -7,6 +7,7 @@ import type { EngagementMode } from './journey'
 type DesignState = Pick<SurveyorState,
   'engagementMode' | 'cfg' | 'tiers' | 'vms' | 'chosenKey' | 'existingCapacityCfg' | 'existingCapacityTiers'
   | 'existingCapacityNodes' | 'placementInputs' | 'managementDecision' | 'managementDeploymentInputs' | 'includeManagementInSizing'>
+  & Partial<Pick<SurveyorState, 'managementAdvisorAnswers'>>
 
 /** The planning state the design function reads. Project payloads and saved scenarios have the same fields. */
 export function platformDesignInputs(state: DesignState): PlatformDesignInputs {
@@ -23,6 +24,7 @@ export function platformDesignInputs(state: DesignState): PlatformDesignInputs {
     managementDecision: state.managementDecision,
     managementDeploymentInputs: state.managementDeploymentInputs,
     includeManagementInSizing: state.includeManagementInSizing,
+    managementAdvisorAnswers: state.managementAdvisorAnswers,
   }
 }
 
@@ -46,6 +48,7 @@ export function usePlatformDesign(options: { management?: ManagementDeploymentIn
   const managementDecision = useSurveyorStore((state) => state.managementDecision)
   const storedManagement = useSurveyorStore((state) => state.managementDeploymentInputs)
   const includeManagementInSizing = useSurveyorStore((state) => state.includeManagementInSizing)
+  const managementAdvisorAnswers = useSurveyorStore((state) => state.managementAdvisorAnswers)
   const overridden = managementOverride !== undefined
   const managementDeploymentInputs = overridden ? managementOverride : storedManagement
   return useMemo(() => resolvePlatformDesign(platformDesignInputs({
@@ -54,5 +57,6 @@ export function usePlatformDesign(options: { management?: ManagementDeploymentIn
     managementDecision: overridden ? 'design' : managementDecision,
     managementDeploymentInputs,
     includeManagementInSizing,
-  })), [engagementMode, cfg, tiers, vms, chosenKey, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, placementInputs, managementDecision, managementDeploymentInputs, includeManagementInSizing, overridden])
+    managementAdvisorAnswers,
+  })), [engagementMode, cfg, tiers, vms, chosenKey, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, placementInputs, managementDecision, managementDeploymentInputs, includeManagementInSizing, managementAdvisorAnswers, overridden])
 }

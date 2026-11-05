@@ -6,13 +6,14 @@ import type { ManagementDeploymentInputs } from '../engine/managementDeployment'
 import { summarizeImport, type ImportReport, type ImportSummary } from '../io/rvtools'
 import { combineImportSummaries, mergeInventories } from '../io/inventoryMerge'
 import type { StorageDecisionAnswers } from '../engine/storageDecision'
-import { DEFAULT_REPORT_METADATA, normalizeConfig, normalizeProjectPayload, normalizeProposedConfig, normalizeScenarioSnapshots, normalizeStorageDecisionAnswers, normalizeTiers, normalizeVms, type ProjectDataSource, type ProjectPayload, type ReportMetadata, type ScenarioSnapshot } from './project'
+import { DEFAULT_REPORT_METADATA, normalizeConfig, normalizeManagementInputs, normalizeProjectPayload, normalizeProposedConfig, normalizeScenarioSnapshots, normalizeStorageDecisionAnswers, normalizeTiers, normalizeVms, type ProjectDataSource, type ProjectPayload, type ReportMetadata, type ScenarioSnapshot } from './project'
 import { surveyorStorage } from './persistence'
 import { DEFAULT_PLACEMENT_INPUTS, normalizePlacementInputs, type PlacementInputs } from '../engine/deploymentPlanning'
 import { DEFAULT_NETWORK_INPUTS, type NetworkDesignInputs } from '../engine/networkDesign'
 import { DEFAULT_DR_INPUTS, type DrDesignInputs } from '../engine/drDesign'
 import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMode, type ManagementDecision } from './journey'
 import type { Scenario } from './urlState'
+import { normalizeAdvisorAnswers, type AdvisorAnswers } from '../data/managementPlane'
 
 export interface SurveyorState {
   engagementMode: EngagementMode | null
@@ -26,6 +27,8 @@ export interface SurveyorState {
   existingCapacityTiers: Record<TierId, TierPolicy>
   existingCapacityNodes: number
   managementDeploymentInputs: ManagementDeploymentInputs | null
+  /** Management Plane Advisor answers. The deployment stack follows them until the user picks it. */
+  managementAdvisorAnswers: AdvisorAnswers
   includeManagementInSizing: boolean
   savedScenarios: ScenarioSnapshot[]
   /** Set when a shared link left its inventory out; the notice stays until dismissed or replaced. */
@@ -51,6 +54,8 @@ export interface SurveyorState {
   setExistingCapacityTiers: (tiers: Record<TierId, TierPolicy>) => void
   setExistingCapacityNodes: (nodes: number) => void
   setManagementDeploymentInputs: (inputs: ManagementDeploymentInputs) => void
+  /** Saves advisor answers. Answering makes an unassessed management decision a design. */
+  setManagementAdvisorAnswers: (answers: AdvisorAnswers) => void
   setIncludeManagementInSizing: (include: boolean) => void
   saveNamedScenario: (name: string) => void
   loadNamedScenario: (id: string) => void
@@ -86,6 +91,7 @@ const defaults = () => ({
   existingCapacityTiers: defaultTiers(),
   existingCapacityNodes: 8,
   managementDeploymentInputs: null as ManagementDeploymentInputs | null,
+  managementAdvisorAnswers: {} as AdvisorAnswers,
   includeManagementInSizing: true,
   savedScenarios: [] as ScenarioSnapshot[],
   sharedInventoryOmitted: null as number | null,
@@ -122,6 +128,7 @@ export function payloadFromState(state: SurveyorState): ProjectPayload {
     existingCapacityTiers: structuredClone(state.existingCapacityTiers),
     existingCapacityNodes: state.existingCapacityNodes,
     managementDeploymentInputs: structuredClone(state.managementDeploymentInputs),
+    managementAdvisorAnswers: structuredClone(state.managementAdvisorAnswers),
     includeManagementInSizing: state.includeManagementInSizing,
     placementInputs: structuredClone(state.placementInputs),
     networkDesignInputs: structuredClone(state.networkDesignInputs),
@@ -152,6 +159,8 @@ export function migratePersistedState(persisted: unknown): SurveyorState {
     existingCapacityCfg: normalizeConfig(value.existingCapacityCfg),
     existingCapacityTiers: normalizeTiers(value.existingCapacityTiers),
     savedScenarios: normalizeScenarioSnapshots(value.savedScenarios),
+    managementDeploymentInputs: normalizeManagementInputs(value.managementDeploymentInputs),
+    managementAdvisorAnswers: normalizeAdvisorAnswers(value.managementAdvisorAnswers),
   } as SurveyorState
 }
 
@@ -172,6 +181,14 @@ export const useSurveyorStore = create<SurveyorState>()(
       setExistingCapacityTiers: (existingCapacityTiers) => set({ existingCapacityTiers }),
       setExistingCapacityNodes: (existingCapacityNodes) => set({ existingCapacityNodes }),
       setManagementDeploymentInputs: (managementDeploymentInputs) => set({ managementDeploymentInputs }),
+      setManagementAdvisorAnswers: (answers) => set((state) => {
+        const managementAdvisorAnswers = normalizeAdvisorAnswers(answers)
+        const answered = Object.keys(managementAdvisorAnswers).length > 0
+        return {
+          managementAdvisorAnswers,
+          managementDecision: answered && state.managementDecision === 'unassessed' ? 'design' : state.managementDecision,
+        }
+      }),
       setIncludeManagementInSizing: (includeManagementInSizing) => set({ includeManagementInSizing }),
       saveNamedScenario: (name) => set((state) => {
         const snapshot: ScenarioSnapshot = {
@@ -185,11 +202,12 @@ export const useSurveyorStore = create<SurveyorState>()(
       loadNamedScenario: (id) => set((state) => {
         const snapshot = state.savedScenarios.find((item) => item.id === id)
         // The import banner describes the previous inventory, so it goes with it.
-        return snapshot ? { ...normalizeProjectPayload(snapshot), sharedInventoryOmitted: null, lastImport: null } : {}
+        return snapshot ? { ...normalizeProjectPayload(snapshot), managementAdvisorAnswers: normalizeAdvisorAnswers(snapshot.managementAdvisorAnswers), sharedInventoryOmitted: null, lastImport: null } : {}
       }),
       deleteNamedScenario: (id) => set((state) => ({ savedScenarios: state.savedScenarios.filter((item) => item.id !== id) })),
       loadProject: (payload, savedScenarios) => set((state) => ({
         ...normalizeProjectPayload(payload),
+        managementAdvisorAnswers: normalizeAdvisorAnswers(payload.managementAdvisorAnswers),
         savedScenarios: savedScenarios ? normalizeScenarioSnapshots(savedScenarios) : state.savedScenarios,
         sharedInventoryOmitted: null,
         lastImport: null,
@@ -239,7 +257,8 @@ export const useSurveyorStore = create<SurveyorState>()(
           existingCapacityNodes: typeof scenario.existingCapacityNodes === 'number' ? Math.max(1, scenario.existingCapacityNodes) : state.existingCapacityNodes,
         }
         if (scenario.chosenKey !== undefined) next.chosenKey = scenario.chosenKey
-        if (scenario.managementDeploymentInputs !== undefined) next.managementDeploymentInputs = scenario.managementDeploymentInputs
+        if (scenario.managementDeploymentInputs !== undefined) next.managementDeploymentInputs = normalizeManagementInputs(scenario.managementDeploymentInputs)
+        if (scenario.managementAdvisorAnswers !== undefined) next.managementAdvisorAnswers = normalizeAdvisorAnswers(scenario.managementAdvisorAnswers)
         if (scenario.includeManagementInSizing !== undefined) next.includeManagementInSizing = scenario.includeManagementInSizing
         if (scenario.placementInputs !== undefined) next.placementInputs = normalizePlacementInputs(scenario.placementInputs)
         if (scenario.networkDesignInputs !== undefined) next.networkDesignInputs = scenario.networkDesignInputs
@@ -256,7 +275,8 @@ export const useSurveyorStore = create<SurveyorState>()(
     {
       name: 'hyperv-surveyor-state',
       // 6 normalizes saved VMs and scenarios, such as numbers saved as text.
-      version: 6,
+      // 7 keeps the Management Plane Advisor answers and marks who owns the management stack.
+      version: 7,
       storage: createJSONStorage(() => surveyorStorage),
       onRehydrateStorage: () => () => settleHydration(),
       migrate: (persisted) => migratePersistedState(persisted),
@@ -271,6 +291,7 @@ export const useSurveyorStore = create<SurveyorState>()(
         existingCapacityTiers: state.existingCapacityTiers,
         existingCapacityNodes: state.existingCapacityNodes,
         managementDeploymentInputs: state.managementDeploymentInputs,
+        managementAdvisorAnswers: state.managementAdvisorAnswers,
         includeManagementInSizing: state.includeManagementInSizing,
         placementInputs: state.placementInputs,
         networkDesignInputs: state.networkDesignInputs,

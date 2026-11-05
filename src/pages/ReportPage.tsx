@@ -31,6 +31,7 @@ export default function ReportPage() {
     tiers,
     chosenKey,
     managementDeploymentInputs,
+    managementAdvisorAnswers,
     includeManagementInSizing,
     placementInputs,
     storageDecisionAnswers,
@@ -59,6 +60,7 @@ export default function ReportPage() {
     tiers,
     chosenKey,
     managementDeploymentInputs,
+    managementAdvisorAnswers,
     includeManagementInSizing,
     placementInputs,
     storageDecisionAnswers,
@@ -71,7 +73,7 @@ export default function ReportPage() {
     existingCapacityNodes,
     lastImport,
     generatedAt,
-  }), [lastImport, engagementMode, managementDecision, cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, placementInputs, storageDecisionAnswers, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, tiers, vms])
+  }), [lastImport, engagementMode, managementDecision, cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, managementAdvisorAnswers, placementInputs, storageDecisionAnswers, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, tiers, vms])
   const visibleSections = selectedReportSections(report, selection, outputOptions)
   const selectedCount = Object.values(selection).filter(Boolean).length
 
@@ -158,7 +160,7 @@ export default function ReportPage() {
 
           <div className="report-management-status">
             <strong>Management selection</strong>
-            <span>{managementDecision === 'design' ? (managementDeploymentInputs ? 'Using your saved deployment choices' : 'Using the advisor baseline') : managementDecision === 'existing' ? 'Existing management solution recorded' : managementDecision === 'deferred' ? 'Decision intentionally deferred' : 'Management plane not assessed'}</span>
+            <span>{managementDecision === 'design' ? (managementDeploymentInputs?.stackSource === 'user' ? 'Using your saved deployment choices' : 'Following the advisor, or a labelled starting point until it is complete') : managementDecision === 'existing' ? 'Existing management solution recorded' : managementDecision === 'deferred' ? 'Decision intentionally deferred' : 'Management plane not assessed'}</span>
             <Link to="/management-plane">Review management design</Link>
           </div>
 

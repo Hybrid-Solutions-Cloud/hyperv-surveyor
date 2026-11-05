@@ -6,9 +6,10 @@ import { DEFAULT_NETWORK_INPUTS, type NetworkDesignInputs } from '../engine/netw
 import { DEFAULT_DR_INPUTS, type DrDesignInputs } from '../engine/drDesign'
 import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMode, type ManagementDecision } from './journey'
 import type { StorageDecisionAnswers } from '../engine/storageDecision'
+import { normalizeAdvisorAnswers, type AdvisorAnswers } from '../data/managementPlane'
 
-/** 5 added savedScenarios to the project file. */
-export const PROJECT_SCHEMA_VERSION = 5 as const
+/** 5 added savedScenarios to the project file. 6 added the Management Plane Advisor answers. */
+export const PROJECT_SCHEMA_VERSION = 6 as const
 export const ENGINE_VERSION = '1.2.0'
 
 export interface ReportMetadata {
@@ -56,6 +57,8 @@ export interface ProjectPayload {
   reportMetadata: ReportMetadata
   dataSources: ProjectDataSource[]
   storageDecisionAnswers: StorageDecisionAnswers
+  /** Management Plane Advisor answers. Absent in files written before schema 6. */
+  managementAdvisorAnswers?: AdvisorAnswers
 }
 
 export interface SurveyorProject {
@@ -135,6 +138,26 @@ export function normalizeStorageDecisionAnswers(value: unknown): StorageDecision
   return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'))
 }
 
+/**
+ * Saved management inputs. Saves made before the advisor answers were kept have no stackSource; their
+ * stack was picked on the Deployment design tab, so it stays the user's. Those saves also froze the SCOM
+ * daily data at the old automatic value (1 GiB, or managed VMs / 500), which is dropped so it follows
+ * the managed estate again; any other value was typed by the user and is kept.
+ */
+export function normalizeManagementInputs(value: unknown): ManagementDeploymentInputs | null {
+  if (!record(value)) return null
+  const inputs = { ...(value as unknown as ManagementDeploymentInputs) }
+  if (inputs.stackSource !== 'advisor' && inputs.stackSource !== 'user') {
+    const legacy = inputs.stackSource === undefined
+    inputs.stackSource = 'user'
+    const daily = inputs.scomDailyDataGiB
+    const managedVms = typeof inputs.managedVms === 'number' ? inputs.managedVms : 0
+    if (legacy && typeof daily === 'number' && (daily === 1 || daily === Math.max(1, managedVms / 500))) delete inputs.scomDailyDataGiB
+  }
+  if (inputs.scomDailyDataGiB !== undefined && !(typeof inputs.scomDailyDataGiB === 'number' && Number.isFinite(inputs.scomDailyDataGiB))) delete inputs.scomDailyDataGiB
+  return inputs
+}
+
 export function normalizeProjectPayload(value: unknown): ProjectPayload {
   if (!record(value)) throw new Error('The project payload is missing or invalid.')
   const vms = normalizeVms(value.vms)
@@ -149,7 +172,8 @@ export function normalizeProjectPayload(value: unknown): ProjectPayload {
     existingCapacityCfg: normalizeConfig(value.existingCapacityCfg),
     existingCapacityTiers: normalizeTiers(value.existingCapacityTiers),
     existingCapacityNodes: typeof value.existingCapacityNodes === 'number' ? Math.max(1, value.existingCapacityNodes) : 8,
-    managementDeploymentInputs: record(value.managementDeploymentInputs) ? value.managementDeploymentInputs as unknown as ManagementDeploymentInputs : null,
+    managementDeploymentInputs: normalizeManagementInputs(value.managementDeploymentInputs),
+    managementAdvisorAnswers: normalizeAdvisorAnswers(value.managementAdvisorAnswers),
     includeManagementInSizing: typeof value.includeManagementInSizing === 'boolean' ? value.includeManagementInSizing : true,
     placementInputs: normalizePlacementInputs(value.placementInputs),
     networkDesignInputs: { ...DEFAULT_NETWORK_INPUTS, ...(record(value.networkDesignInputs) ? value.networkDesignInputs : {}) },

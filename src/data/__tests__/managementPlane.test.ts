@@ -15,6 +15,7 @@ const completeAnswers = (overrides: AdvisorAnswers = {}): AdvisorAnswers => ({
   migrationConstraints: false,
   largeFabric: false,
   wacSoftwareDefinedFabric: false,
+  vmodeHostEligible: true,
   smallEdge: false,
   azureReady: true,
   gaRequired: true,
@@ -74,7 +75,8 @@ describe('management-plane recommendations', () => {
 
     expect(result.status).toBe('incomplete')
     expect(result.stack).toEqual(['classic'])
-    expect(result.unansweredDecisionIds).toEqual(['gaRequired', 'managementHa', 'wacSoftwareDefinedFabric'])
+    // D4 and D7: host eligibility and the SCOM monitoring question are also needed before the stack is final.
+    expect(result.unansweredDecisionIds).toEqual(['gaRequired', 'managementHa', 'wacSoftwareDefinedFabric', 'vmodeHostEligible', 'monitoring'])
   })
 
   it('prefers vMode for small or large estates when all vMode gates are explicitly accepted', () => {
@@ -94,10 +96,14 @@ describe('management-plane recommendations', () => {
     expect(result.excluded.some((item) => item.id === 'wac-virtual')).toBe(true)
   })
 
-  it('allows vMode beside SCVMM when Pure integration drives SCVMM but no vMode gate is hit', () => {
+  // D10: no Microsoft or Pure documentation of a Pure integration in vMode was found, so Pure needs
+  // validation before vMode can be chosen. The workbook says the same.
+  it('keeps vMode out when Pure integration drives SCVMM, because the Pure path in vMode needs validation', () => {
     const result = recommendManagementPlane(completeAnswers({ pureIntegration: true, gaRequired: false }))
 
-    expect(result.stack).toEqual(['scvmm', 'wac-virtual'])
+    expect(result.status).toBe('ready')
+    expect(result.stack).toEqual(['scvmm', 'wac-admin'])
+    expect(result.excluded.find((item) => item.id === 'wac-virtual')?.reason).toMatch(/needs validation/)
     expect(result.cautions.some((caution) => caution.includes('Pure Storage'))).toBe(true)
   })
 

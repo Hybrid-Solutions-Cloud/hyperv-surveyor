@@ -1,4 +1,5 @@
-import { MANAGEMENT_PLANES, type PlaneId } from '../data/managementPlane'
+import { DECISION_QUESTIONS, MANAGEMENT_PLANES, type AdvisorAnswers, type PlaneId } from '../data/managementPlane'
+import { advisorMatchSentence } from '../engine/managementAdvisor'
 import {
   normalizeManagementDeploymentInputs,
   type ManagementDeploymentInputs,
@@ -98,6 +99,8 @@ export interface SolutionReportInputs {
   chosenKey: string
   managementDeploymentInputs: ManagementDeploymentInputs | null
   includeManagementInSizing: boolean
+  /** Management Plane Advisor answers, recorded in the report with the recommended stack. */
+  managementAdvisorAnswers?: AdvisorAnswers
   generatedAt?: string
   placementInputs?: PlacementInputs
   storageDecisionAnswers?: StorageDecisionAnswers
@@ -219,6 +222,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
     managementDecision: input.managementDecision,
     managementDeploymentInputs: input.managementDeploymentInputs,
     includeManagementInSizing: input.includeManagementInSizing,
+    managementAdvisorAnswers: input.managementAdvisorAnswers,
   })
   const managementOnly = design.path === 'management-only'
   const usesExistingHardware = design.path === 'existing'
@@ -238,6 +242,16 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   const managementInputs = design.management.inputs
   const managementPlan = design.management.plan
   const managementConsumesPlatform = design.management.counted
+  const advisor = design.management.advisor
+  const advisorSentence = advisorMatchSentence(design.management.source, advisor)
+  const advisorAnswerRows = DECISION_QUESTIONS
+    .filter((question) => advisor.answers[question.id] !== undefined)
+    .map((question) => [question.question, advisor.answers[question.id] ? 'Yes' : 'No'])
+  const stackSourceLabel = design.management.source === 'saved'
+    ? 'Chosen on the Deployment design tab'
+    : design.management.source === 'advisor'
+      ? 'Follows the advisor recommendation'
+      : 'Starting point, not a recommendation'
   // Management-only has no platform; an empty sizing keeps the shared wording code simple.
   const finalSizing = design.sizing ?? solveForward(platformCfg, [], platformTiers)
   const growth = design.growth
@@ -631,7 +645,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       metrics: managementOnly ? [
         { label: 'Platform placement', value: 'Not assessed' },
         { label: 'Management instances', value: managementDecision === 'design' ? number(managementPlan.totalInstances) : 'Not calculated' },
-        ...(design.management.dedicated ? [{ label: 'Dedicated management nodes', value: 'Not calculated', detail: design.management.dedicated.reason ?? undefined }] : []),
+        ...(design.management.dedicated ? [{ label: 'Dedicated management nodes', value: design.management.dedicated.nodes === null ? 'Not calculated' : number(design.management.dedicated.nodes), detail: design.management.dedicated.basis ?? design.management.dedicated.reason ?? undefined }] : []),
       ] : [
         { label: 'Target clusters', value: number(design.clusters.length) },
         { label: usesExistingHardware ? 'Entered nodes' : 'Total nodes', value: design.totalNodes === null ? 'Not calculated' : number(design.totalNodes) },
@@ -936,7 +950,13 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
           ? `The management design is sized for ${managementInputs.managedHosts.toLocaleString()} hosts, ${managementInputs.managedVms.toLocaleString()} workload VMs, and ${managementInputs.managedClusters.toLocaleString()} clusters.`
           : `Warning: managed hosts are not entered, so the management design is not sized for a host count. Enter the managed hosts before using this bill of materials. It covers ${managementInputs.managedVms.toLocaleString()} workload VMs.`,
         `Management components are placed on ${managementInputs.managementPlacement.replace(/-/g, ' ')}.`,
-        ...(design.management.dedicated?.reason ? [design.management.dedicated.reason] : []),
+        ...(design.management.dedicated ? [design.management.dedicated.nodes !== null
+          ? `The dedicated management cluster needs ${number(design.management.dedicated.nodes)} hosts.${design.management.dedicated.basis ? ` ${design.management.dedicated.basis}` : ''}`
+          : design.management.dedicated.reason ?? 'The dedicated management cluster host count is not calculated.'] : []),
+        ...design.management.warnings.map((warning) => `Warning: ${warning}`),
+        ...design.management.errors.map((error) => `Blocking: ${error}`),
+        `Management Plane Advisor: ${advisor.status === 'not-started' ? 'not answered' : advisor.status === 'ready' ? 'complete' : advisor.status}. Recommended stack: ${advisor.recommendedStack}.`,
+        advisorSentence,
       ] : [managementDecision === 'existing'
         ? 'An existing management solution was recorded for this engagement. Its topology, capacity, lifecycle, and licensing were not reassessed by Surveyor.'
         : managementDecision === 'deferred'
@@ -952,8 +972,12 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Arc connectivity', value: managementInputs.includeArc ? `${managementInputs.arcConnectivity} · ${managementInputs.arcRegion}` : 'Not applicable' },
         { label: 'Arc guest scope', value: managementInputs.includeArc ? `${number(managementInputs.arcGuestScopePct, 1)}% of managed VMs` : 'Not applicable' },
         { label: 'SCOM use', value: managementInputs.monitoring === 'scom' ? 'Monitoring, reporting, and forecasting' : managementInputs.monitoring === 'scom-features' ? managementInputs.foundation === 'scvmm' ? 'Reporting and forecasting only' : 'Not planned: needs SCVMM' : 'Not selected' },
-        { label: 'SCOM collection', value: managementInputs.monitoring === 'scom' || (managementInputs.monitoring === 'scom-features' && managementInputs.foundation === 'scvmm') ? `${number(managementInputs.scomDailyDataGiB, 1)} GiB/day · ${managementInputs.scomWarehouseRetentionDays} warehouse days` : 'Not selected' },
-      ] : [{ label: 'Management decision', value: managementDecisionLabel }],
+        { label: 'SCOM collection', value: managementInputs.monitoring === 'scom' || (managementInputs.monitoring === 'scom-features' && managementInputs.foundation === 'scvmm') ? `${number(managementInputs.scomDailyDataGiB, 1)} GiB/day · ${managementInputs.scomWarehouseRetentionDays} warehouse days` : 'Not selected', detail: managementPlan.scomAgentManagedComputers > 0 ? `${managementInputs.scomDailyDataUserSet ? 'Set by the user' : 'Calculated'} for ${number(managementPlan.scomAgentManagedComputers)} agent-managed computers` : undefined },
+        { label: 'Dedicated management hosts', value: design.management.dedicated ? design.management.dedicated.nodes === null ? 'Not calculated' : number(design.management.dedicated.nodes) : 'Not selected', detail: design.management.dedicated?.basis ?? design.management.dedicated?.reason ?? undefined },
+        { label: 'Stack source', value: stackSourceLabel },
+        { label: 'Advisor recommendation', value: advisor.recommendedStack },
+        { label: 'Matches the advisor', value: advisor.matches === null ? 'Not comparable: the advisor is not complete' : advisor.matches ? 'Yes' : 'No', detail: advisor.differences.join(' ') || undefined },
+      ] : [{ label: 'Management decision', value: managementDecisionLabel }, ...(advisor.answeredCount > 0 ? [{ label: 'Advisor recommendation', value: advisor.recommendedStack }] : [])],
       reasoning: managementDecision === 'design' ? [
         {
           decision: managementInputs.foundation === 'scvmm' ? 'Use SCVMM 2025 as the fabric foundation' : 'Use Classic Hyper-V tools as the fabric foundation',
@@ -1018,8 +1042,18 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
             ? 'The management decision was explicitly deferred and remains an implementation dependency.'
             : 'No management-plane assessment was completed, so the report cannot explain or size a management topology.',
       }],
-      bullets: managementDecision === 'design' ? [...managementPlan.dependencies.map((item) => `Dependency: ${item}`), ...managementPlan.cautions.map((item) => `Caution: ${item}`)] : [],
-      tables: managementDecision === 'design' ? [
+      bullets: managementDecision === 'design' ? [
+        ...managementPlan.dependencies.map((item) => `Dependency: ${item}`),
+        ...managementPlan.cautions.map((item) => `Caution: ${item}`),
+        ...advisor.recommendation.cautions.map((item) => `Advisor caution: ${item}`),
+      ] : [],
+      tables: [
+        ...(advisorAnswerRows.length > 0 ? [{
+          title: 'Management Plane Advisor answers',
+          headers: ['Question', 'Answer'],
+          rows: advisorAnswerRows,
+        }] : []),
+        ...(managementDecision === 'design' ? [
         {
           title: 'Management-plane bill of materials',
           headers: ['Component', 'Qty', 'Availability', 'vCPU each', 'RAM each', 'Disk each', 'Basis'],
@@ -1038,7 +1072,8 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
           headers: ['Service', 'Type', 'Billing basis', 'Deployment requirement'],
           rows: managementPlan.arcServices.map((service) => [service.name, service.category, service.billing, service.requirement]),
         }] : []),
-      ] : [],
+        ] : []),
+      ],
     },
     {
       id: 'assumptions',
