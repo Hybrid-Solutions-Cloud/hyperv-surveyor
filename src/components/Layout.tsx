@@ -21,9 +21,39 @@ import {
 } from 'lucide-react'
 import { payloadFromState, useSurveyorStore } from '../state/store'
 import { toUrl, urlOmittedInventory } from '../state/urlState'
-import { ENGAGEMENT_LABELS, journeyResumeRoute } from '../state/journey'
+import { ENGAGEMENT_LABELS, journeyResumeRoute, type EngagementMode } from '../state/journey'
 
-const navGroups = [
+type NavItem = { to: string; label: string; icon: typeof Home; end?: boolean }
+
+/**
+ * Which platform pages belong to each path. Pages outside the path are hidden from the sidebar;
+ * their routes still open and say they are not part of the current path.
+ */
+const PATH_PAGES: Record<EngagementMode, string[]> = {
+  'new-platform': ['/workloads', '/configuration', '/results'],
+  'existing-capacity': ['/capacity', '/workloads'],
+  'fit-gap': ['/workloads', '/capacity'],
+  'management-only': [],
+}
+
+const PATH_LABELS: Partial<Record<EngagementMode, Record<string, string>>> = {
+  'existing-capacity': { '/capacity': 'Existing capacity', '/workloads': 'Workloads (optional)' },
+  'fit-gap': { '/capacity': 'Fit and gap' },
+}
+
+export function navGroupsFor(mode: EngagementMode | null): Array<{ label: string; items: NavItem[] }> {
+  if (!mode) return navGroups
+  return navGroups
+    .map((group) => group.label !== 'Platform' ? group : {
+      ...group,
+      items: group.items
+        .filter((item) => PATH_PAGES[mode].includes(item.to))
+        .map((item) => ({ ...item, label: PATH_LABELS[mode]?.[item.to] ?? item.label })),
+    })
+    .filter((group) => group.items.length > 0)
+}
+
+const navGroups: Array<{ label: string; items: NavItem[] }> = [
   { label: 'Start', items: [{ to: '/', label: 'Planning paths', icon: Home, end: true }] },
   { label: 'Platform', items: [
     { to: '/workloads', label: 'Workloads', icon: Cpu },
@@ -96,7 +126,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </a>
 
         <nav className="side-nav" aria-label="Primary navigation">
-          {navGroups.map((group) => (
+          {navGroupsFor(engagementMode).map((group) => (
             <div className="nav-group" key={group.label}>
               <div className="nav-group-label">{group.label}</div>
               {group.items.map((item) => {
@@ -105,7 +135,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <NavLink
                   key={to}
                   to={to}
-                  end={'end' in item ? item.end : undefined}
+                  end={item.end}
                   onClick={() => setMenuOpen(false)}
                   className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
                 >

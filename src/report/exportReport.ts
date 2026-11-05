@@ -54,7 +54,16 @@ function safeFilename(value: string) {
   return cleaned || 'hyper-v-solution'
 }
 
-function pdfText(value: string) {
+const PDF_SPECIAL: Record<string, string> = {
+  'ß': 'ss', 'Æ': 'AE', 'æ': 'ae', 'Ø': 'O', 'ø': 'o', 'Œ': 'OE', 'œ': 'oe', 'Ł': 'L', 'ł': 'l', 'Đ': 'D', 'đ': 'd', 'Þ': 'Th', 'þ': 'th', 'ı': 'i',
+}
+
+/**
+ * The PDF uses the built-in Helvetica font, which covers Latin-1 only. No Unicode font is bundled,
+ * so other characters are transliterated where a Latin equivalent exists and replaced with "?"
+ * otherwise. The PDF cover says so whenever that happens.
+ */
+function transliterate(value: string) {
   return value
     .replace(/[–—]/g, '-')
     .replace(/[‘’]/g, "'")
@@ -64,7 +73,43 @@ function pdfText(value: string) {
     .replace(/≥/g, '>=')
     .replace(/≤/g, '<=')
     .replace(/→/g, '->')
+    .replace(/…/g, '...')
+    .replace(/[ßÆæØøŒœŁłĐđÞþı]/g, (char) => PDF_SPECIAL[char] ?? char)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\u0009\u000A\u000D\u0020-\u007E\u00A0-\u00FF]/g, '?')
 }
+
+/** True when the PDF cannot show this text exactly. */
+export function pdfNeedsTransliteration(value: string) {
+  const plain = value
+    .replace(/[–—‘’“”•×≥≤→…]/g, '')
+  return /[^\u0009\u000A\u000D\u0020-\u007E\u00A0-\u00FF]/.test(plain)
+}
+
+function pdfText(value: string) {
+  return transliterate(value)
+}
+
+/** Removes control characters that Word shows raw; line breaks become spaces. */
+export function wordSafeText(value: string) {
+  return value.replace(/\r?\n/g, ' ').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+}
+
+function sanitizeSectionsForWord(sections: ReportSection[]): ReportSection[] {
+  const t = wordSafeText
+  return sections.map((section) => ({
+    ...section,
+    title: t(section.title),
+    paragraphs: section.paragraphs.map(t),
+    metrics: section.metrics.map((metric) => ({ label: t(metric.label), value: t(metric.value), detail: metric.detail === undefined ? undefined : t(metric.detail) })),
+    reasoning: section.reasoning.map((item) => ({ ...item, decision: t(item.decision), explanation: t(item.explanation), tradeoff: item.tradeoff === undefined ? undefined : t(item.tradeoff) })),
+    bullets: section.bullets.map(t),
+    tables: section.tables.map((table) => ({ title: table.title === undefined ? undefined : t(table.title), headers: table.headers.map(t), rows: table.rows.map((row) => row.map((cell) => t(String(cell ?? '')))) })),
+  }))
+}
+
+const EMPTY_TABLE_NOTE = 'No rows are available for this section.'
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
@@ -83,7 +128,7 @@ function markdownTable(table: ReportTable) {
   const header = `| ${table.headers.map(markdownCell).join(' | ')} |`
   const rule = `| ${table.headers.map(() => '---').join(' | ')} |`
   const rows = table.rows.map((row) => `| ${row.map(markdownCell).join(' | ')} |`)
-  return [table.title ? `### ${table.title}` : '', header, rule, ...rows].filter(Boolean).join('\n')
+  return [table.title ? `### ${table.title}` : '', header, rule, ...rows, table.rows.length === 0 ? `\n_${EMPTY_TABLE_NOTE}_` : ''].filter(Boolean).join('\n')
 }
 
 export function reportToMarkdown(
@@ -127,8 +172,10 @@ export function reportToJson(
   selection: ReportSelection,
   options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS,
 ) {
+  const metadata = selection.executive ? report.metadata : { ...report.metadata, decisionNotes: '' }
   return JSON.stringify({
     ...report,
+    metadata,
     outputOptions: options,
     includedSectionIds: Object.entries(selection).filter(([, included]) => included).map(([id]) => id),
     sections: selectedReportSections(report, selection, options),
@@ -324,7 +371,7 @@ function sectionToWord(section: ReportSection, tableWidth: number) {
   })))
   section.tables.forEach((table) => {
     if (table.title) children.push(new Paragraph({ text: table.title, heading: HeadingLevel.HEADING_2 }))
-    children.push(wordTable(table, tableWidth), new Paragraph({ spacing: { after: 80 } }))
+    children.push(wordTable(table, tableWidth), new Paragraph({ spacing: { after: 80 }, children: table.rows.length === 0 ? [new TextRun({ text: EMPTY_TABLE_NOTE, italics: true, size: 17, color: MUTED })] : [] }))
   })
   return children
 }
@@ -377,7 +424,8 @@ export async function reportToWordBlob(
   selection: ReportSelection,
   options: ReportOutputOptions = DEFAULT_REPORT_OUTPUT_OPTIONS,
 ) {
-  const sections = selectedReportSections(report, selection, options)
+  const sections = sanitizeSectionsForWord(selectedReportSections(report, selection, options))
+  const preparedBy = [report.metadata.author, report.metadata.organization].map((value) => wordSafeText(value ?? '').trim()).filter(Boolean).join(' · ')
   const documentFile = new Document({
     creator: 'Hyper-V Surveyor',
     title: report.title,
@@ -442,18 +490,20 @@ export async function reportToWordBlob(
             border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: CYAN, space: 10 } },
             children: [new TextRun({ text: 'CUSTOMER SOLUTION REPORT', size: 18, bold: true, color: BLUE, characterSpacing: 80 })],
           }),
-          new Paragraph({ text: report.title, style: 'Title' }),
+          new Paragraph({ text: wordSafeText(report.title), style: 'Title' }),
           new Paragraph({
             spacing: { after: 700 },
             children: [new TextRun({ text: 'Sizing, architecture, storage, and management-plane design', size: 22, color: MUTED })],
           }),
           new Paragraph({ children: [new TextRun({ text: 'PREPARED FOR', size: 15, bold: true, color: MUTED })], spacing: { after: 45 } }),
-          new Paragraph({ children: [new TextRun({ text: report.customerName, size: 28, bold: true, color: NAVY })], spacing: { after: 300 } }),
+          new Paragraph({ children: [new TextRun({ text: wordSafeText(report.customerName), size: 28, bold: true, color: NAVY })], spacing: { after: 300 } }),
           new Paragraph({ children: [new TextRun({ text: 'SELECTED ARCHITECTURE', size: 15, bold: true, color: MUTED })], spacing: { after: 45 } }),
-          new Paragraph({ children: [new TextRun({ text: report.selectedArchitecture, size: 23, bold: true, color: BLUE })], spacing: { after: 300 } }),
+          new Paragraph({ children: [new TextRun({ text: wordSafeText(report.selectedArchitecture), size: 23, bold: true, color: BLUE })], spacing: { after: 300 } }),
           new Paragraph({ children: [new TextRun({ text: 'GENERATED', size: 15, bold: true, color: MUTED })], spacing: { after: 45 } }),
           new Paragraph({ children: [new TextRun({ text: new Date(report.generatedAt).toLocaleString(), size: 19, color: TEXT })], spacing: { after: 250 } }),
-          new Paragraph({ children: [new TextRun({ text: `Revision ${report.metadata.revision} · ${report.metadata.approvalStatus.toUpperCase()}${report.metadata.author ? ` · ${report.metadata.author}` : ''}`, size: 17, color: TEXT })], spacing: { after: 160 } }),
+          new Paragraph({ children: [new TextRun({ text: 'PREPARED BY', size: 15, bold: true, color: MUTED })], spacing: { after: 45 } }),
+          new Paragraph({ children: [new TextRun({ text: preparedBy || 'Not specified', size: 19, color: TEXT })], spacing: { after: 250 } }),
+          new Paragraph({ children: [new TextRun({ text: `Revision ${wordSafeText(report.metadata.revision)} · ${report.metadata.approvalStatus.toUpperCase()}`, size: 17, color: TEXT })], spacing: { after: 160 } }),
           new Paragraph({ children: [new TextRun({ text: `${sections.length} report sections included`, size: 17, italics: true, color: MUTED })] }),
         ],
       },
@@ -480,7 +530,7 @@ function addPdfPage(doc: jsPDF, orientation: PdfOrientation) {
   doc.addPage('letter', orientation)
 }
 
-function drawPdfCover(doc: jsPDF, report: SolutionReport, sections: ReportSection[]) {
+function drawPdfCover(doc: jsPDF, report: SolutionReport, sections: ReportSection[], transliterated: boolean) {
   const width = doc.internal.pageSize.getWidth()
   const height = doc.internal.pageSize.getHeight()
   doc.setFillColor(...NAVY_RGB)
@@ -493,7 +543,7 @@ function drawPdfCover(doc: jsPDF, report: SolutionReport, sections: ReportSectio
   doc.text('CUSTOMER SOLUTION REPORT', 54, 58)
   doc.setFontSize(29)
   doc.setTextColor(255, 255, 255)
-  const titleLines = doc.splitTextToSize(pdfText(report.title), width - 108) as string[]
+  const titleLines = (doc.splitTextToSize(pdfText(report.title), width - 108) as string[]).slice(0, 3)
   doc.text(titleLines, 54, 105)
   const subtitleY = 105 + titleLines.length * 34 + 12
   doc.setFont('helvetica', 'normal')
@@ -508,37 +558,68 @@ function drawPdfCover(doc: jsPDF, report: SolutionReport, sections: ReportSectio
     ['Prepared by', [report.metadata.author, report.metadata.organization].filter(Boolean).join(' · ') || 'Not specified'],
     ['Generated', new Date(report.generatedAt).toLocaleString()],
   ]
-  let y = 310
+  let y = 290
   for (const [label, value] of cards) {
+    doc.setFontSize(12)
+    const lines = (doc.splitTextToSize(pdfText(value), width - 142) as string[]).slice(0, 2)
+    const cardHeight = 36 + lines.length * 14
     doc.setFillColor(246, 249, 251)
     doc.setDrawColor(215, 224, 231)
-    doc.roundedRect(54, y, width - 108, 62, 5, 5, 'FD')
+    doc.roundedRect(54, y, width - 108, cardHeight, 5, 5, 'FD')
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(7.5)
     doc.setTextColor(...MUTED_RGB)
-    doc.text(label.toUpperCase(), 70, y + 20)
-    doc.setFontSize(13)
+    doc.text(label.toUpperCase(), 70, y + 18)
+    doc.setFontSize(12)
     doc.setTextColor(...NAVY_RGB)
-    doc.text(doc.splitTextToSize(pdfText(value), width - 142), 70, y + 43)
-    y += 76
+    doc.text(lines, 70, y + 36)
+    y += cardHeight + 8
   }
 
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9)
-  doc.setTextColor(...BLUE_RGB)
-  doc.text('REPORT SCOPE', 54, y + 12)
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9)
-  doc.setTextColor(...TEXT_RGB)
-  const names = sections.map((section) => section.title)
-  const midpoint = Math.ceil(names.length / 2)
-  names.forEach((name, index) => {
-    const column = index >= midpoint ? 1 : 0
-    const row = column ? index - midpoint : index
+  if (transliterated) {
+    doc.setFont('helvetica', 'italic')
+    doc.setFontSize(8)
+    doc.setTextColor(...MUTED_RGB)
+    const note = doc.splitTextToSize('Note: some characters in this report are outside the PDF font. They are transliterated or shown as "?". Use the Word or HTML export for the exact text.', width - 108) as string[]
+    doc.text(note, 54, y + 6)
+    y += note.length * 10 + 8
+  }
+
+  // The section list wraps into two columns and continues on another page when it runs out of room.
+  const bottom = height - 70
+  const drawHeading = (top: number, continued: boolean) => {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor(...BLUE_RGB)
+    doc.text(continued ? 'REPORT SCOPE (CONTINUED)' : 'REPORT SCOPE', 54, top + 12)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(...TEXT_RGB)
+    return top + 34
+  }
+  let rowY = drawHeading(y, false)
+  const columnWidth = (width - 108) / 2
+  let column = 0
+  let firstRowY = rowY
+  for (const section of sections) {
+    if (rowY > bottom) {
+      if (column === 0) {
+        column = 1
+        rowY = firstRowY
+      } else {
+        doc.addPage('letter', 'portrait')
+        column = 0
+        rowY = drawHeading(54, true)
+        firstRowY = rowY
+      }
+    }
+    const x = 54 + column * columnWidth
     doc.setFillColor(...CYAN_RGB)
-    doc.circle(58 + column * 255, y + 34 + row * 18, 1.8, 'F')
-    doc.text(pdfText(name), 66 + column * 255, y + 37 + row * 18)
-  })
+    doc.circle(x + 4, rowY - 3, 1.8, 'F')
+    const nameLines = doc.splitTextToSize(pdfText(section.title), columnWidth - 20) as string[]
+    doc.text(nameLines, x + 12, rowY)
+    rowY += nameLines.length * 12 + 6
+  }
   doc.setFontSize(8)
   doc.setTextColor(...MUTED_RGB)
   doc.text(`${sections.length} selected sections`, 54, height - 54)
@@ -627,9 +708,15 @@ function pdfSection(doc: jsPDF, section: ReportSection) {
   doc.setTextColor(...TEXT_RGB)
   for (const paragraph of section.paragraphs) {
     const lines = doc.splitTextToSize(pdfText(paragraph), doc.internal.pageSize.getWidth() - 108) as string[]
-    ensureSpace(lines.length * 14 + 10)
-    doc.text(lines, 54, y)
-    y += lines.length * 14 + 8
+    for (const line of lines) {
+      ensureSpace(14)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9.5)
+      doc.setTextColor(...TEXT_RGB)
+      doc.text(line, 54, y)
+      y += 14
+    }
+    y += 8
   }
 
   if (section.metrics.length) {
@@ -654,6 +741,15 @@ function pdfSection(doc: jsPDF, section: ReportSection) {
       const tradeoffLines = item.tradeoff
         ? doc.splitTextToSize(`Tradeoff / validation: ${pdfText(item.tradeoff)}`, contentWidth) as string[]
         : []
+      const maxCard = doc.internal.pageSize.getHeight() - 52 - 90
+      const maxLines = Math.max(1, Math.floor((maxCard - 48 - decisionLines.length * 12) / 11))
+      if (explanationLines.length + tradeoffLines.length > maxLines) {
+        tradeoffLines.length = 0
+        if (explanationLines.length > maxLines) {
+          explanationLines.length = maxLines
+          explanationLines[maxLines - 1] = `${explanationLines[maxLines - 1]} ...`
+        }
+      }
       const cardHeight = 48 + decisionLines.length * 12 + explanationLines.length * 11 + tradeoffLines.length * 10
       ensureSpace(cardHeight + 9)
       const pageWidth = doc.internal.pageSize.getWidth()
@@ -691,11 +787,18 @@ function pdfSection(doc: jsPDF, section: ReportSection) {
   doc.setTextColor(...TEXT_RGB)
   for (const bullet of section.bullets) {
     const lines = doc.splitTextToSize(pdfText(bullet), doc.internal.pageSize.getWidth() - 130) as string[]
-    ensureSpace(lines.length * 12 + 7)
+    ensureSpace(Math.min(lines.length, 3) * 12 + 7)
     doc.setFillColor(...CYAN_RGB)
     doc.circle(59, y - 2.6, 1.8, 'F')
-    doc.text(lines, 69, y)
-    y += lines.length * 12 + 5
+    lines.forEach((line, index) => {
+      if (index > 0) ensureSpace(12)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      doc.setTextColor(...TEXT_RGB)
+      doc.text(line, 69, y)
+      y += 12
+    })
+    y += 5
   }
 
   for (const table of section.tables) {
@@ -737,6 +840,14 @@ function pdfSection(doc: jsPDF, section: ReportSection) {
       showHead: 'everyPage',
     })
     y = ((doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y) + 18
+    if (table.rows.length === 0) {
+      ensureSpace(16)
+      doc.setFont('helvetica', 'italic')
+      doc.setFontSize(8.5)
+      doc.setTextColor(...MUTED_RGB)
+      doc.text(EMPTY_TABLE_NOTE, 54, y)
+      y += 16
+    }
   }
 }
 
@@ -753,7 +864,9 @@ export function reportToPdfBlob(
     author: 'Hyper-V Surveyor',
     creator: 'Hyper-V Surveyor',
   })
-  drawPdfCover(doc, report, sections)
+  const coverText = [report.title, report.customerName, report.selectedArchitecture, report.metadata.author, report.metadata.organization, report.metadata.revision].join(' ')
+  const transliterated = pdfNeedsTransliteration(coverText) || pdfNeedsTransliteration(JSON.stringify(sections))
+  drawPdfCover(doc, report, sections, transliterated)
   sections.forEach((section) => pdfSection(doc, section))
 
   const pages = doc.getNumberOfPages()

@@ -665,6 +665,7 @@ export function solveReverse(
     binding, bindingExplanation,
     additionalVmsByTier,
     findings,
+    csvPlans,
     capacity: cap,
     storageDomains,
   }
@@ -708,6 +709,7 @@ export function compareReferenceServers(
   cfg: ClusterConfig,
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
+  fixedVms: Vm[] = [],
 ): ReferenceServerOption[] {
   const isCurrent = (p: { sockets: number; coresPerSocket: number; ramGiB: number }) =>
     p.sockets === cfg.node.sockets && p.coresPerSocket === cfg.node.coresPerSocket && p.ramGiB === cfg.node.ramGiB
@@ -718,7 +720,7 @@ export function compareReferenceServers(
   return profiles.map((profile) => ({
     ...profile,
     selected: isCurrent(profile),
-    result: solveForward({ ...cfg, node: { ...cfg.node, sockets: profile.sockets, coresPerSocket: profile.coresPerSocket, ramGiB: profile.ramGiB } }, vms, tiers),
+    result: solveForward({ ...cfg, node: { ...cfg.node, sockets: profile.sockets, coresPerSocket: profile.coresPerSocket, ramGiB: profile.ramGiB } }, vms, tiers, fixedVms),
   }))
 }
 
@@ -734,13 +736,14 @@ export function compareArchitectures(
   base: ClusterConfig,
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
+  fixedVms: Vm[] = [],
 ): ArchitectureOption[] {
   return ARCHITECTURE_VARIANTS.map(v => {
     const variant = { ...base, ...v.patch } as ClusterConfig
     // A disk witness chosen for a SAN design must not rule S2D out of the comparison. Say so plainly.
     const swapWitness = variant.architecture !== 'san' && variant.witnessType === 'disk'
     const cfg: ClusterConfig = swapWitness ? { ...variant, witnessType: 'cloud' } : variant
-    const result = solveForward(cfg, vms, tiers)
+    const result = solveForward(cfg, vms, tiers, fixedVms)
     if (swapWitness) {
       result.findings.push({
         severity: 'info',

@@ -10,17 +10,19 @@ interface Props {
   tiers: Record<TierId, TierPolicy>
   inputs: PlacementInputs
   setInputs: (inputs: PlacementInputs) => void
+  /** Management VMs counted in sizing, so the preview matches the design. */
+  managementVms?: Vm[]
 }
 
 /** One cluster or split is the user's decision. This panel shows the trade and changes nothing itself. */
-export function ClusterLayoutPanel({ option, vms, tiers, inputs, setInputs }: Props) {
+export function ClusterLayoutPanel({ option, vms, tiers, inputs, setInputs, managementVms = [] }: Props) {
   const result = option.result
   const limit = clusterNodeLimitFor(option.cfg)
   const spare = option.cfg.spareNodes
   const maxNodes = Math.min(inputs.maxNodesPerCluster, limit)
   const split = useMemo(
-    () => planMultipleClusters(option.cfg, vms, tiers, { ...inputs, clusterLayout: 'split', maxNodesPerCluster: maxNodes }),
-    [option.cfg, vms, tiers, inputs, maxNodes],
+    () => planMultipleClusters(option.cfg, vms, tiers, { ...inputs, clusterLayout: 'split', maxNodesPerCluster: maxNodes }, managementVms),
+    [option.cfg, vms, tiers, inputs, maxNodes, managementVms],
   )
   const set = (patch: Partial<PlacementInputs>) => setInputs({ ...inputs, ...patch })
   const needed = result.nodesNeeded

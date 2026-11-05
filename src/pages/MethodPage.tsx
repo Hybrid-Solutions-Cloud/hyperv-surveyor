@@ -44,8 +44,10 @@ function MethodOverview() {
           <h2>One engine, two directions</h2>
           <p>
             Forward sizing finds the minimum node count for a workload. Existing-capacity sizing fixes the hardware
-            and calculates what still fits. Both use the same CPU, memory, storage, and validation functions so their
-            answers cannot drift apart.
+            and calculates what still fits. Both use the same CPU, memory, storage, and validation functions, and
+            automated tests check that forward, reverse, and fit-gap agree at the boundary. Every page, the report,
+            and the workbooks read one resolved design, so they show the same numbers for the same inputs. That is
+            enforced by tests, not guaranteed: report a mismatch if you see one.
           </p>
           <div className="method-flow">
             <span>Workloads</span><i>+</i><span>Assumptions</span><i>→</i><strong>Constraint engine</strong><i>→</i><span>Explainable result</span>
@@ -80,15 +82,17 @@ function MethodOverview() {
           It can size conservatively from configured vCPU, RAM, and storage, but it cannot establish a measured long-term utilization percentile.
         </div>
         <p>
-          Imported workloads therefore default to a right-sizing factor of 1.0. If measured utilization is available
-          from an operations platform, adjust the factor deliberately and document the evidence in the exported design.
+          Imported workloads therefore default to a right-sizing factor of 1.0. If you import a performance file and
+          choose measured P95 sizing, a VM with a measured CPU P95 is sized on vCPU × P95 × comfort factor ÷ benchmark
+          factor with no vCPU-to-core ratio, because the measurement is actual use; memory uses its measured P95 the same
+          way. VMs without a measurement fall back to allocation and the tier policy, and the report states the coverage.
         </p>
       </section>
 
       <section className="panel source-note">
         <div>
           <h2>Source maintenance</h2>
-          <p>Rules and management-plane content are generated from the supplied research workbook. Commercial values must be reverified before quotation.</p>
+          <p>The sizing rules and limits in the engine are written by hand, each with its basis (MS, MS-REC, or TOOL) and a source where one exists. The management-plane content and the platform limits table below are generated from the supplied research workbook. Commercial values must be reverified before quotation.</p>
         </div>
         <a href="https://learn.microsoft.com/windows-server/virtualization/hyper-v/" target="_blank" rel="noreferrer" className="btn ghost link-btn">
           Microsoft Hyper-V documentation <ExternalLink size={14} />

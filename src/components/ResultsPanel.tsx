@@ -1,16 +1,16 @@
 import React from 'react'
-import { forecastGrowth, type ArchitectureOption, type GrowthForecastPoint } from '../engine/solve'
+import type { ArchitectureOption } from '../engine/solve'
+import type { PlatformDesign } from '../engine/platformDesign'
 import { RESILIENCY, TIER_IDS } from '../engine/rules'
 import { giBToTiB } from '../engine/compute'
-import type { TierId, TierPolicy, Vm } from '../engine/types'
+import type { TierId, TierPolicy } from '../engine/types'
 import { Card, FindingsList, fmt0, fmt1 } from './Shared'
 
 interface Props {
-  options: ArchitectureOption[]
-  chosenKey: string
+  /** The resolved design. Every figure below comes from it. */
+  design: PlatformDesign
   setChosenKey: (k: string) => void
   tiers: Record<TierId, TierPolicy>
-  vms: Vm[]
   onExport: () => void
   /** Shown above the comparison: help choosing a storage type. */
   beforeComparison?: React.ReactNode
@@ -32,12 +32,16 @@ const driverLabel: Record<string, string> = {
   'custom-target': 'custom target',
 }
 
-export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onExport, beforeComparison, designChoices }: Props) {
-  const chosen = options.find(o => o.key === chosenKey) ?? options[0]
+export function ResultsPanel({ design, setChosenKey, tiers, onExport, beforeComparison, designChoices }: Props) {
+  const options = design.options
+  const chosen = design.chosen ?? options[0]
   const r = chosen.result
-  const availableStorageTiB = (r.capacity?.usableTiB ?? 0) + (r.sanCapacityTiB ?? 0)
+  const storage = design.storage
+  const split = design.status === 'split'
+  const designOk = design.feasible === true
+  const availableStorageTiB = (storage?.s2dUsableTiB ?? 0) + (storage?.sanEffectiveTiB ?? 0)
 
-  if (r.demand.vmCount === 0) {
+  if (design.status === 'no-workload' || r.demand.vmCount === 0) {
     return (
       <div className="panel">
         <h2>Results</h2>
@@ -46,30 +50,13 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
     )
   }
 
-  const spare = r.nodes - r.workloadNodes
-  const growth = forecastGrowth(chosen.cfg, vms, tiers)
-  const sanPlans = r.csvPlans.filter(plan => plan.domain === 'san')
+  const spare = chosen.cfg.spareNodes
+  const growth = design.growth
+  const csvPlans = storage?.csvPlans ?? []
+  const sanPlans = csvPlans.filter(plan => plan.domain === 'san')
   const sanCsvCount = sanPlans.reduce((sum, plan) => sum + plan.count, 0)
   const granularSanAlternative = sanPlans.reduce((sum, plan) => sum + plan.granularAdvisoryCount, 0)
-  const actionFor = (point: GrowthForecastPoint, index: number) => {
-    if (!point.result.feasible) {
-      if (point.result.sanCapacityTiB !== null && point.result.requiredSanTiB > point.result.sanCapacityTiB) {
-        return `Expand SAN effective capacity by ${fmt1(point.result.requiredSanTiB - point.result.sanCapacityTiB)} TiB`
-      }
-      return point.result.nodesNeeded !== null && point.result.nodesNeeded > point.result.clusterNodeLimit
-        ? `Above the ${point.result.clusterNodeLimit}-node limit: review server size, storage type, or cluster layout`
-        : 'Review the design findings'
-    }
-    if (growth.plan.strategy === 'build-now') {
-      return index === 0
-        ? `Build ${growth.plannedNodesToday ?? '—'} nodes now`
-        : `Covered by initial ${growth.plannedNodesToday ?? '—'}-node build`
-    }
-    if (index === 0) return `Initial build: ${point.result.nodes} nodes`
-    return point.additionalNodes && point.additionalNodes > 0
-      ? `Add ${point.additionalNodes} node${point.additionalNodes === 1 ? '' : 's'}`
-      : 'No node addition'
-  }
+  const management = design.management
 
   return (
     <div className="stack">
@@ -137,25 +124,19 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
 
       <div className="panel">
         <h2>{chosen.label}</h2>
-        <div className={`note ${r.feasible ? 'ok' : 'err'}`}>
-          <strong>
-            {r.feasible
-              ? `${r.nodes} nodes — ${r.workloadNodes} carrying workload after N+${spare}`
-              : r.nodesNeeded === null
-                ? 'No node count works with these inputs'
-                : r.nodesNeeded > r.clusterNodeLimit
-                  ? `One cluster needs ${r.nodesNeeded} nodes; the limit is ${r.clusterNodeLimit}`
-                  : 'This design is blocked'}
-          </strong>
-          {r.bindingExplanation}
+        <div className={`note ${designOk ? 'ok' : 'err'}`}>
+          <strong>{design.headline}</strong>
+          {design.explanation}
         </div>
+        {management.counted && <div className="note"><strong>Includes {management.countedVms.length} management VMs</strong>They share the workload cluster and are counted in this result: {management.impactLabel.toLowerCase()}.</div>}
+        {design.splitRequested && <div className="note"><strong>{split ? 'The comparison above is one cluster per option' : 'Split selected'}</strong>{split ? 'The selected design below is your split. The table above still compares each storage type in one cluster.' : 'The split cannot place the workload yet. Change the split limits below or choose one cluster.'}</div>}
         <div className={`note ${r.performanceAssessment.confidence === 'high' ? 'ok' : r.performanceAssessment.measuredVms > 0 ? 'warn' : ''}`}>
           <strong>Sizing evidence: {r.performanceAssessment.basis === 'measured-p95' ? 'measured P95 with allocation fallback' : 'allocation'} · {r.performanceAssessment.confidence.replace('-', ' ')} ({r.performanceAssessment.score}/100)</strong>
           CPU coverage {r.performanceAssessment.cpuCoveragePct.toFixed(0)}% · memory {r.performanceAssessment.memoryCoveragePct.toFixed(0)}% · storage performance {r.performanceAssessment.storagePerformanceCoveragePct.toFixed(0)}%.
         </div>
 
         <div className="grid cards">
-          <Card k="Nodes" v={r.feasible ? r.nodes : r.nodesNeeded ?? r.computeNodesNeeded ?? '—'} s={r.feasible ? `${r.workloadNodes} workload + ${spare} spare` : r.nodesNeeded !== null ? `needed in one cluster, limit ${r.clusterNodeLimit}` : r.computeNodesNeeded !== null ? 'for compute; more hosts will not fix the storage' : 'fix the inputs above'} />
+          <Card k="Nodes" v={design.totalNodes ?? (r.nodesNeeded ?? r.computeNodesNeeded ?? '—')} s={split ? `across ${design.clusters.length} clusters, ${design.workloadNodes} carrying workload` : designOk ? `${r.workloadNodes} workload + ${spare} spare` : design.status === 'split-failed' ? 'the split cannot place the workload' : r.nodesNeeded !== null ? `needed in one cluster, limit ${r.clusterNodeLimit}` : r.computeNodesNeeded !== null ? 'for compute; more hosts will not fix the storage' : 'fix the inputs above'} />
           <Card k="If CPU alone" v={Number.isFinite(r.nodesIfCpuOnly) ? r.nodesIfCpuOnly : '—'} s="nodes" />
           <Card k="If memory alone" v={Number.isFinite(r.nodesIfMemoryOnly) ? r.nodesIfMemoryOnly : '—'} s="nodes" />
           <Card k="If storage alone"
@@ -163,10 +144,10 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
             s={r.capacity ? 'nodes / domain validation' : `${fmt1(r.sanCapacityTiB ?? 0)} TiB SAN effective`} />
           <Card k="Cores required" v={fmt0(r.demand.requiredPCores)} s={`from ${fmt0(r.demand.totalVCpu)} allocated vCPU`} />
           <Card k="RAM required" v={fmt1(r.demand.requiredRamGiB / 1024)} s="TiB" />
-          <Card k="Storage required" v={fmt1(r.requiredStorageTiB)} s="TiB consumed" />
-          {r.feasible && <Card k="Storage available" v={fmt1(availableStorageTiB)} s={chosen.cfg.architecture === 'hybrid' ? `${fmt1(r.capacity?.usableTiB ?? 0)} S2D + ${fmt1(r.sanCapacityTiB ?? 0)} SAN` : 'TiB effective / usable'} />}
-          {r.sanSizing && <Card k="SAN to buy" v={fmt1(r.sanSizing.usableToBuyTiB)} s={`TiB usable at ${r.sanSizing.drr}:1, keeping ${(r.sanSizing.freeSpaceTargetPct * 100).toFixed(0)}% free`} />}
-          <Card k="Licensable cores" v={r.nodesNeeded === null ? '—' : fmt0(r.licensableCoresPerNode * r.nodesNeeded)} s={r.nodesNeeded === null ? 'needs a valid node count' : `${r.licensableCoresPerNode} per node × ${r.nodesNeeded}`} />
+          <Card k="Storage required" v={fmt1(storage?.requiredTiB ?? r.requiredStorageTiB)} s="TiB consumed" />
+          {designOk && <Card k="Storage available" v={fmt1(availableStorageTiB)} s={chosen.cfg.architecture === 'hybrid' ? `${fmt1(storage?.s2dUsableTiB ?? 0)} S2D usable + ${fmt1(storage?.sanEffectiveTiB ?? 0)} SAN effective` : chosen.cfg.architecture === 'san' ? 'TiB SAN effective (usable × data reduction)' : 'TiB S2D usable'} />}
+          {storage?.sanToBuyUsableTiB != null && <Card k="SAN to buy" v={fmt1(storage.sanToBuyUsableTiB)} s={`TiB usable (${fmt1(storage.sanToBuyEffectiveTiB ?? 0)} TiB effective at ${storage.sanDrr}:1), keeping ${((storage.sanFreeSpaceTargetPct ?? 0) * 100).toFixed(0)}% free`} />}
+          <Card k="Licensable cores" v={design.licensableCores === null ? '—' : fmt0(design.licensableCores)} s={design.licensableCoresDetail} />
         </div>
 
         <h3 style={{ marginTop: 18 }}>Storage performance validation</h3>
@@ -190,7 +171,19 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
           </table>
         </div>
 
-        {r.capacity && r.feasible && (
+        {split && (
+          <>
+            <h3 style={{ marginTop: 18 }}>Target clusters</h3>
+            <div className="scroll" style={{ maxHeight: 'none' }}>
+              <table>
+                <thead><tr><th>Cluster</th><th>Purpose</th><th className="num">Workload VMs</th><th className="num">Management VMs</th><th className="num">Nodes</th><th>Binding</th><th className="num">Required TiB</th>{chosen.cfg.architecture !== 'san' && <th className="num">S2D usable TiB</th>}{storage?.sanToBuyUsableTiB != null && <th className="num">SAN to buy TiB</th>}</tr></thead>
+                <tbody>{design.clusters.map((cluster) => <tr key={cluster.id}><td><strong>{cluster.name}</strong></td><td>{cluster.purpose}</td><td className="num">{fmt0(cluster.workloadVms)}</td><td className="num">{cluster.managementVms || '—'}</td><td className="num">{cluster.nodesLabel}</td><td><span className="pill info">{cluster.binding}</span></td><td className="num">{fmt1(cluster.requiredStorageTiB)}</td>{chosen.cfg.architecture !== 'san' && <td className="num">{cluster.s2dUsableTiB === null ? '—' : fmt1(cluster.s2dUsableTiB)}</td>}{storage?.sanToBuyUsableTiB != null && <td className="num">{cluster.sanToBuyUsableTiB === null ? '—' : fmt1(cluster.sanToBuyUsableTiB)}</td>}</tr>)}</tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {r.capacity && design.status === 'feasible' && (
           <>
             <h3 style={{ marginTop: 18 }}>S2D capacity chain</h3>
             <table>
@@ -212,9 +205,10 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
 
       {designChoices}
 
-      <div className="panel">
+      {growth && <div className="panel">
         <h2>Capacity growth plan</h2>
-        <div className={`note ${growth.points.every((point) => point.result.feasible) ? 'ok' : 'warn'}`}>
+        <p className="small muted" style={{ marginTop: -6 }}>Forecast scope: {growth.scopeLabel}.</p>
+        <div className={`note ${growth.allFeasible ? 'ok' : 'warn'}`}>
           <strong>{growth.plan.strategy === 'build-now' ? 'Forecast capacity is included now' : 'Nodes are phased with demand'}</strong>
           {growth.plan.annualGrowthPct > 0
             ? `${(growth.plan.annualGrowthPct * 100).toFixed(1)}% annual growth compounds through Year ${growth.plan.horizonYears}. Immediate headroom is ${growth.plan.immediateHeadroomPct.toFixed(1)}%.`
@@ -233,19 +227,19 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
                 <th className="num">Demand multiplier</th>
                 <th className="num">Nodes required</th>
                 <th>Binding constraint</th>
-                {r.sanSizing && <th className="num">SAN to buy (TiB)</th>}
+                {growth.points.some((point) => point.sanToBuyUsableTiB !== null) && <th className="num">SAN usable to buy (TiB)</th>}
                 <th>Deployment action</th>
               </tr>
             </thead>
             <tbody>
-              {growth.points.map((point, index) => (
+              {growth.points.map((point) => (
                 <tr key={point.year}>
                   <td><strong>{point.year === 0 ? 'Today' : `Year ${point.year}`}</strong></td>
                   <td className="num mono">{point.demandFactor.toFixed(2)}×</td>
-                  <td className="num"><strong>{point.result.feasible ? point.result.nodes : point.result.nodesNeeded !== null ? nodesNeededText(point.result) : 'Review'}</strong></td>
-                  <td><span className={`pill ${point.result.binding === 'storage' ? 'warn' : 'info'}`}>{point.result.binding}</span></td>
-                  {r.sanSizing && <td className="num mono">{fmt1(point.result.sanSizing?.usableToBuyTiB ?? 0)}</td>}
-                  <td>{actionFor(point, index)}</td>
+                  <td className="num"><strong>{point.nodesLabel}</strong></td>
+                  <td><span className={`pill ${point.binding === 'storage' ? 'warn' : 'info'}`}>{point.binding}</span></td>
+                  {growth.points.some((item) => item.sanToBuyUsableTiB !== null) && <td className="num mono">{point.sanToBuyUsableTiB === null ? '—' : fmt1(point.sanToBuyUsableTiB)}</td>}
+                  <td>{point.action}</td>
                 </tr>
               ))}
             </tbody>
@@ -254,7 +248,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
         <p className="small muted" style={{ marginTop: 8 }}>
           This is a planning forecast, not measured trend analysis. It compounds the entered growth percentage across the current workload mix and preserves the selected N+n reserve at every point.
         </p>
-      </div>
+      </div>}
 
       <div className="panel">
         <h2>{chosen.cfg.architecture === 'san'
@@ -274,11 +268,12 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
             They are shown as an optional granular-recovery alternative and are not silently enforced in this mode.
           </div>
         )}
-        {!r.feasible && <div className="note warn"><strong>Layout not calculated</strong>This option does not fit one cluster, so a volume layout here would describe a design that cannot be built. Resolve the node count first.</div>}
-        {r.feasible && <div className="scroll">
+        {!storage?.csvPlans && <div className="note warn"><strong>Layout not calculated</strong>{storage?.csvNotCalculatedReason ?? 'Resolve the node count first.'}</div>}
+        {storage?.csvPlans && <div className="scroll">
           <table>
             <thead>
               <tr>
+                {storage?.perCluster && <th>Cluster</th>}
                 <th>Tier</th>
                 <th>Storage object</th>
                 <th>Planned demand</th>
@@ -288,8 +283,9 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
               </tr>
             </thead>
             <tbody>
-              {r.csvPlans.map((p, i) => (
+              {csvPlans.map((p, i) => (
                 <tr key={i}>
+                  {storage?.perCluster && <td>{p.cluster}</td>}
                   <td><strong>{tiers[p.tier].label}</strong></td>
                   <td>
                     <span className={`pill ${p.domain === 's2d' ? 'ok' : 'info'}`}>
@@ -318,8 +314,8 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
                 </tr>
               ))}
               <tr>
-                <td colSpan={4}><strong>Total logical storage objects</strong></td>
-                <td><strong>{r.totalCsvs}</strong></td>
+                <td colSpan={storage?.perCluster ? 5 : 4}><strong>Total logical storage objects</strong></td>
+                <td><strong>{storage?.totalCsvs}</strong></td>
                 <td className="small muted">A result above 64 generates a design warning.</td>
               </tr>
             </tbody>

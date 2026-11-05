@@ -1,45 +1,33 @@
 import { useMemo } from 'react'
 import { Activity, Boxes, Network, ShieldCheck } from 'lucide-react'
 import { Field, NumberInput, PageHeader } from '../components/Shared'
-import { compareArchitectures } from '../engine/solve'
-import { clusterNodeLimitFor, planMultipleClusters } from '../engine/deploymentPlanning'
+import { clusterNodeLimitFor } from '../engine/deploymentPlanning'
 import { assessMigrationReadiness } from '../engine/readiness'
 import { designNetwork } from '../engine/networkDesign'
 import { designDisasterRecovery } from '../engine/drDesign'
 import { useSurveyorStore } from '../state/store'
 import { JourneyBar } from '../components/JourneyBar'
-import { deploymentComponentsToVms, deploymentInputsFromStack, normalizeManagementDeploymentInputs, planManagementDeployment } from '../engine/managementDeployment'
-import { solveForward } from '../engine/solve'
+import { usePlatformDesign } from '../state/usePlatformDesign'
+import { ENGAGEMENT_LABELS } from '../state/journey'
 import { WorkflowNav } from '../components/WorkflowNav'
 
 export default function DeploymentPage() {
   const store = useSurveyorStore()
-  const options = useMemo(() => compareArchitectures(store.cfg, store.vms, store.tiers), [store.cfg, store.vms, store.tiers])
-  const chosen = options.find((option) => option.key === store.chosenKey) ?? options[0]
-  const usesExistingHardware = store.engagementMode === 'existing-capacity' || store.engagementMode === 'fit-gap'
-  const managementOnly = store.engagementMode === 'management-only'
-  const platformCfg = usesExistingHardware ? store.existingCapacityCfg : chosen.cfg
-  const platformTiers = usesExistingHardware ? store.existingCapacityTiers : store.tiers
-  const workloadPlan = useMemo(() => planMultipleClusters(platformCfg, store.vms, platformTiers, store.placementInputs), [platformCfg, store.vms, platformTiers, store.placementInputs])
-  const platformNodes = usesExistingHardware
-    ? store.existingCapacityNodes
-    : store.placementInputs.clusterLayout === 'split' && workloadPlan.feasible ? workloadPlan.totalNodes : chosen.result.nodes
-  const splitLayout = store.placementInputs.clusterLayout === 'split'
+  // One design for every page: placement, management, network and recovery all read it.
+  const design = usePlatformDesign()
+  const usesExistingHardware = design.path === 'existing'
+  const managementOnly = design.path === 'management-only'
+  const platformCfg = design.cfg
+  const splitLayout = !usesExistingHardware && store.placementInputs.clusterLayout === 'split'
   const nodeLimit = clusterNodeLimitFor(platformCfg)
-  const defaultManagementInputs = deploymentInputsFromStack(platformNodes <= 4 ? ['classic', 'wac-admin'] : ['scvmm', 'wac-admin'], platformNodes, store.vms.filter((vm) => vm.include).length)
-  const managementInputs = normalizeManagementDeploymentInputs(store.managementDeploymentInputs ?? defaultManagementInputs)
-  const managementPlan = useMemo(() => planManagementDeployment(managementInputs), [managementInputs])
-  const managementVms = useMemo(() => deploymentComponentsToVms(managementPlan.components), [managementPlan.components])
-  const embeddedManagementVms = store.managementDecision === 'design' && store.includeManagementInSizing && managementInputs.managementPlacement === 'workload-cluster' ? managementVms : []
+  const management = design.management
+  const managementPlan = management.plan
+  const embeddedManagementVms = management.countedVms
+  const dedicatedManagement = management.dedicated
   const readiness = useMemo(() => assessMigrationReadiness(store.vms, platformCfg), [store.vms, platformCfg])
-  const clusters = useMemo(() => planMultipleClusters(platformCfg, store.vms, platformTiers, store.placementInputs, embeddedManagementVms), [platformCfg, store.vms, platformTiers, store.placementInputs, embeddedManagementVms])
-  const dedicatedManagement = store.managementDecision === 'design' && managementInputs.managementPlacement === 'dedicated-management-cluster' && managementVms.length > 0
-    ? solveForward(platformCfg, [], platformTiers, managementVms)
-    : null
-  const networkNodeCount = (usesExistingHardware ? platformNodes : clusters.totalNodes) + (dedicatedManagement?.feasible ? dedicatedManagement.nodes : 0)
-  const network = useMemo(() => designNetwork(platformCfg, networkNodeCount, store.networkDesignInputs), [platformCfg, networkNodeCount, store.networkDesignInputs])
-  const platformSizing = useMemo(() => solveForward(platformCfg, store.vms, platformTiers), [platformCfg, store.vms, platformTiers])
-  const dr = useMemo(() => designDisasterRecovery(store.vms, platformSizing, store.drDesignInputs), [store.vms, platformSizing, store.drDesignInputs])
+  const network = useMemo(() => design.network.nodes === null ? null : designNetwork(platformCfg, design.network.nodes, store.networkDesignInputs), [platformCfg, design.network.nodes, store.networkDesignInputs])
+  const dr = useMemo(() => design.sizing ? designDisasterRecovery(store.vms, design.sizing, store.drDesignInputs) : null, [store.vms, design.sizing, store.drDesignInputs])
+  const placementOk = design.feasible === true
   const setPlacement = (patch: Partial<typeof store.placementInputs>) => store.setPlacementInputs({ ...store.placementInputs, ...patch })
   const setNetwork = (patch: Partial<typeof store.networkDesignInputs>) => store.setNetworkDesignInputs({ ...store.networkDesignInputs, ...patch })
   const setDr = (patch: Partial<typeof store.drDesignInputs>) => store.setDrDesignInputs({ ...store.drDesignInputs, ...patch })
@@ -47,7 +35,7 @@ export default function DeploymentPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Implementation planning"
+        eyebrow={`Implementation planning${store.engagementMode ? ` · ${ENGAGEMENT_LABELS[store.engagementMode]}` : ''}`}
         title="Implementation plan"
         description="Turn the selected sizing result into target clusters, migration readiness, host networking, and disaster-recovery requirements."
       />
@@ -56,35 +44,38 @@ export default function DeploymentPage() {
         <section className="panel">
           <h2>Management-only implementation</h2>
           <p className="muted">The management bill of materials is available without a workload design. Add a platform path later if host placement, network ports, workload fit, or disaster recovery must also be calculated.</p>
+          {management.contextNote && <div className="note warn"><strong>Managed hosts</strong>{management.contextNote}</div>}
+          {dedicatedManagement?.reason && <div className="note warn"><strong>Dedicated management cluster</strong>{dedicatedManagement.reason}</div>}
           <div className="grid cards"><div className="card"><div className="k">Management instances</div><div className="v">{managementPlan.totalInstances}</div></div><div className="card"><div className="k">Management vCPU</div><div className="v">{managementPlan.totalVCpu}</div></div><div className="card"><div className="k">Management memory</div><div className="v">{managementPlan.totalRamGiB}<span style={{ fontSize: 15 }}> GiB</span></div></div><div className="card"><div className="k">Management disk</div><div className="v">{managementPlan.totalDiskGiB}<span style={{ fontSize: 15 }}> GiB</span></div></div></div>
         </section>
       </div> : store.vms.filter((vm) => vm.include).length === 0 ? <div className="panel"><h2>Add workloads first</h2><p className="muted">Import or enter workloads before building the implementation plan.</p></div> : <div className="stack">
         <section className="panel">
           <h2><Boxes size={18} /> Cluster placement</h2>
-          <div className="form-grid two-column">
+          {usesExistingHardware && <p className="small muted">Placement uses the {design.totalNodes} entered nodes of the existing estate. Adding or splitting clusters is not part of this path.</p>}
+          {!usesExistingHardware && <div className="form-grid two-column">
             <Field label="Cluster layout" hint="Surveyor keeps one cluster unless you choose to split."><select value={store.placementInputs.clusterLayout} onChange={(event) => setPlacement({ clusterLayout: event.target.value as typeof store.placementInputs.clusterLayout })}><option value="single">One cluster</option><option value="split">Split into multiple clusters</option></select></Field>
             {splitLayout && <Field label="Maximum nodes / target cluster" hint={`Up to ${nodeLimit} for this storage type.`}><NumberInput value={Math.min(store.placementInputs.maxNodesPerCluster, nodeLimit)} min={2} max={nodeLimit} onChange={(value) => setPlacement({ maxNodesPerCluster: Math.round(value) })} /></Field>}
             {splitLayout && <Field label="Target VMs / cluster" hint="8,000 is the Hyper-V maximum, so it adds no extra limit."><NumberInput value={store.placementInputs.targetVmsPerCluster} min={1} max={8000} step={50} onChange={(value) => setPlacement({ targetVmsPerCluster: Math.round(value) })} /></Field>}
             {splitLayout && <Field label="Maximum target clusters"><NumberInput value={store.placementInputs.maxClusters} min={1} max={64} onChange={(value) => setPlacement({ maxClusters: Math.round(value) })} /></Field>}
             {splitLayout && platformCfg.sanSizingMode !== 'calculated' && (platformCfg.architecture === 'san' || platformCfg.architecture === 'hybrid') && <Field label="SAN capacity scope"><select value={store.placementInputs.sanCapacityScope} onChange={(event) => setPlacement({ sanCapacityScope: event.target.value as typeof store.placementInputs.sanCapacityScope })}><option value="shared">One shared array capacity pool</option><option value="per-cluster">Dedicated array capacity per cluster</option></select></Field>}
-          </div>
+          </div>}
           {splitLayout && <div className="meter-toggles">
             <label><input type="checkbox" checked={store.placementInputs.preserveSourceClusters} onChange={(event) => setPlacement({ preserveSourceClusters: event.target.checked })} /> Keep each source cluster together</label>
             <label><input type="checkbox" checked={store.placementInputs.separateDatabaseTier} onChange={(event) => setPlacement({ separateDatabaseTier: event.target.checked })} /> Place database tier on dedicated clusters</label>
           </div>}
-          <div className={`note ${clusters.feasible ? 'ok' : 'err'}`}>
-            <strong>{clusters.feasible ? `${clusters.clusters.length} target cluster${clusters.clusters.length === 1 ? '' : 's'} · ${clusters.totalNodes} total nodes` : splitLayout ? 'Placement needs revision' : 'This workload does not fit one cluster'}</strong>
-            {clusters.feasible ? `${clusters.totalWorkloadNodes} nodes carry workload after each cluster's failure reserve.` : clusters.warnings.join(' ')}
+          <div className={`note ${placementOk ? 'ok' : 'err'}`}>
+            <strong>{placementOk && !usesExistingHardware ? `${design.clusters.length} target cluster${design.clusters.length === 1 ? '' : 's'} · ${design.totalNodes} total nodes` : design.headline}</strong>
+            {placementOk ? `${design.workloadNodes} nodes carry workload after ${usesExistingHardware ? 'the' : "each cluster's"} failure reserve.` : design.explanation}
           </div>
           <div className="scroll" style={{ maxHeight: 'none' }}>
             <table><thead><tr><th>Target cluster</th><th>Purpose</th><th className="num">Workload VMs</th><th className="num">Management VMs</th><th className="num">Nodes</th><th>Constraint</th><th>Source clusters</th><th>Confidence</th></tr></thead>
-              <tbody>{clusters.clusters.map((cluster) => <tr key={cluster.id}><td><strong>{cluster.name}</strong></td><td>{cluster.purpose}</td><td className="num">{(cluster.vms.length - cluster.managementVmCount).toLocaleString()}</td><td className="num">{cluster.managementVmCount || '—'}</td><td className="num">{cluster.result.feasible ? cluster.result.nodes : 'Review'}</td><td><span className={`pill ${cluster.result.feasible ? 'info' : 'err'}`}>{cluster.result.binding}</span></td><td>{cluster.sourceClusters.join(', ') || 'Mixed / not provided'}</td><td>{cluster.result.performanceAssessment.confidence.replace('-', ' ')} · {cluster.result.performanceAssessment.score}/100</td></tr>)}</tbody>
+              <tbody>{design.clusters.map((cluster) => <tr key={cluster.id}><td><strong>{cluster.name}</strong></td><td>{cluster.purpose}</td><td className="num">{cluster.workloadVms.toLocaleString()}</td><td className="num">{cluster.managementVms || '—'}</td><td className="num">{cluster.feasible && cluster.nodes !== null ? cluster.nodes : cluster.nodesLabel}</td><td><span className={`pill ${cluster.feasible ? 'info' : 'err'}`}>{cluster.binding}</span></td><td>{cluster.sourceClusters.join(', ') || 'Mixed / not provided'}</td><td>{cluster.confidence}</td></tr>)}</tbody>
             </table>
           </div>
-          {embeddedManagementVms.length > 0 && <div className="note ok"><strong>Management VMs placed with workloads</strong>{embeddedManagementVms.length} management instances are kept together on the first non-database workload cluster and included in that cluster's node calculation.</div>}
-          {dedicatedManagement && <div className={`note ${dedicatedManagement.feasible ? 'ok' : 'err'}`}><strong>Dedicated management cluster</strong>{dedicatedManagement.feasible ? `${dedicatedManagement.nodes} nodes of the selected specification are required for ${managementVms.length} management instances, including the configured failure reserve.` : dedicatedManagement.bindingExplanation}</div>}
-          {store.managementDecision === 'design' && managementInputs.managementPlacement === 'external-fabric' && <div className="note"><strong>External management fabric</strong>The management BOM is retained, but its VMs and nodes are excluded from this platform placement plan.</div>}
-          {clusters.warnings.map((warning) => <div className="note warn" key={warning}>{warning}</div>)}
+          {embeddedManagementVms.length > 0 && <div className="note ok"><strong>Management VMs placed with workloads</strong>{embeddedManagementVms.length} management instances are {usesExistingHardware ? 'counted on the entered hosts' : "kept together on the first non-database workload cluster and included in that cluster's node calculation"}. Host impact: {management.impactLabel.toLowerCase()}.</div>}
+          {dedicatedManagement && <div className={`note ${dedicatedManagement.nodes !== null ? 'ok' : 'err'}`}><strong>Dedicated management cluster</strong>{dedicatedManagement.nodes !== null ? `${dedicatedManagement.nodes} nodes of the selected specification are required for ${management.vms.length} management instances, including the configured failure reserve.` : dedicatedManagement.reason}</div>}
+          {management.designed && management.inputs.managementPlacement === 'external-fabric' && <div className="note"><strong>External management fabric</strong>The management BOM is retained, but its VMs and nodes are excluded from this platform placement plan.</div>}
+          {(design.placement?.warnings ?? []).filter((warning) => !design.explanation.includes(warning)).map((warning) => <div className="note warn" key={warning}>{warning}</div>)}
         </section>
 
         <section className="panel">
@@ -120,9 +111,10 @@ export default function DeploymentPage() {
             <label><input type="checkbox" checked={store.networkDesignInputs.separateStorageFabric} onChange={(event) => setNetwork({ separateStorageFabric: event.target.checked })} /> Isolate S2D and SAN traffic</label>
             <label><input type="checkbox" checked={store.networkDesignInputs.switchRedundancy} onChange={(event) => setNetwork({ switchRedundancy: event.target.checked })} /> Redundant switches</label>
           </div>
-          <div className="grid cards"><div className="card"><div className="k">Host switch ports</div><div className="v">{network.totalHostPorts}</div></div><div className="card"><div className="k">Aggregate / node</div><div className="v">{network.aggregateGbpsPerNode}<span style={{ fontSize: 15 }}> Gbps</span></div></div></div>
-          <ul className="report-bullets">{network.intentSummary.map((intent) => <li key={intent}>{intent}</li>)}</ul>
-          {network.findings.map((finding) => <div className={`note ${finding.severity === 'error' ? 'err' : finding.severity === 'warning' ? 'warn' : ''}`} key={finding.message}>{finding.message}</div>)}
+          {!network && <div className="note warn"><strong>Host switch ports not calculated</strong>{design.network.reason}</div>}
+          {network && <div className="grid cards"><div className="card"><div className="k">Host switch ports</div><div className="v">{network.totalHostPorts}</div><div className="s">for {design.network.nodes} nodes</div></div><div className="card"><div className="k">Aggregate / node</div><div className="v">{network.aggregateGbpsPerNode}<span style={{ fontSize: 15 }}> Gbps</span></div></div></div>}
+          {network && <ul className="report-bullets">{network.intentSummary.map((intent) => <li key={intent}>{intent}</li>)}</ul>}
+          {(network?.findings ?? []).map((finding) => <div className={`note ${finding.severity === 'error' ? 'err' : finding.severity === 'warning' ? 'warn' : ''}`} key={finding.message}>{finding.message}</div>)}
         </section>
 
         <section className="panel">
@@ -139,8 +131,8 @@ export default function DeploymentPage() {
             <Field label="Recovery test every N months"><NumberInput value={store.drDesignInputs.testFrequencyMonths} min={1} max={36} onChange={(value) => setDr({ testFrequencyMonths: Math.round(value) })} /></Field>
           </div>
           <div className="meter-toggles"><label><input type="checkbox" checked={store.drDesignInputs.immutableCopy} onChange={(event) => setDr({ immutableCopy: event.target.checked })} /> Immutable/offline recovery copy</label><label><input type="checkbox" checked={store.drDesignInputs.applicationConsistent} onChange={(event) => setDr({ applicationConsistent: event.target.checked })} /> Application-consistent recovery</label></div>
-          <div className="grid cards"><div className="card"><div className="k">Protected VMs</div><div className="v">{dr.protectedVms}</div></div><div className="card"><div className="k">Protected storage</div><div className="v">{dr.protectedStorageTiB.toFixed(1)}<span style={{ fontSize: 15 }}> TiB</span></div></div><div className="card"><div className="k">Secondary storage</div><div className="v">{dr.secondaryStorageTiB.toFixed(1)}<span style={{ fontSize: 15 }}> TiB</span></div></div><div className="card"><div className="k">Estimated burst WAN</div><div className="v">{dr.estimatedBurstMbps.toFixed(0)}<span style={{ fontSize: 15 }}> Mbps</span></div><div className="s">{dr.bandwidthPasses ? 'within entered capacity' : 'above entered capacity'}</div></div></div>
-          {dr.findings.map((finding) => <div className={`note ${finding.severity === 'error' ? 'err' : finding.severity === 'warning' ? 'warn' : ''}`} key={finding.message}>{finding.message}</div>)}
+          {dr && <div className="grid cards"><div className="card"><div className="k">Protected VMs</div><div className="v">{dr.protectedVms}</div></div><div className="card"><div className="k">Protected storage</div><div className="v">{dr.protectedStorageTiB.toFixed(1)}<span style={{ fontSize: 15 }}> TiB</span></div></div><div className="card"><div className="k">Secondary storage</div><div className="v">{dr.secondaryStorageTiB.toFixed(1)}<span style={{ fontSize: 15 }}> TiB</span></div></div><div className="card"><div className="k">Estimated burst WAN</div><div className="v">{dr.estimatedBurstMbps.toFixed(0)}<span style={{ fontSize: 15 }}> Mbps</span></div><div className="s">{dr.bandwidthPasses ? 'within entered capacity' : 'above entered capacity'}</div></div></div>}
+          {(dr?.findings ?? []).map((finding) => <div className={`note ${finding.severity === 'error' ? 'err' : finding.severity === 'warning' ? 'warn' : ''}`} key={finding.message}>{finding.message}</div>)}
         </section>
       </div>}
       <WorkflowNav

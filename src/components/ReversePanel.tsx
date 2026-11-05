@@ -166,7 +166,11 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
         <div className="grid cards" style={{ marginBottom: 18 }}>
           <Card k="Usable CPU" v={fmt1(r.availablePCores)} s="physical cores" />
           <Card k="Usable memory" v={fmt1(r.availableRamGiB / 1024)} s="TiB" />
-          <Card k="Usable storage" v={fmt1(r.availableStorageTiB)} s="TiB" />
+          {cfg.architecture === 'san'
+            ? <Card k="SAN effective storage" v={fmt1(r.availableStorageTiB)} s={`TiB: ${fmt1(cfg.san.usableTiB)} usable × ${Math.max(1, cfg.san.drr)}:1 data reduction`} />
+            : cfg.architecture === 'hybrid'
+              ? <Card k="Available storage" v={fmt1(r.availableStorageTiB)} s={`TiB: ${fmt1(r.capacity?.usableTiB ?? 0)} S2D usable + ${fmt1(cfg.san.usableTiB * Math.max(1, cfg.san.drr))} SAN effective (${fmt1(cfg.san.usableTiB)} usable × ${Math.max(1, cfg.san.drr)}:1)`} />
+              : <Card k="S2D usable storage" v={fmt1(r.availableStorageTiB)} s="TiB" />}
           <Card k="Workload hosts" v={r.workloadNodes} s={`${nodes} total, ${cfg.spareNodes} unavailable`} />
         </div>
         <h3>Current workload fit</h3>

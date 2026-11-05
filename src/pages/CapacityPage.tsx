@@ -9,7 +9,8 @@ import { ArrowRight, Download } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { exportExistingCapacity } from '../io/exportXlsx'
 import { WorkflowNav } from '../components/WorkflowNav'
-import { managementVmsForSizing } from '../engine/managementDeployment'
+import { usePlatformDesign } from '../state/usePlatformDesign'
+import { ENGAGEMENT_LABELS } from '../state/journey'
 
 export default function CapacityPage() {
   const {
@@ -22,29 +23,23 @@ export default function CapacityPage() {
     resetExistingCapacity,
     vms,
     engagementMode,
-    managementDecision,
-    includeManagementInSizing,
-    managementDeploymentInputs,
   } = useSurveyorStore()
   const fitGap = engagementMode === 'fit-gap'
+  const onExistingPath = engagementMode === 'existing-capacity' || engagementMode === 'fit-gap'
   const included = vms.filter((vm) => vm.include).length
+  // The same design every other page reads. Off the existing paths this page is read as existing capacity.
+  const design = usePlatformDesign(onExistingPath ? {} : { engagementMode: 'existing-capacity' })
   // Counted only when the management plane really shares this hardware.
-  const managementVms = useMemo(() => managementVmsForSizing({
-    decision: managementDecision,
-    includeInSizing: includeManagementInSizing,
-    storedInputs: managementDeploymentInputs,
-    platformNodes: existingCapacityNodes,
-    workloadVmCount: included,
-  }), [managementDecision, includeManagementInSizing, managementDeploymentInputs, existingCapacityNodes, included])
+  const managementVms = design.management.countedVms
 
   return (
     <>
       <PageHeader
-        eyebrow={fitGap ? 'Fit and gap · Input 2 of 2' : 'Existing capacity · Platform outcome'}
+        eyebrow={fitGap ? 'Fit and gap · Input 2 of 2' : onExistingPath ? 'Existing capacity · Platform outcome' : `Not part of your path${engagementMode ? ` (${ENGAGEMENT_LABELS[engagementMode]})` : ''} · Existing capacity`}
         title={fitGap ? 'Workload fit and hardware gap' : 'Existing-hardware capacity'}
         description={fitGap ? 'Test the included workload against fixed hardware, identify every deficit, and determine whether same-spec node expansion can close the gap.' : 'Fix the hardware the customer already owns and calculate its capacity envelope, workload headroom, and first exhausted resource.'}
         actions={<div className="row page-action-row">
-          <button className="btn ghost" type="button" onClick={() => exportExistingCapacity(existingCapacityCfg, existingCapacityNodes, existingCapacityTiers, vms, engagementMode, managementVms)}><Download size={15} /> Download workbook</button>
+          <button className="btn ghost" type="button" onClick={() => exportExistingCapacity(design, vms)}><Download size={15} /> Download workbook</button>
           {included === 0
             ? <Link className="btn link-btn" to="/workloads">Add workload evidence <ArrowRight size={15} /></Link>
             : <Link className="btn link-btn" to="/management-plane">Continue to management <ArrowRight size={15} /></Link>}

@@ -14,11 +14,10 @@ import {
   ServerCog,
   ShieldAlert,
 } from 'lucide-react'
-import { compareArchitectures, forecastGrowth, type ArchitectureOption } from '../engine/solve'
-import { plannedPlatformNodes, planMultipleClusters } from '../engine/deploymentPlanning'
+import type { ArchitectureOption } from '../engine/solve'
+import { usePlatformDesign } from '../state/usePlatformDesign'
 import {
   ARC_SERVICE_CATALOG,
-  deploymentComponentsToVms,
   deploymentInputsFromStack,
   normalizeManagementDeploymentInputs,
   planManagementDeployment,
@@ -53,22 +52,18 @@ type AdvisorTab = 'recommend' | 'deploy' | 'compare' | 'cost' | 'vmware' | 'fiel
 export default function ManagementPlanePage() {
   const [tab, setTab] = useState<AdvisorTab>('recommend')
   const [answers, setAnswers] = useState<AdvisorAnswers>({})
-  const { cfg, vms, tiers, chosenKey, managementDeploymentInputs, engagementMode, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, setManagementDecision, placementInputs } = useSurveyorStore()
-  const options = useMemo(() => compareArchitectures(cfg, vms, tiers), [cfg, vms, tiers])
-  const chosen = options.find((option) => option.key === chosenKey) ?? options[0]
+  const { vms, managementDeploymentInputs, setManagementDecision } = useSurveyorStore()
+  // The same design the report and the Implementation plan use: the chosen option, not the base config.
+  const design = usePlatformDesign()
   const includedVms = vms.filter((vm) => vm.include).length
-  const workloadPlan = useMemo(() => planMultipleClusters(chosen.cfg, vms, tiers, placementInputs), [chosen.cfg, vms, tiers, placementInputs])
   const recommendation = recommendManagementPlane(answers)
-  const usesExistingHardware = engagementMode === 'existing-capacity' || engagementMode === 'fit-gap'
-  const managementOnly = engagementMode === 'management-only'
-  const platformCfg = usesExistingHardware ? existingCapacityCfg : cfg
-  const platformTiers = usesExistingHardware ? existingCapacityTiers : tiers
-  const platformNodes = managementOnly ? (managementDeploymentInputs?.managedHosts ?? 0) : usesExistingHardware ? existingCapacityNodes : plannedPlatformNodes(chosen.result, workloadPlan, placementInputs)
-  const platformLabel = managementOnly
-    ? 'Management-only scope'
-    : usesExistingHardware
-      ? `Existing ${existingCapacityCfg.architecture.toUpperCase()} estate`
-      : chosen.label
+  const usesExistingHardware = design.path === 'existing'
+  const managementOnly = design.path === 'management-only'
+  const platformCfg = design.cfg
+  const platformTiers = design.tiers
+  // Defaults follow the design's node count, or the nodes it needs when it does not fit: never the cluster limit.
+  const platformNodes = managementOnly ? (managementDeploymentInputs?.managedHosts ?? 0) : design.totalNodes ?? design.management.contextNodes
+  const platformLabel = design.platformLabel
 
   return (
     <>
@@ -81,7 +76,7 @@ export default function ManagementPlanePage() {
 
       <div className="advisor-context">
         <div><span>Platform context</span><strong>{platformLabel}</strong></div>
-        <div><span>{usesExistingHardware ? 'Existing hosts' : managementOnly ? 'Managed hosts' : 'Calculated hosts'}</span><strong>{platformNodes || 'Enter in deployment design'}</strong></div>
+        <div><span>{usesExistingHardware ? 'Existing hosts' : managementOnly ? 'Managed hosts' : design.totalNodes === null ? 'Hosts the workload needs' : 'Calculated hosts'}</span><strong>{platformNodes || 'Enter in deployment design'}</strong>{!managementOnly && !usesExistingHardware && design.feasible === false && <small>The design does not fit yet</small>}</div>
         <div><span>Included workloads</span><strong>{includedVms.toLocaleString()} VMs</strong></div>
         <div className="advisor-freshness"><ShieldAlert size={16} /><span>Workbook-backed advisor library · qualifying questions fact-checked {MANAGEMENT_WORKBOOK.decisionQuestionsVerified} · verify commercial terms before quoting</span></div>
       </div>
@@ -388,45 +383,20 @@ function DeploymentDesignerPanel({
   const inputs = normalizeManagementDeploymentInputs(storedInputs
     ? { ...storedInputs, monitoring: storedInputs.monitoring ?? 'none' }
     : makeSuggestedInputs())
-  const plan = useMemo(() => planManagementDeployment(inputs), [inputs])
-  const managementVms = useMemo(() => deploymentComponentsToVms(plan.components), [plan.components])
-  const consumesWorkloadCapacity = includeInSizing && inputs.managementPlacement === 'workload-cluster' && platformKind !== 'management-only'
-  const baseSizing = useMemo(() => {
-    if (platformKind === 'management-only') return null
-    const forecast = forecastGrowth(platformCfg, vms, tiers)
-    return forecast.plan.strategy === 'build-now'
-      ? forecast.points[forecast.points.length - 1].result
-      : forecast.points[0].result
-  }, [platformCfg, platformKind, tiers, vms])
-  const adjusted = useMemo(() => {
-    if (platformKind === 'management-only') return null
-    if (!consumesWorkloadCapacity) return baseSizing
-    const forecast = forecastGrowth(platformCfg, vms, tiers, managementVms)
-    return forecast.plan.strategy === 'build-now'
-      ? forecast.points[forecast.points.length - 1].result
-      : forecast.points[0].result
-  }, [baseSizing, consumesWorkloadCapacity, managementVms, platformCfg, platformKind, tiers, vms])
-  const hostDelta = adjusted?.feasible
-    ? platformKind === 'existing'
-      ? Math.max(0, adjusted.nodes - platformNodes)
-      : baseSizing?.feasible ? adjusted.nodes - baseSizing.nodes : null
-    : null
-  const impactValue = platformKind === 'management-only'
-    ? 'BOM only'
-    : !adjusted?.feasible
-      ? platformKind === 'new' && platformNodes > 0 ? `${platformNodes} nodes across clusters` : 'Review design'
-      : platformKind === 'existing'
-        ? adjusted.nodes <= platformNodes ? `${platformNodes} existing · fits` : `${platformNodes} → ${adjusted.nodes}`
-        : `${baseSizing?.nodes ?? '—'} → ${adjusted.nodes}`
+  const inputsKey = JSON.stringify(inputs)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stableInputs = useMemo(() => inputs, [inputsKey])
+  const plan = useMemo(() => planManagementDeployment(stableInputs), [stableInputs])
+  // Host impact by the same rule every other page uses, for the inputs shown here.
+  const impactDesign = usePlatformDesign({ management: stableInputs })
+  const hostDelta = impactDesign.management.hostDelta
+  const fitText = platformKind === 'existing' && impactDesign.fitGap?.fits !== null && impactDesign.fitGap
+    ? impactDesign.fitGap.fits ? ` Fits on the ${platformNodes} entered nodes.` : ` Does not fit the ${platformNodes} entered nodes.`
+    : ''
+  const impactValue = platformKind === 'management-only' ? 'BOM only' : impactDesign.management.impactLabel
   const impactDetail = platformKind === 'management-only'
     ? 'No workload cluster supplied'
-    : inputs.managementPlacement !== 'workload-cluster'
-      ? 'No workload-cluster capacity consumed'
-      : !includeInSizing
-        ? 'Management overhead excluded'
-        : hostDelta === null
-          ? 'Could not compare'
-          : hostDelta > 0 ? `Adds ${hostDelta} host${hostDelta === 1 ? '' : 's'}` : 'No additional hosts'
+    : `${impactDesign.management.impactDetail}${fitText}`
 
   const scomPlanned = inputs.monitoring === 'scom' || (inputs.monitoring === 'scom-features' && inputs.foundation === 'scvmm')
 

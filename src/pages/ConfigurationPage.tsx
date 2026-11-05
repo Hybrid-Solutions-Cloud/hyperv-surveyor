@@ -5,14 +5,16 @@ import { JourneyBar } from '../components/JourneyBar'
 import { PageHeader } from '../components/Shared'
 import { WorkflowNav } from '../components/WorkflowNav'
 import { useSurveyorStore } from '../state/store'
+import { ENGAGEMENT_LABELS } from '../state/journey'
 
 export default function ConfigurationPage() {
-  const { cfg, setCfg, tiers, setTiers } = useSurveyorStore()
+  const { cfg, setCfg, tiers, setTiers, engagementMode } = useSurveyorStore()
+  const offPath = engagementMode !== null && engagementMode !== 'new-platform'
 
   return (
     <>
       <PageHeader
-        eyebrow="New platform · Step 2"
+        eyebrow={offPath ? `Not part of your path (${ENGAGEMENT_LABELS[engagementMode!]}) · Proposed hardware` : 'New platform · Step 2'}
         title="Hardware and assumptions"
         description="Starting assumptions for the comparison. You do not need final hardware: Surveyor uses these to work out the node count and the storage you need."
         actions={<Link className="btn link-btn" to="/results">Calculate designs <ArrowRight size={15} /></Link>}

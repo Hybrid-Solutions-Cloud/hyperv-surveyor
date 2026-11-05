@@ -372,6 +372,8 @@ export interface ReverseResult {
   bindingExplanation: string
   additionalVmsByTier: Record<TierId, number>
   findings: Finding[]
+  /** Logical storage objects for the entered node count. */
+  csvPlans: CsvPlan[]
   capacity: CapacityResult | null
   storageDomains: Array<{
     domain: 's2d' | 'san'

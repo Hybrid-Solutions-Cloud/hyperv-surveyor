@@ -4,6 +4,8 @@ import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
 import { fmt0 } from './Shared'
 
 interface Props {
+  /** Management VMs counted in sizing, so the selected row matches the design. */
+  managementVms?: Vm[]
   option: ArchitectureOption
   vms: Vm[]
   tiers: Record<TierId, TierPolicy>
@@ -12,8 +14,8 @@ interface Props {
 }
 
 /** Compares server sizes for the selected storage option. Only the user's click changes the design. */
-export function ReferenceServerPanel({ option, vms, tiers, cfg, setCfg }: Props) {
-  const servers = useMemo(() => compareReferenceServers(option.cfg, vms, tiers), [option.cfg, vms, tiers])
+export function ReferenceServerPanel({ option, vms, tiers, cfg, setCfg, managementVms = [] }: Props) {
+  const servers = useMemo(() => compareReferenceServers(option.cfg, vms, tiers, managementVms), [option.cfg, vms, tiers, managementVms])
   return (
     <div className="panel">
       <h2>Reference server comparison: {option.label}</h2>

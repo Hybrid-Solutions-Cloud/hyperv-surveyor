@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { Download, FolderOpen, RotateCcw, Save, Trash2, Upload } from 'lucide-react'
-import { compareArchitectures, solveForward } from '../engine/solve'
-import { planMultipleClusters } from '../engine/deploymentPlanning'
+import { compareScenario } from '../state/scenarioComparison'
 import { PageHeader } from '../components/Shared'
 import { useResetEverything } from '../components/useResetEverything'
 import { createProject, downloadProject, parseProject, type ProjectPayload } from '../state/project'
@@ -40,29 +39,10 @@ export default function ProjectPage() {
     { id: 'current', name: 'Current working design', createdAt: '', ...currentPayload },
     ...store.savedScenarios,
   ].map((scenario) => {
-    const options = compareArchitectures(scenario.cfg, scenario.vms, scenario.tiers)
-    const selected = options.find((option) => option.key === scenario.chosenKey) ?? options[0]
-    const usesExisting = scenario.engagementMode === 'existing-capacity' || scenario.engagementMode === 'fit-gap'
-    const managementOnly = scenario.engagementMode === 'management-only'
-    const result = managementOnly
-      ? null
-      : usesExisting
-        ? solveForward(scenario.existingCapacityCfg, scenario.vms, scenario.existingCapacityTiers)
-        : selected.result
-    const architecture = managementOnly
-      ? 'Management only'
-      : usesExisting ? `Existing ${scenario.existingCapacityCfg.architecture.toUpperCase()}` : selected.label
-    const splitPlan = !managementOnly && !usesExisting && scenario.placementInputs.clusterLayout === 'split'
-      ? planMultipleClusters(selected.cfg, scenario.vms, scenario.tiers, scenario.placementInputs)
-      : null
-    const nodes = managementOnly
-      ? '—'
-      : usesExisting
-        ? `${scenario.existingCapacityNodes} existing`
-        : splitPlan?.feasible
-          ? `${splitPlan.totalNodes.toLocaleString()} across ${splitPlan.clusters.length} clusters`
-          : result?.feasible ? result.nodes.toLocaleString() : 'Review'
-    return { scenario, result, architecture, nodes }
+    // The same design function as every other page, so a scenario row matches its report.
+    const row = compareScenario(scenario)
+    const result = row.design.path === 'management-only' ? null : row.design.sizing
+    return { scenario, design: row.design, result, architecture: row.architecture, nodes: row.nodes, resultLabel: row.result, storage: row.storage }
   }), [store.engagementMode, store.managementDecision, store.cfg, store.vms, store.tiers, store.chosenKey, store.customerName, store.existingCapacityCfg, store.existingCapacityTiers, store.existingCapacityNodes, store.managementDeploymentInputs, store.includeManagementInSizing, store.placementInputs, store.networkDesignInputs, store.drDesignInputs, store.reportMetadata, store.dataSources, store.storageDecisionAnswers, store.savedScenarios])
 
   const resetEverything = useResetEverything()
@@ -126,17 +106,18 @@ export default function ProjectPage() {
         <h2>Scenario comparison</h2>
         <div className="scroll" style={{ maxHeight: 'none' }}>
           <table>
-            <thead><tr><th>Scenario</th><th>Planning path</th><th>Architecture</th><th className="num">VMs</th><th className="num">Nodes</th><th>Constraint</th><th className="num">Storage</th><th>Evidence</th><th /></tr></thead>
+            <thead><tr><th>Scenario</th><th>Planning path</th><th>Architecture</th><th className="num">VMs</th><th className="num">Nodes</th><th>Result</th><th>Constraint</th><th className="num">Storage</th><th>Evidence</th><th /></tr></thead>
             <tbody>
-              {comparison.map(({ scenario, result, architecture, nodes }) => (
+              {comparison.map(({ scenario, design, result, architecture, nodes, resultLabel, storage }) => (
                 <tr key={scenario.id}>
                   <td><strong>{scenario.name}</strong>{scenario.createdAt && <div className="small muted">{new Date(scenario.createdAt).toLocaleString()}</div>}</td>
                   <td>{scenario.engagementMode ? ENGAGEMENT_LABELS[scenario.engagementMode] : 'Not selected'}</td>
                   <td>{architecture}</td>
                   <td className="num">{scenario.vms.filter((vm) => vm.include).length.toLocaleString()}</td>
                   <td className="num"><strong>{nodes}</strong></td>
-                  <td>{result ? <span className={`pill ${result.feasible ? 'info' : 'err'}`}>{result.binding}</span> : 'Not assessed'}</td>
-                  <td className="num">{result ? `${result.requiredStorageTiB.toFixed(1)} TiB` : '—'}</td>
+                  <td><span className={`pill ${design.feasible === true ? 'ok' : design.feasible === false ? 'err' : 'info'}`}>{resultLabel}</span></td>
+                  <td>{result ? <span className="pill info">{result.binding}</span> : 'Not assessed'}</td>
+                  <td className="num">{storage}</td>
                   <td>{result ? `${result.performanceAssessment.confidence.replace('-', ' ')} · ${result.performanceAssessment.score}/100` : 'Management inputs only'}</td>
                   <td className="nowrap">
                     {scenario.id !== 'current' && <>
