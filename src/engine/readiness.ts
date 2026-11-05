@@ -31,6 +31,7 @@ export function assessMigrationReadiness(vms: Vm[], cfg: ClusterConfig): Migrati
     if (vm.firmware === 'bios') add(vm, 'review', 'firmware', 'BIOS firmware maps to a Generation 1 Hyper-V VM.', 'Confirm Generation 1 is acceptable or plan an application-supported UEFI conversion.')
     if (vm.firmware === 'unknown') add(vm, 'review', 'firmware', 'Firmware type is missing from the source inventory.', 'Confirm BIOS versus UEFI before choosing the target VM generation.')
     if (vm.hasRdm) add(vm, 'blocked', 'storage', 'Raw Device Mapping detected.', 'Replace the RDM with a supported VHDX, pass-through, shared-VHDX/VHD Set, or application-native storage design.')
+    if (vm.hasSharedDisk) add(vm, 'review', 'storage', 'Shared virtual disk detected (multi-writer or SCSI bus sharing).', 'Design the Hyper-V equivalent, such as shared VHDX/VHD Set or a guest cluster on shared storage, and confirm the migration method supports it.')
     if ((vm.snapshotCount ?? 0) > 0) add(vm, 'review', 'snapshot', `${vm.snapshotCount} VMware snapshot(s) detected.`, 'Consolidate snapshots and verify backup consistency before conversion.')
     if (vm.encrypted || vm.hasVtpm) add(vm, 'review', 'security', 'Encryption or vTPM is enabled.', 'Design target key protection, shielding/vTPM handling, and a supported migration method.')
     if (vm.sourceCpuVendor && vm.sourceCpuVendor !== 'unknown' && cfg.node.cpuVendor && cfg.node.cpuVendor !== 'unknown' && vm.sourceCpuVendor !== cfg.node.cpuVendor) {

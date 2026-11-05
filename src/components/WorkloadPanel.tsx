@@ -1,8 +1,10 @@
 import React, { useMemo, useRef, useState } from 'react'
-import { parseRvTools, summarizeImport, type ImportSummary } from '../io/rvtools'
-import { downloadPerformanceTemplate, mergePerformanceData, parsePerformanceData, type PerformanceMergeReport } from '../io/performance'
+import { describeStorageSources, type ImportReport, type ImportSummary } from '../io/rvtools'
+import { downloadInventoryTemplate, parseInventoryFile } from '../io/genericInventory'
+import { attachPerformanceFile, downloadPerformanceTemplate, type PerformanceAttachResult } from '../io/performance'
 import { assessPerformanceData } from '../engine/performance'
-import { bulkVms, demoFleet, newVm } from '../state/defaults'
+import { storageOutlierFinding } from '../engine/dataQuality'
+import { blankVm, bulkVms } from '../state/defaults'
 import { TIER_IDS } from '../engine/rules'
 import { giBToTiB } from '../engine/compute'
 import type { PowerState, TierId, TierPolicy, Vm } from '../engine/types'
@@ -12,18 +14,26 @@ interface Props {
   vms: Vm[]
   setVms: (v: Vm[]) => void
   tiers: Record<TierId, TierPolicy>
-  onDataSource?: (source: { kind: 'rvtools' | 'performance'; fileName: string; rows: number }) => void
   report: ImportSummary | null
-  setReport: (report: ImportSummary | null) => void
+  /** Replace the inventory with an import, or add the import to it. */
+  onImport: (mode: 'replace' | 'add', report: ImportReport, fileName: string) => void
+  onClearAll: () => void
+  onLoadDemo: () => void
+  onPerformanceSource?: (source: { kind: 'performance'; fileName: string; rows: number }) => void
 }
 
 const SHOW_ALL_ROWS_UP_TO = 1000
 const DEFAULT_ROWS_PER_PAGE = 200
+const NAMES_SHOWN = 25
 
-export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setReport }: Props) {
+export function WorkloadPanel({ vms, setVms, tiers, report, onImport, onClearAll, onLoadDemo, onPerformanceSource }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const performanceFileRef = useRef<HTMLInputElement>(null)
-  const [performanceReport, setPerformanceReport] = useState<PerformanceMergeReport | null>(null)
+  // The latest inventory, read after a file finishes loading so edits made meanwhile survive.
+  const vmsRef = useRef(vms)
+  vmsRef.current = vms
+  const [performanceReport, setPerformanceReport] = useState<PerformanceAttachResult | null>(null)
+  const [pendingImport, setPendingImport] = useState<{ report: ImportReport; fileName: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [over, setOver] = useState(false)
   const [filter, setFilter] = useState('')
@@ -36,32 +46,50 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
   const [bulkTier, setBulkTier] = useState<TierId>('general')
   const [bulk, setBulk] = useState({ count: 100, tier: 'general' as TierId, vCpu: 4, ramGiB: 16, storageGiB: 200, prefix: 'VM' })
 
+  function applyImport(mode: 'replace' | 'add', imported: ImportReport, fileName: string) {
+    onImport(mode, imported, fileName)
+    setPendingImport(null)
+    // Match counts describe the previous inventory.
+    setPerformanceReport(null)
+  }
+
   async function handleFile(file: File) {
     setError(null)
     try {
-      const buf = await file.arrayBuffer()
-      const rep = parseRvTools(buf)
-      setReport(summarizeImport(rep, file.name))
-      setVms(rep.vms)
-      onDataSource?.({ kind: 'rvtools', fileName: file.name, rows: rep.totalRows })
+      const imported = parseInventoryFile(await file.arrayBuffer())
+      // A second file never replaces the inventory silently: the user chooses.
+      if (vmsRef.current.length > 0) setPendingImport({ report: imported, fileName: file.name })
+      else applyImport('replace', imported, file.name)
     } catch (e: any) {
       setError(e?.message ?? 'Could not read that file.')
-      setReport(null)
     }
   }
 
   async function handlePerformanceFile(file: File) {
     setError(null)
     try {
-      const records = parsePerformanceData(await file.arrayBuffer())
-      const merged = mergePerformanceData(vms, records)
-      setVms(merged.vms)
-      setPerformanceReport(merged)
-      onDataSource?.({ kind: 'performance', fileName: file.name, rows: merged.rows })
+      const attached = await attachPerformanceFile(file, () => vmsRef.current)
+      setVms(attached.vms)
+      setPerformanceReport(attached)
+      onPerformanceSource?.({ kind: 'performance', fileName: file.name, rows: attached.rows })
     } catch (e: any) {
       setError(e?.message ?? 'Could not read the performance file.')
       setPerformanceReport(null)
     }
+  }
+
+  function loadDemo() {
+    if (vms.length > 0 && !window.confirm(`Replace all ${vms.length.toLocaleString()} workloads with a randomized 400-VM demo fleet? Your current workloads, edits and import details are removed.`)) return
+    setPendingImport(null)
+    setPerformanceReport(null)
+    onLoadDemo()
+  }
+
+  function clearAll() {
+    if (!window.confirm(`Remove all ${vms.length.toLocaleString()} workloads from this project?`)) return
+    setPendingImport(null)
+    setPerformanceReport(null)
+    onClearAll()
   }
 
   const shown = useMemo(() => {
@@ -86,6 +114,7 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
     }
   }, [vms])
   const performance = useMemo(() => assessPerformanceData(vms), [vms])
+  const outlierFinding = useMemo(() => storageOutlierFinding(vms), [vms])
   const stopped = useMemo(() => {
     const list = vms.filter(v => v.powerState !== 'poweredOn')
     return {
@@ -119,7 +148,7 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
           className={`dropzone ${over ? 'over' : ''}`}
           role="button"
           tabIndex={0}
-          aria-label="Import RVTools workbook"
+          aria-label="Import an RVTools export or inventory template"
           onClick={() => fileRef.current?.click()}
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click() } }}
           onDragOver={e => { e.preventDefault(); setOver(true) }}
@@ -130,27 +159,49 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
             if (f) handleFile(f)
           }}
         >
-          <strong>Drop an RVTools export here</strong>
+          <strong>Drop an RVTools export or a Surveyor inventory template here</strong>
           <div className="small muted" style={{ marginTop: 4 }}>
-            .xlsx · reads vInfo, vPartition and vHost · nothing leaves this browser
+            .xlsx, .xls or .csv · an RVTools workbook (reads vInfo, vPartition, vDisk, vSnapshot and vHost), the RVTools vInfo tab saved as CSV, or the inventory template below · nothing leaves this browser
+          </div>
+          <div className="small muted" style={{ marginTop: 4 }}>
+            Hyper-V, SCVMM, Azure Migrate and other exports are not read directly: copy their columns into the inventory template.
           </div>
         </div>
         <input
-          ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
-          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
+          ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = '' }}
         />
 
+        {pendingImport && (
+          <div className="note warn" style={{ marginTop: 12 }} role="alertdialog" aria-label="Choose how to import">
+            <strong>{pendingImport.fileName} has {pendingImport.report.vms.length.toLocaleString()} VMs. The inventory already has {vms.length.toLocaleString()}.</strong>
+            Add keeps every current row with its edits and measured performance, and skips an incoming VM only when its name and vCenter both match one already here.
+            Replace removes all current workloads, edits and measured performance, then loads this file.
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="btn" type="button" onClick={() => applyImport('add', pendingImport.report, pendingImport.fileName)}>Add to current inventory</button>
+              <button className="btn ghost" type="button" onClick={() => applyImport('replace', pendingImport.report, pendingImport.fileName)}>Replace current inventory</button>
+              <button className="btn ghost" type="button" onClick={() => setPendingImport(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+
         <div className="row" style={{ marginTop: 12 }}>
+          <button className="btn ghost" onClick={() => downloadInventoryTemplate('xlsx')}>
+            Download inventory template (XLSX)
+          </button>
+          <button className="btn ghost" onClick={() => downloadInventoryTemplate('csv')}>
+            Download inventory template (CSV)
+          </button>
           <button className="btn ghost" onClick={() => performanceFileRef.current?.click()} disabled={vms.length === 0}>
             Attach measured performance
           </button>
           <button className="btn ghost" onClick={() => downloadPerformanceTemplate(vms)} disabled={vms.length === 0}>
             Download performance template
           </button>
-          <button className="btn ghost" onClick={() => { setReport(null); setVms(demoFleet()) }}>
+          <button className="btn ghost" onClick={loadDemo}>
             Generate randomized demo fleet (400 VMs)
           </button>
-          <button className="btn ghost" onClick={() => { if (window.confirm(`Remove all ${vms.length.toLocaleString()} workloads from this project?`)) { setReport(null); setVms([]) } }} disabled={vms.length === 0}>
+          <button className="btn ghost" onClick={clearAll} disabled={vms.length === 0}>
             Clear all
           </button>
         </div>
@@ -158,7 +209,7 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
           ref={performanceFileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }}
           onChange={e => { const file = e.target.files?.[0]; if (file) handlePerformanceFile(file); e.target.value = '' }}
         />
-        {vms.length > 0 && <p className="small muted" style={{ marginTop: 8 }}>Performance files match on VM name and accept CSV/XLSX columns for CPU P95 %, Memory P95 %, IOPS P95, throughput, latency, network, observation days, and source.</p>}
+        {vms.length > 0 && <p className="small muted" style={{ marginTop: 8 }}>Performance files match on VM UUID or VM name and accept CSV/XLSX columns for CPU P95 %, Memory P95 %, IOPS P95, throughput, latency, network, observation days, and source. A blank cell never erases a value already attached.</p>}
 
         {error && <div className="note err" style={{ marginTop: 12 }}><strong>Import failed</strong>{error}</div>}
 
@@ -167,10 +218,8 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
             <div className="note ok">
               <strong>Imported {report.importedVms} VMs from {report.totalRows} rows in {report.fileName}</strong>
               {report.importedVms - report.poweredOff - report.suspended} powered on · {report.poweredOff} powered off · {report.suspended} suspended.{' '}
-              Not imported: {report.excludedTemplates} templates · {report.excludedSrmPlaceholders} SRM placeholders · {report.excludedVcls} vCLS.
-              {report.usedPartitionData
-                ? ' Consumed storage taken from vPartition (in-guest actual).'
-                : ' No vPartition tab — consumed storage taken from vInfo In Use.'}
+              {report.format !== 'inventory-template' && <>Not imported: {report.excludedTemplates} templates · {report.excludedSrmPlaceholders} SRM placeholders · {report.excludedVcls} vCLS.{' '}</>}
+              {describeStorageSources(report)}
             </div>
             {report.warnings.map((w, i) => (
               <div className="note warn" key={i}>{w}</div>
@@ -202,9 +251,11 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
         {performanceReport && (
           <div className={`note ${performanceReport.matched > 0 ? 'ok' : 'warn'}`} style={{ marginTop: 12 }}>
             <strong>Attached performance data to {performanceReport.matched.toLocaleString()} of {vms.length.toLocaleString()} inventory VMs</strong>
-            Read {performanceReport.rows.toLocaleString()} measurement rows.
-            {performanceReport.unmatchedNames.length > 0 && ` ${performanceReport.unmatchedNames.length.toLocaleString()} name(s) did not match the inventory.`}
-            {performanceReport.duplicateNames.length > 0 && ` ${performanceReport.duplicateNames.length.toLocaleString()} duplicate name(s) used the last row.`}
+            Read {performanceReport.rows.toLocaleString()} measurement rows from sheet "{performanceReport.sheetName}". Recognised columns: {performanceReport.recognizedColumns.join(', ')}.
+            {performanceReport.unmatchedNames.length > 0 && ` ${performanceReport.unmatchedNames.length.toLocaleString()} name(s) did not match the inventory${performanceReport.unmatchedNames.length > NAMES_SHOWN ? ` (first ${NAMES_SHOWN})` : ''}: ${performanceReport.unmatchedNames.slice(0, NAMES_SHOWN).join(', ')}.`}
+            {performanceReport.ambiguousNames.length > 0 && ` ${performanceReport.ambiguousNames.length.toLocaleString()} name(s) fit more than one inventory VM, so nothing was attached to them: ${performanceReport.ambiguousNames.slice(0, NAMES_SHOWN).join(', ')}. Add a VM UUID or Cluster column to tell them apart.`}
+            {performanceReport.duplicateNames.length > 0 && ` ${performanceReport.duplicateNames.length.toLocaleString()} name(s) appeared on more than one row; their values were combined, later rows filling or updating each field.`}
+            {performanceReport.warnings.map((warning) => <div key={warning} style={{ marginTop: 4 }}>{warning}</div>)}
           </div>
         )}
       </div>
@@ -215,7 +266,7 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
           Manual rows and imported rows are the same object. Everything below is editable after import.
         </p>
         <div className="row">
-          <Field label="Count"><NumberInput value={bulk.count} min={1} onChange={n => setBulk({ ...bulk, count: n })} /></Field>
+          <Field label="Count"><NumberInput value={bulk.count} min={1} onChange={n => setBulk({ ...bulk, count: Math.max(1, Math.floor(n)) })} /></Field>
           <Field label="Tier">
             <select value={bulk.tier} onChange={e => setBulk({ ...bulk, tier: e.target.value as TierId })}>
               {TIER_IDS.map(t => <option key={t} value={t}>{tiers[t].label}</option>)}
@@ -231,7 +282,7 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
             setVms([...vms, ...bulkVms(bulk.count, bulk.tier, bulk.vCpu, bulk.ramGiB, bulk.storageGiB, bulk.prefix)])}>
             Add {bulk.count} VMs
           </button>
-          <button className="btn ghost" onClick={() => setVms([...vms, newVm()])}>Add one blank row</button>
+          <button className="btn ghost" onClick={() => setVms([...vms, blankVm()])}>Add one blank row</button>
         </div>
       </div>
 
@@ -249,9 +300,17 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
           <div className="card">
             <div className="k">Provisioned storage</div>
             <div className="v">{fmt1(giBToTiB(totals.prov))}<span style={{ fontSize: 15 }}> TiB</span></div>
-            <div className="s">Thin gap {fmt1(giBToTiB(totals.prov - totals.sto))} TiB</div>
+            <div className="s">Thin gap {fmt1(giBToTiB(totals.prov - totals.sto))} TiB · not used for sizing</div>
           </div>
         </div>
+        <p className="small muted" style={{ marginTop: -4 }}>Storage is sized on consumed (Used) GiB. Provisioned GiB is shown and exported so the thin-provisioning gap is visible; it does not change the sizing.</p>
+        {outlierFinding && (
+          <div className="note warn">
+            <strong>Data quality: storage outliers</strong>
+            {outlierFinding.message}
+            <div className="small" style={{ marginTop: 4 }}>{outlierFinding.outliers.slice(0, NAMES_SHOWN).map((item) => `${item.vmName} (${fmt1(giBToTiB(item.storageGiB))} TiB, ${item.sharePct.toFixed(0)}%)`).join(' · ')}</div>
+          </div>
+        )}
 
         <div className="row" style={{ marginBottom: 10 }}>
           <Field label="Search"><input value={filter} onChange={e => { setFilter(e.target.value); setPage(0) }} placeholder="name or guest OS" /></Field>
@@ -303,7 +362,7 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
           </p>
         )}
         {vms.length === 0 ? (
-          <p className="muted">No workloads yet. Import an RVTools export, add rows by hand, or load the demo fleet.</p>
+          <p className="muted">No workloads yet. Import an RVTools export or the inventory template, add rows by hand, or load the demo fleet.</p>
         ) : (
           <div className="scroll">
             <table>
@@ -315,7 +374,7 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
                   <th className="num" style={{ width: 74 }}>vCPU</th>
                   <th className="num" style={{ width: 92 }}>RAM GiB</th>
                   <th className="num" style={{ width: 104 }}>Used GiB</th>
-                  <th className="num" style={{ width: 104 }}>Prov GiB</th>
+                  <th className="num" style={{ width: 104 }} title="Provisioned size. Shown for the thin-provisioning gap; storage is sized on Used GiB.">Prov GiB (not sized)</th>
                   <th style={{ width: 88 }}>Power</th>
                   <th style={{ width: 46 }} />
                 </tr>
@@ -328,6 +387,9 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
                       <input value={v.name} onChange={e => patch(v.id, { name: e.target.value })} />
                       {v.autoClassified && <span className="pill tool" style={{ marginTop: 3, display: 'inline-block' }}>auto-classified — review</span>}
                       {v.sizeReview && <span className="pill tool" style={{ marginTop: 3, display: 'inline-block' }}>large VM — confirm tier</span>}
+                      {v.hasSharedDisk && <span className="pill warn" style={{ marginTop: 3, display: 'inline-block' }} title={v.sharedStorageDedupedGiB ? `${fmt0(v.sharedStorageDedupedGiB)} GiB of shared space is counted on another VM in its group.` : 'Shared space could not be de-duplicated; storage may be counted more than once.'}>shared disk</span>}
+                      {v.hasRdm && <span className="pill warn" style={{ marginTop: 3, display: 'inline-block' }}>RDM</span>}
+                      {!v.include && (v.vCpu <= 0 || v.ramGiB <= 0) && <span className="pill tool" style={{ marginTop: 3, display: 'inline-block' }}>enter vCPU and RAM, then tick Inc</span>}
                     </td>
                     <td>
                       <select value={v.tier} onChange={e => patch(v.id, { tier: e.target.value as TierId, autoClassified: false, sizeReview: false })}>

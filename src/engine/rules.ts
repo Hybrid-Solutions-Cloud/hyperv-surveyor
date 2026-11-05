@@ -304,12 +304,9 @@ export const DEFAULT_TIERS: Record<TierId, TierPolicy> = {
 export const TIER_IDS: TierId[] = ['general', 'database', 'vdi', 'infrastructure']
 
 /**
- * Auto-classification heuristics. Deliberately conservative — anything promoted out of
- * "general" is flagged autoClassified so the SE reviews it rather than trusting it. [TOOL]
+ * Auto-classification size thresholds. The name rules live in io/classifyVm.ts and match whole
+ * name tokens. Anything promoted out of "general" is flagged for review. [TOOL]
  */
-export const DB_NAME_PATTERN = /(sql|mssql|oracle|ora\d|postgres|pgsql|mysql|mariadb|db2|sybase|mongo|\bdb\b|dbs\d)/i
-export const VDI_NAME_PATTERN = /(vdi|ctx|citrix|xendesktop|wvd|avd|rds\d|session)/i
-export const INFRA_NAME_PATTERN = /(^dc\d|domain|dns|dhcp|ntp|print|jump|bastion|wsus|\bad\d)/i
 
 export const AUTO_CLASSIFY = {
   heavyVCpu: 8,

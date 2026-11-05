@@ -34,7 +34,7 @@ that can be opened directly for offline and disconnected use.
 
 - Journey-based planning with new-platform, existing-capacity, fit-and-gap, and management-only starting points
 - Workload-to-hardware fit assessment with explicit CPU, memory, S2D, and SAN deficits plus same-spec expansion guidance
-- Workload inventory with RVTools import, measured-performance attachment, confidence scoring, bulk review, and manual entry
+- Workload inventory with RVTools import (full workbook or vInfo CSV), a generic CSV/XLSX inventory template for other sources, measured-performance attachment, confidence scoring, bulk review, and manual entry
 - Hardware, resilience, storage, and tier assumptions
 - Forward comparison across SAN, S2D, MAP, and hybrid designs
 - Independent existing-hardware workspace with editable compute, SAN/S2D storage, reserves, workload policies, headroom, and reverse sizing

@@ -181,7 +181,7 @@ export function exportDesign(
   // ---- Inventory -----------------------------------------------------------
   const inv: any[][] = [[
     'VM', 'Tier', 'Included', 'Power state', 'vCPU', 'RAM (GiB)',
-    'Consumed (GiB)', 'Provisioned (GiB)', 'Thin gap (GiB)', 'Guest OS',
+    'Consumed (GiB)', 'Provisioned (GiB, not sized)', 'Thin gap (GiB)', 'Guest OS',
     'Source cluster', 'Source host', 'Source CPU vendor', 'Firmware', 'Disks', 'NICs', 'Snapshots', 'RDM', 'Encrypted', 'vTPM',
     'CPU P95 %', 'Memory P95 %', 'IOPS P95', 'Throughput MBps P95', 'Latency ms P95', 'Network Mbps P95', 'Observation days', 'Performance source', 'Auto-classified',
   ]]
@@ -290,7 +290,7 @@ export function exportExistingCapacity(
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(findings), 'Findings')
 
   const inventory: any[][] = [[
-    'VM', 'Tier', 'Included', 'Power state', 'vCPU', 'RAM (GiB)', 'Consumed (GiB)', 'Provisioned (GiB)', 'Guest OS', 'Source cluster', 'Source host',
+    'VM', 'Tier', 'Included', 'Power state', 'vCPU', 'RAM (GiB)', 'Consumed (GiB)', 'Provisioned (GiB, not sized)', 'Guest OS', 'Source cluster', 'Source host',
   ], ...vms.map((vm) => [
     vm.name, tiers[vm.tier].label, vm.include ? 'YES' : 'no', vm.powerState, vm.vCpu, r1(vm.ramGiB), r1(vm.storageGiB), r1(vm.provisionedGiB), vm.guestOs ?? '', vm.sourceCluster ?? '', vm.sourceHost ?? '',
   ])]

@@ -65,13 +65,22 @@ export interface Vm {
   ramGiB: number
   /** Real consumed storage — from vPartition where available. */
   storageGiB: number
-  /** Allocated/provisioned storage. Shown alongside so the thin gap is visible. */
+  /** Allocated/provisioned storage. Shown and exported so the thin gap is visible; never sized. */
   provisionedGiB: number
   powerState: PowerState
   include: boolean
   guestOs?: string
   sourceCluster?: string
   sourceHost?: string
+  sourceDatacenter?: string
+  /** vCenter (RVTools VI SDK Server). With the name, the identity used to merge two imports. */
+  sourceVCenter?: string
+  sourceVmUuid?: string
+  sourceVmId?: string
+  /** A disk is shared with another VM (multi-writer or bus sharing). */
+  hasSharedDisk?: boolean
+  /** Shared space removed from this VM because another VM in the group already counts it. */
+  sharedStorageDedupedGiB?: number
   sourceCpuVendor?: CpuVendor
   firmware?: 'bios' | 'efi' | 'unknown'
   diskCount?: number

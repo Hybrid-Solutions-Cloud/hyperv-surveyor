@@ -83,12 +83,22 @@ export function newVm(partial: Partial<Vm> = {}): Vm {
   }
 }
 
+/**
+ * A blank inventory row: zero sizes and excluded, so adding it never changes the design until
+ * someone fills it in and ticks Include.
+ */
+export function blankVm(): Vm {
+  return newVm({ vCpu: 0, ramGiB: 0, storageGiB: 0, provisionedGiB: 0, include: false })
+}
+
 /** Bulk add: "120 x 4 vCPU / 16 GiB / 200 GiB" as one action. */
 export function bulkVms(
   count: number, tier: TierId, vCpu: number, ramGiB: number, storageGiB: number, prefix: string,
 ): Vm[] {
   const out: Vm[] = []
-  for (let i = 1; i <= count; i++) {
+  // A count is whole VMs: 1.5 adds 1, never 2.
+  const whole = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0
+  for (let i = 1; i <= whole; i++) {
     out.push(newVm({
       name: `${prefix}${String(i).padStart(3, '0')}`,
       tier, vCpu, ramGiB, storageGiB, provisionedGiB: storageGiB * 2,

@@ -71,8 +71,15 @@ export default function ProjectPage() {
     setError('')
     try {
       const project = parseProject(await file.text())
-      store.loadProject(project.payload)
-      setMessage(`Opened project exported ${new Date(project.exportedAt).toLocaleString()} with engine ${project.engineVersion}.`)
+      const current = store.savedScenarios.length
+      const incoming = project.savedScenarios
+      const scenarioText = incoming
+        ? ` Your ${current} saved scenario${current === 1 ? '' : 's'} in this browser will be replaced by the project's ${incoming.length}.`
+        : current > 0 ? ` This older project file has no saved scenarios, so your ${current} saved scenario${current === 1 ? '' : 's'} stay.` : ''
+      const hasWork = store.vms.length > 0 || current > 0 || store.customerName.trim() !== ''
+      if (hasWork && !window.confirm(`Open ${file.name}?\n\nThis replaces the current design, workloads and settings in this browser.${scenarioText} Download a project file first if you need the current work.`)) return
+      store.loadProject(project.payload, incoming)
+      setMessage(`Opened project exported ${new Date(project.exportedAt).toLocaleString()} with engine ${project.engineVersion}.${incoming ? ` ${incoming.length} saved scenario${incoming.length === 1 ? '' : 's'} loaded.` : ''}`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not open that project file.')
     }
@@ -90,9 +97,9 @@ export default function ProjectPage() {
       <div className="grid two">
         <section className="panel">
           <h2><FolderOpen size={17} /> Project file</h2>
-          <p className="small muted">The project file is the portable source of truth. It contains the complete inventory, measurements, assumptions, management design, and existing-capacity workspace.</p>
+          <p className="small muted">The project file is the portable source of truth. It contains the complete inventory, measurements, assumptions, management design, existing-capacity workspace, and saved scenarios.</p>
           <div className="row">
-            <button className="btn" onClick={() => downloadProject(createProject(currentPayload))}><Download size={15} /> Download project</button>
+            <button className="btn" onClick={() => downloadProject(createProject(currentPayload, store.savedScenarios))}><Download size={15} /> Download project</button>
             <button className="btn ghost" onClick={() => fileRef.current?.click()}><Upload size={15} /> Open project</button>
           </div>
           <input ref={fileRef} type="file" accept=".json,.hvsurveyor.json" style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) openProject(file); event.target.value = '' }} />

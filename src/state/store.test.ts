@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useSurveyorStore } from './store'
+import { migratePersistedState, payloadFromState, useSurveyorStore } from './store'
+import { createProject, parseProject } from './project'
+import { blankVm, bulkVms } from './defaults'
 
 describe('existing-capacity workspace', () => {
   beforeEach(() => {
@@ -107,5 +109,73 @@ describe('management deployment state', () => {
 
     expect(useSurveyorStore.getState().managementDeploymentInputs).toEqual(inputs)
     expect(useSurveyorStore.getState().includeManagementInSizing).toBe(false)
+  })
+})
+
+describe('B15 projects and named scenarios', () => {
+  beforeEach(() => {
+    useSurveyorStore.getState().resetScenario()
+  })
+
+  it('a project file carries saved scenarios and opening it replaces them', () => {
+    const store = useSurveyorStore.getState()
+    store.setCustomerName('Sender')
+    store.saveNamedScenario('Option A')
+    const project = parseProject(JSON.stringify(createProject(payloadFromState(useSurveyorStore.getState()), useSurveyorStore.getState().savedScenarios)))
+    expect(project.savedScenarios?.map((item) => item.name)).toEqual(['Option A'])
+
+    useSurveyorStore.getState().resetScenario()
+    useSurveyorStore.getState().saveNamedScenario('Local only')
+    useSurveyorStore.getState().loadProject(project.payload, project.savedScenarios)
+    expect(useSurveyorStore.getState().savedScenarios.map((item) => item.name)).toEqual(['Option A'])
+  })
+
+  it('an older project file without scenarios keeps the local ones', () => {
+    useSurveyorStore.getState().saveNamedScenario('Local only')
+    const legacy = { kind: 'hyperv-surveyor-project', schemaVersion: 4, engineVersion: '1.1.0', exportedAt: '', payload: payloadFromState(useSurveyorStore.getState()) }
+    const project = parseProject(JSON.stringify(legacy))
+    expect(project.savedScenarios).toBeUndefined()
+    useSurveyorStore.getState().loadProject(project.payload, project.savedScenarios)
+    expect(useSurveyorStore.getState().savedScenarios.map((item) => item.name)).toEqual(['Local only'])
+  })
+
+  it('opening a project or a named scenario clears the previous import banner', () => {
+    const store = useSurveyorStore.getState()
+    store.saveNamedScenario('Before import')
+    const summary = { format: 'rvtools', fileName: 'a.xlsx', importedVms: 1 } as never
+    store.setLastImport(summary)
+    useSurveyorStore.getState().loadNamedScenario(useSurveyorStore.getState().savedScenarios[0].id)
+    expect(useSurveyorStore.getState().lastImport).toBeNull()
+    useSurveyorStore.getState().setLastImport(summary)
+    useSurveyorStore.getState().loadProject(payloadFromState(useSurveyorStore.getState()))
+    expect(useSurveyorStore.getState().lastImport).toBeNull()
+  })
+})
+
+describe('B17 inventory housekeeping', () => {
+  beforeEach(() => {
+    useSurveyorStore.getState().resetScenario()
+  })
+
+  it('demo and clear drop the previous import summary and data sources', () => {
+    const store = useSurveyorStore.getState()
+    store.addDataSource({ kind: 'rvtools', fileName: 'estate.xlsx', rows: 10 })
+    store.setLastImport({ fileName: 'estate.xlsx' } as never)
+    store.loadDemo()
+    expect(useSurveyorStore.getState()).toMatchObject({ dataSources: [], lastImport: null })
+    useSurveyorStore.getState().addDataSource({ kind: 'performance', fileName: 'perf.csv', rows: 10 })
+    useSurveyorStore.getState().clearWorkloads()
+    expect(useSurveyorStore.getState()).toMatchObject({ vms: [], dataSources: [], lastImport: null })
+  })
+
+  it('a blank row is excluded and adds nothing to sizing; a fractional count adds whole VMs', () => {
+    expect(blankVm()).toMatchObject({ vCpu: 0, ramGiB: 0, storageGiB: 0, include: false })
+    expect(bulkVms(1.5, 'general', 4, 16, 200, 'VM')).toHaveLength(1)
+  })
+
+  it('migration normalizes numbers saved as text', () => {
+    const migrated = migratePersistedState({ vms: [{ id: 'a', name: 'app1', vCpu: '4', ramGiB: '16', storageGiB: '200', provisionedGiB: '', include: true }], savedScenarios: [{ id: 's', name: 'S', vms: [{ name: 'x', vCpu: '2' }] }] })
+    expect(migrated.vms[0]).toMatchObject({ vCpu: 4, ramGiB: 16, storageGiB: 200, provisionedGiB: 200 })
+    expect(migrated.savedScenarios[0].vms[0].vCpu).toBe(2)
   })
 })

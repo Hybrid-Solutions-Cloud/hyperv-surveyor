@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   BarChart3,
   BookOpen,
@@ -19,7 +19,7 @@ import {
   Share2,
   X,
 } from 'lucide-react'
-import { useSurveyorStore } from '../state/store'
+import { payloadFromState, useSurveyorStore } from '../state/store'
 import { toUrl, urlOmittedInventory } from '../state/urlState'
 import { ENGAGEMENT_LABELS, journeyResumeRoute } from '../state/journey'
 
@@ -46,11 +46,14 @@ const navGroups = [
 export function Layout({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [shareMessage, setShareMessage] = useState('')
-  const { customerName, vms, cfg, tiers, engagementMode, managementDecision, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes } = useSurveyorStore()
+  const store = useSurveyorStore()
+  const { pathname } = useLocation()
+  const { customerName, vms, engagementMode, sharedInventoryOmitted, dismissSharedInventoryNotice } = store
   const included = vms.filter((vm) => vm.include).length
 
   async function shareScenario() {
-    const scenario = { customerName, vms, cfg, tiers, engagementMode, managementDecision, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes }
+    // The whole design travels in the link's fragment; only a large inventory is left out.
+    const scenario = payloadFromState(useSurveyorStore.getState())
     const url = toUrl(scenario, engagementMode ? journeyResumeRoute(engagementMode, included) : '/results')
     try {
       await navigator.clipboard.writeText(url)
@@ -133,7 +136,25 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <span><ClipboardCheck size={15} /> Runs locally in your browser</span>
           <span>No telemetry · no customer data upload</span>
         </div>
-        <div className="content-wrap">{children}</div>
+        <div className="content-wrap">
+          {sharedInventoryOmitted !== null && vms.length > 0 && (
+            <div className="note warn" role="status">
+              <strong>The shared link you opened left out its {sharedInventoryOmitted.toLocaleString()} workload records</strong>
+              Its design settings were applied, but the {vms.length.toLocaleString()} workloads below are the ones already in this browser, not the sender's. Ask for the Surveyor project file to see the sender's inventory.
+              <div className="row" style={{ marginTop: 8 }}>
+                <Link className="btn ghost" to="/project">Open a project file</Link>
+                <button className="btn ghost" type="button" onClick={dismissSharedInventoryNotice}>Keep my workloads and dismiss</button>
+              </div>
+            </div>
+          )}
+          {sharedInventoryOmitted !== null && vms.length === 0 && pathname !== '/results' && (
+            <div className="note warn" role="status">
+              <strong>The shared link you opened left out its {sharedInventoryOmitted.toLocaleString()} workload records</strong>
+              Results that need workloads stay blocked until you open the sender's project file or import an inventory.
+            </div>
+          )}
+          {children}
+        </div>
         <footer className="site-footer">
           <span>Hyper-V Surveyor · Independent planning aid · Estimates require validation</span>
           <Link to="/about">Important use notice</Link>

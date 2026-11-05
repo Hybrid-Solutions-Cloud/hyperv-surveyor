@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import HomePage from './pages/HomePage'
@@ -12,17 +11,9 @@ import ReportPage from './pages/ReportPage'
 import ProjectPage from './pages/ProjectPage'
 import DeploymentPage from './pages/DeploymentPage'
 import AboutPage from './pages/AboutPage'
-import { fromUrl } from './state/urlState'
-import { useSurveyorStore } from './state/store'
 
+/** Shared links are applied in main.tsx, after saved state loads and before this renders. */
 export default function App() {
-  const loadScenario = useSurveyorStore((state) => state.loadScenario)
-
-  useEffect(() => {
-    const shared = fromUrl()
-    if (shared) loadScenario(shared)
-  }, [loadScenario])
-
   return (
     <Layout>
       <Routes>

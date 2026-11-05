@@ -149,7 +149,10 @@ export default function HomePage() {
 
         <div className="demo-path">
           <span>Want to explore first?</span>
-          <button className="btn ghost" type="button" onClick={() => { store.setEngagementMode('new-platform'); store.loadDemo(); navigate('/workloads') }}>Load a random 400-VM new-platform demo</button>
+          <button className="btn ghost" type="button" onClick={() => {
+            if (store.vms.length > 0 && !window.confirm(`Replace all ${store.vms.length.toLocaleString()} workloads with a randomized 400-VM demo fleet? Your current workloads, edits and import details are removed.`)) return
+            store.setEngagementMode('new-platform'); store.loadDemo(); navigate('/workloads')
+          }}>Load a random 400-VM new-platform demo</button>
         </div>
       </section>
 

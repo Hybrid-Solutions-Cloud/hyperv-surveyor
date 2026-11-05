@@ -136,7 +136,7 @@ export function reportToJson(
 }
 
 function isCompactColumn(header: string) {
-  return /^(qty|count|nodes?|vCPU|RAM each|disk each|vCPU each|feasible|memory|consumed|provisioned|size each|total|VMs each|VMs|right-size factor|VMs \/ CSV)$/i.test(header)
+  return /^(qty|count|nodes?|vCPU|RAM each|disk each|vCPU each|feasible|memory|consumed|provisioned( \(not sized\))?|size each|total|VMs each|VMs|right-size factor|VMs \/ CSV)$/i.test(header)
 }
 
 function isExpansiveColumn(header: string) {

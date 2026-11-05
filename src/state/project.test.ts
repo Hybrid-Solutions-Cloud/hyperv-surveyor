@@ -33,7 +33,7 @@ describe('project files', () => {
     const reopened = parseProject(JSON.stringify(project))
     expect(reopened.payload.customerName).toBe('Contoso')
     expect(reopened.payload.vms[0].name).toBe('APP01')
-    expect(reopened.schemaVersion).toBe(4)
+    expect(reopened.schemaVersion).toBe(5)
     expect(reopened.payload.engagementMode).toBe('fit-gap')
     expect(reopened.payload.managementDecision).toBe('design')
   })

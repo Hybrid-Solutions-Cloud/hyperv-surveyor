@@ -774,3 +774,4 @@ tr.infeasible td { opacity: 0.48; }
   .checkpoint-heading { grid-template-columns: 42px minmax(0, 1fr); }
   .checkpoint-status { grid-column: 2; width: fit-content; }
 }
+.boot-screen { display: grid; place-items: center; min-height: 100vh; color: var(--muted, #555); font-size: 14px; }

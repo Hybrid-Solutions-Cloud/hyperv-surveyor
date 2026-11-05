@@ -1,90 +1,164 @@
 /**
- * Scenario -> URL. An SE builds a config on a call, sends the link, the customer opens the
- * exact same numbers. VM inventories are omitted above a size threshold to keep URLs usable —
- * the config always survives, and the inventory is re-importable.
+ * Scenario -> URL. An SE builds a design on a call, sends the link, and the customer opens the
+ * same design.
+ *
+ * The link carries the whole design: path, hardware, tiers, existing capacity, management,
+ * placement, network, DR, storage answers, the chosen architecture and report details. The only
+ * thing it can leave out is a large VM inventory, which is replaced by a count.
+ *
+ * Everything travels in the URL fragment, after #, as #/route?s=<payload>. Browsers never send
+ * the fragment to the web server, so customer and VM data do not leave the browser. The app uses
+ * HashRouter, so the fragment is also the route; the payload sits in the route's query, which the
+ * router ignores. It is read once at start-up and then removed from the address bar.
+ *
+ * Older links keep opening: ?s=<payload> in the real query string, and #s=<payload> from the
+ * original prototype.
  */
 import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
-import { normalizeProjectPayload } from './project'
-import type { EngagementMode, ManagementDecision } from './journey'
+import { normalizeProjectPayload, type ProjectPayload } from './project'
+import { journeyResumeRoute } from './journey'
 
-export interface Scenario {
-  engagementMode?: EngagementMode | null
-  managementDecision?: ManagementDecision
+export type Scenario = Partial<Omit<ProjectPayload, 'cfg' | 'tiers' | 'vms'>> & {
   cfg: ClusterConfig
   tiers: Record<TierId, TierPolicy>
+  /** Absent when the link omitted the inventory; the recipient's own VMs are then kept. */
   vms?: Vm[]
-  customerName?: string
   inventoryOmitted?: number
-  existingCapacityCfg?: ClusterConfig
-  existingCapacityTiers?: Record<TierId, TierPolicy>
-  existingCapacityNodes?: number
 }
 
-const MAX_VMS_IN_URL = 60
+export const MAX_VMS_IN_URL = 60
+const SHARE_PARAM = 's'
+
+/** Design fields a link may carry, besides cfg, tiers, vms and inventoryOmitted. */
+const DESIGN_KEYS = [
+  'engagementMode', 'managementDecision', 'customerName', 'chosenKey',
+  'existingCapacityCfg', 'existingCapacityTiers', 'existingCapacityNodes',
+  'managementDeploymentInputs', 'includeManagementInSizing', 'placementInputs',
+  'networkDesignInputs', 'drDesignInputs', 'reportMetadata', 'dataSources', 'storageDecisionAnswers',
+] as const satisfies ReadonlyArray<keyof ProjectPayload>
 
 function encode(obj: unknown): string {
   const json = JSON.stringify(obj)
-  return btoa(unescape(encodeURIComponent(json)))
+  return btoa(unescape(encodeURIComponent(json))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
+/** Accepts standard and URL-safe base64, with or without padding. */
 function decode<T>(s: string): T | null {
   try {
-    return JSON.parse(decodeURIComponent(escape(atob(s)))) as T
+    const standard = s.trim().replace(/ /g, '+').replace(/-/g, '+').replace(/_/g, '/')
+    const padded = standard + '='.repeat((4 - (standard.length % 4)) % 4)
+    return JSON.parse(decodeURIComponent(escape(atob(padded)))) as T
   } catch {
     return null
   }
 }
 
-export function toUrl(scn: Scenario, route = '/results'): string {
-  const payload: Scenario = {
-    engagementMode: scn.engagementMode,
-    managementDecision: scn.managementDecision,
+function currentHref(): string {
+  return typeof window !== 'undefined' ? window.location.href : 'http://localhost/'
+}
+
+export function urlOmittedInventory(scn: Pick<Scenario, 'vms'>): boolean {
+  return !!scn.vms && scn.vms.length > MAX_VMS_IN_URL
+}
+
+export function toUrl(scn: Scenario, route = '/results', href = currentHref()): string {
+  const omitted = urlOmittedInventory(scn)
+  const payload: Scenario & { v: number } = {
+    v: 2,
+    ...Object.fromEntries(DESIGN_KEYS.filter((key) => scn[key] !== undefined).map((key) => [key, scn[key]])),
     cfg: scn.cfg,
     tiers: scn.tiers,
-    customerName: scn.customerName,
-    vms: scn.vms && scn.vms.length <= MAX_VMS_IN_URL ? scn.vms : undefined,
-    inventoryOmitted: scn.vms && scn.vms.length > MAX_VMS_IN_URL ? scn.vms.length : undefined,
-    existingCapacityCfg: scn.existingCapacityCfg,
-    existingCapacityTiers: scn.existingCapacityTiers,
-    existingCapacityNodes: scn.existingCapacityNodes,
+    vms: omitted ? undefined : scn.vms ?? [],
+    inventoryOmitted: omitted ? scn.vms!.length : undefined,
   }
-  const current = new URL(window.location.href)
-  current.searchParams.set('s', encode(payload))
-  current.hash = route
-  return current.toString()
+  const url = new URL(href)
+  url.searchParams.delete(SHARE_PARAM)
+  url.hash = `${route.startsWith('/') ? route : `/${route}`}?${SHARE_PARAM}=${encode(payload)}`
+  return url.toString()
 }
 
-export function fromUrl(): Scenario | null {
-  const queryPayload = new URL(window.location.href).searchParams.get('s')
-  if (queryPayload) return normalizeShared(decode<Scenario>(queryPayload))
+export interface SharedLink {
+  scenario: Scenario
+  /** The address with the payload removed. */
+  cleanHref: string
+  format: 'fragment' | 'legacy-query' | 'legacy-hash'
+}
+
+/** Reads a share link without touching the browser. Returns null when there is none or it is unreadable. */
+export function readSharedLink(href: string): SharedLink | null {
+  const url = new URL(href)
+  const hash = url.hash
+  const query = hash.indexOf('?')
+  if (hash.startsWith('#/') && query >= 0) {
+    const params = new URLSearchParams(hash.slice(query + 1))
+    const payload = params.get(SHARE_PARAM)
+    if (payload) {
+      const scenario = normalizeShared(decode<Record<string, unknown>>(payload))
+      if (!scenario) return null
+      params.delete(SHARE_PARAM)
+      const rest = params.toString()
+      url.hash = `${hash.slice(1, query)}${rest ? `?${rest}` : ''}`
+      return { scenario, cleanHref: url.toString(), format: 'fragment' }
+    }
+  }
+
+  const queryPayload = url.searchParams.get(SHARE_PARAM)
+  if (queryPayload) {
+    const scenario = normalizeShared(decode<Record<string, unknown>>(queryPayload))
+    if (!scenario) return null
+    url.searchParams.delete(SHARE_PARAM)
+    return { scenario, cleanHref: url.toString(), format: 'legacy-query' }
+  }
 
   // Backward compatibility for links generated by the original prototype.
-  const hash = window.location.hash
-  if (!hash.startsWith('#s=')) return null
-  return normalizeShared(decode<Scenario>(hash.slice(3)))
+  if (hash.startsWith('#s=')) {
+    const scenario = normalizeShared(decode<Record<string, unknown>>(hash.slice(3)))
+    if (!scenario) return null
+    url.hash = scenario.engagementMode
+      ? journeyResumeRoute(scenario.engagementMode, scenario.vms?.filter((vm) => vm.include).length ?? 0)
+      : '/results'
+    return { scenario, cleanHref: url.toString(), format: 'legacy-hash' }
+  }
+  return null
 }
 
-function normalizeShared(value: Scenario | null): Scenario | null {
-  if (!value || typeof value !== 'object') return null
+export function fromUrl(href = currentHref()): Scenario | null {
+  return readSharedLink(href)?.scenario ?? null
+}
+
+/** Reads the share link in the address bar once and removes it, so a reload keeps local edits. */
+export function consumeSharedLink(): Scenario | null {
+  if (typeof window === 'undefined') return null
+  const link = readSharedLink(window.location.href)
+  if (!link) return null
+  window.history.replaceState(window.history.state, '', link.cleanHref)
+  return link.scenario
+}
+
+function normalizeShared(value: Record<string, unknown> | null): Scenario | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   try {
     const payload = normalizeProjectPayload({ ...value })
-    return {
+    const scenario: Scenario = {
       engagementMode: payload.engagementMode,
       managementDecision: payload.managementDecision,
+      customerName: payload.customerName,
       cfg: payload.cfg,
       tiers: payload.tiers,
-      vms: payload.vms,
-      customerName: payload.customerName,
-      inventoryOmitted: typeof value.inventoryOmitted === 'number' ? Math.max(0, value.inventoryOmitted) : undefined,
-      existingCapacityCfg: payload.existingCapacityCfg,
-      existingCapacityTiers: payload.existingCapacityTiers,
-      existingCapacityNodes: payload.existingCapacityNodes,
     }
+    // Only what the link carries. Older links lack most fields, and a missing field keeps the
+    // recipient's value rather than resetting it.
+    for (const key of DESIGN_KEYS) {
+      if (key in value) (scenario as Record<string, unknown>)[key] = payload[key]
+    }
+    if (Array.isArray(value.vms)) scenario.vms = payload.vms
+    if (typeof value.inventoryOmitted === 'number') {
+      scenario.inventoryOmitted = Math.max(0, value.inventoryOmitted)
+      // An omitted inventory never replaces the recipient's VMs, even if an old link sent [].
+      delete scenario.vms
+    }
+    return scenario
   } catch {
     return null
   }
-}
-
-export function urlOmittedInventory(scn: Scenario): boolean {
-  return !!scn.vms && scn.vms.length > MAX_VMS_IN_URL
 }

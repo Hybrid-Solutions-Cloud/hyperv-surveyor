@@ -7,7 +7,8 @@ import { DEFAULT_DR_INPUTS, type DrDesignInputs } from '../engine/drDesign'
 import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMode, type ManagementDecision } from './journey'
 import type { StorageDecisionAnswers } from '../engine/storageDecision'
 
-export const PROJECT_SCHEMA_VERSION = 4 as const
+/** 5 added savedScenarios to the project file. */
+export const PROJECT_SCHEMA_VERSION = 5 as const
 export const ENGINE_VERSION = '1.2.0'
 
 export interface ReportMetadata {
@@ -30,7 +31,7 @@ export const DEFAULT_REPORT_METADATA: ReportMetadata = {
 
 export interface ProjectDataSource {
   id: string
-  kind: 'rvtools' | 'performance'
+  kind: 'rvtools' | 'inventory' | 'performance'
   fileName: string
   importedAt: string
   rows: number
@@ -63,6 +64,8 @@ export interface SurveyorProject {
   engineVersion: string
   exportedAt: string
   payload: ProjectPayload
+  /** Named scenarios. Absent in files written before schema 5, which carried none. */
+  savedScenarios?: ScenarioSnapshot[]
 }
 
 export interface ScenarioSnapshot extends ProjectPayload {
@@ -108,7 +111,11 @@ export function normalizeTiers(value: unknown): Record<TierId, TierPolicy> {
 function normalizeVm(value: unknown, index: number): Vm | null {
   if (!record(value) || typeof value.name !== 'string') return null
   const tier = ['general', 'database', 'vdi', 'infrastructure'].includes(String(value.tier)) ? value.tier as TierId : 'general'
-  const number = (candidate: unknown, fallback = 0) => typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : fallback
+  // Older saves and hand-edited files can hold numbers as text, such as vCpu: "4".
+  const number = (candidate: unknown, fallback = 0) => {
+    const value = typeof candidate === 'string' && candidate.trim() !== '' ? Number(candidate) : candidate
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+  }
   return {
     ...(value as unknown as Vm),
     id: typeof value.id === 'string' ? value.id : `project-${index + 1}`,
@@ -130,7 +137,7 @@ export function normalizeStorageDecisionAnswers(value: unknown): StorageDecision
 
 export function normalizeProjectPayload(value: unknown): ProjectPayload {
   if (!record(value)) throw new Error('The project payload is missing or invalid.')
-  const vms = Array.isArray(value.vms) ? value.vms.map(normalizeVm).filter((vm): vm is Vm => vm !== null) : []
+  const vms = normalizeVms(value.vms)
   return {
     engagementMode: normalizeEngagementMode(value.engagementMode, vms.length > 0 ? 'new-platform' : null),
     managementDecision: value.managementDecision === undefined && record(value.managementDeploymentInputs) ? 'design' : normalizeManagementDecision(value.managementDecision),
@@ -151,7 +158,7 @@ export function normalizeProjectPayload(value: unknown): ProjectPayload {
     storageDecisionAnswers: normalizeStorageDecisionAnswers(value.storageDecisionAnswers),
     dataSources: Array.isArray(value.dataSources) ? value.dataSources.filter(record).map((source, index) => ({
       id: typeof source.id === 'string' ? source.id : `source-${index + 1}`,
-      kind: source.kind === 'performance' ? 'performance' : 'rvtools',
+      kind: source.kind === 'performance' || source.kind === 'inventory' ? source.kind : 'rvtools',
       fileName: typeof source.fileName === 'string' ? source.fileName : 'Unknown source',
       importedAt: typeof source.importedAt === 'string' ? source.importedAt : '',
       rows: typeof source.rows === 'number' ? source.rows : 0,
@@ -159,8 +166,30 @@ export function normalizeProjectPayload(value: unknown): ProjectPayload {
   }
 }
 
-export function createProject(payload: ProjectPayload): SurveyorProject {
-  return { kind: 'hyperv-surveyor-project', schemaVersion: PROJECT_SCHEMA_VERSION, engineVersion: ENGINE_VERSION, exportedAt: new Date().toISOString(), payload }
+export function normalizeVms(value: unknown): Vm[] {
+  return Array.isArray(value) ? value.map(normalizeVm).filter((vm): vm is Vm => vm !== null) : []
+}
+
+export function normalizeScenarioSnapshot(value: unknown, index: number): ScenarioSnapshot | null {
+  if (!record(value)) return null
+  try {
+    return {
+      ...normalizeProjectPayload(value),
+      id: typeof value.id === 'string' ? value.id : `scenario-${index + 1}`,
+      name: typeof value.name === 'string' && value.name.trim() ? value.name : `Scenario ${index + 1}`,
+      createdAt: typeof value.createdAt === 'string' ? value.createdAt : '',
+    }
+  } catch {
+    return null
+  }
+}
+
+export function normalizeScenarioSnapshots(value: unknown): ScenarioSnapshot[] {
+  return Array.isArray(value) ? value.map(normalizeScenarioSnapshot).filter((item): item is ScenarioSnapshot => item !== null) : []
+}
+
+export function createProject(payload: ProjectPayload, savedScenarios: ScenarioSnapshot[] = []): SurveyorProject {
+  return { kind: 'hyperv-surveyor-project', schemaVersion: PROJECT_SCHEMA_VERSION, engineVersion: ENGINE_VERSION, exportedAt: new Date().toISOString(), payload, savedScenarios }
 }
 
 export function parseProject(text: string): SurveyorProject {
@@ -176,6 +205,7 @@ export function parseProject(text: string): SurveyorProject {
     engineVersion: typeof parsed.engineVersion === 'string' ? parsed.engineVersion : 'legacy',
     exportedAt: typeof parsed.exportedAt === 'string' ? parsed.exportedAt : new Date().toISOString(),
     payload: normalizeProjectPayload(parsed.payload),
+    savedScenarios: Array.isArray(parsed.savedScenarios) ? normalizeScenarioSnapshots(parsed.savedScenarios) : undefined,
   }
 }
 

@@ -654,7 +654,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Allocated vCPU', value: number(workloadTotals.vCpu) },
         { label: 'Allocated memory', value: gib(workloadTotals.ramGiB) },
         { label: 'Consumed storage', value: tib(workloadTotals.storageGiB / 1024) },
-        { label: 'Provisioned storage', value: tib(workloadTotals.provisionedGiB / 1024) },
+        { label: 'Provisioned storage (not sized)', value: tib(workloadTotals.provisionedGiB / 1024) },
       ],
       reasoning: [{
         decision: `Size from ${includedVms.length.toLocaleString()} included workload records`,
@@ -1048,7 +1048,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       reasoning: [],
       bullets: [],
       tables: [{
-        headers: ['VM', 'Tier', 'vCPU', 'Memory', 'Consumed', 'Provisioned', 'CPU P95', 'Memory P95', 'Source cluster', 'Power state', 'Guest OS'],
+        headers: ['VM', 'Tier', 'vCPU', 'Memory', 'Consumed', 'Provisioned (not sized)', 'CPU P95', 'Memory P95', 'Source cluster', 'Power state', 'Guest OS'],
         rows: includedVms.map((vm) => [
           vm.name,
           platformTiers[vm.tier].label,
