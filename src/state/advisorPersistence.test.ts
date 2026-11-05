@@ -69,17 +69,18 @@ describe('older saved management inputs', () => {
   })
 
   it('drops the frozen automatic SCOM daily data so it follows the estate again', () => {
-    // Management-only inputs were created at 0 VMs, which froze the value at 1 GiB/day.
-    expect(normalizeManagementInputs({ ...legacy(), managedVms: 5_000, scomDailyDataGiB: 1 })?.scomDailyDataGiB).toBeUndefined()
+    // Only the formula value at the saved managed VMs is known to be automatic.
+    expect(normalizeManagementInputs({ ...legacy(), managedVms: 300, scomDailyDataGiB: 1 })?.scomDailyDataGiB).toBeUndefined()
     expect(normalizeManagementInputs({ ...legacy(), managedVms: 5_000, scomDailyDataGiB: 10 })?.scomDailyDataGiB).toBeUndefined()
-    // Any other value was typed by the user and is kept.
+    // Any other value may have been typed, so it is kept: a real 1 GiB/day at 5,000 VMs survives.
+    expect(normalizeManagementInputs({ ...legacy(), managedVms: 5_000, scomDailyDataGiB: 1 })?.scomDailyDataGiB).toBe(1)
     expect(normalizeManagementInputs({ ...legacy(), managedVms: 5_000, scomDailyDataGiB: 4.5 })?.scomDailyDataGiB).toBe(4.5)
     // New saves mark user-set values by keeping them, whatever they are.
     expect(normalizeManagementInputs({ ...legacy(), stackSource: 'user', scomDailyDataGiB: 1 })?.scomDailyDataGiB).toBe(1)
   })
 
   it('migrates browser saves the same way', () => {
-    const migrated = migratePersistedState({ managementDeploymentInputs: { ...legacy(), managedVms: 2_000, scomDailyDataGiB: 1 } })
+    const migrated = migratePersistedState({ managementDeploymentInputs: { ...legacy(), managedVms: 2_000, scomDailyDataGiB: 4 } })
     expect(migrated.managementDeploymentInputs?.stackSource).toBe('user')
     expect(migrated.managementDeploymentInputs?.scomDailyDataGiB).toBeUndefined()
   })

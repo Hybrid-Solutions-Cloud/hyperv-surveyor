@@ -173,7 +173,7 @@ export function normalizeStorageDecisionAnswers(value: unknown): StorageDecision
 /**
  * Saved management inputs. Saves made before the advisor answers were kept have no stackSource; their
  * stack was picked on the Deployment design tab, so it stays the user's. Those saves also froze the SCOM
- * daily data at the old automatic value (1 GiB, or managed VMs / 500), which is dropped so it follows
+ * daily data at the automatic value (managed VMs / 500, at least 1 GiB), which is dropped so it follows
  * the managed estate again; any other value was typed by the user and is kept.
  */
 export function normalizeManagementInputs(value: unknown): ManagementDeploymentInputs | null {
@@ -184,7 +184,9 @@ export function normalizeManagementInputs(value: unknown): ManagementDeploymentI
     inputs.stackSource = 'user'
     const daily = inputs.scomDailyDataGiB
     const managedVms = typeof inputs.managedVms === 'number' ? inputs.managedVms : 0
-    if (legacy && typeof daily === 'number' && (daily === 1 || daily === Math.max(1, managedVms / 500))) delete inputs.scomDailyDataGiB
+    // Only a value equal to the formula at these managed VMs is known to be automatic. Anything else,
+    // including 1 GiB at a larger estate, may have been typed, so it is kept and counts as set by you.
+    if (legacy && typeof daily === 'number' && daily === Math.max(1, managedVms / 500)) delete inputs.scomDailyDataGiB
   }
   if (inputs.scomDailyDataGiB !== undefined && !(typeof inputs.scomDailyDataGiB === 'number' && Number.isFinite(inputs.scomDailyDataGiB))) delete inputs.scomDailyDataGiB
   return inputs
