@@ -6,6 +6,8 @@ const completeAnswers = (overrides: AdvisorAnswers = {}): AdvisorAnswers => ({
   bareMetal: false,
   tenantSelfService: false,
   azureServices: false,
+  scomFeatures: false,
+  monitoring: false,
   clusterCreation: false,
   pureIntegration: false,
   drs: false,
@@ -17,7 +19,6 @@ const completeAnswers = (overrides: AdvisorAnswers = {}): AdvisorAnswers => ({
   azureReady: true,
   gaRequired: true,
   managementHa: false,
-  monitoring: false,
   automation: false,
   operationsOwnership: true,
   ...overrides,
@@ -63,6 +64,7 @@ describe('management-plane recommendations', () => {
   it('can confirm the foundation without pretending an unanswered WAC mode is decided', () => {
     const result = recommendManagementPlane({
       azureServices: false,
+      scomFeatures: false,
       bareMetal: false,
       tenantSelfService: false,
       pureIntegration: false,
@@ -97,6 +99,20 @@ describe('management-plane recommendations', () => {
 
     expect(result.stack).toEqual(['scvmm', 'wac-virtual'])
     expect(result.cautions.some((caution) => caution.includes('Pure Storage'))).toBe(true)
+  })
+
+  it.each([
+    [false, false, 'none'],
+    [true, false, 'scom-features'],
+    [true, true, 'scom'],
+    [false, true, 'scom'],
+  ])('with forecasting %s and monitoring %s, plans SCOM as %s', (scomFeatures, monitoring, expected) => {
+    expect(recommendManagementPlane(completeAnswers({ scomFeatures, monitoring })).monitoring).toBe(expected)
+  })
+
+  it('requires SCVMM for reporting and forecasting, but not for monitoring alone', () => {
+    expect(recommendManagementPlane(completeAnswers({ scomFeatures: true })).stack).toContain('scvmm')
+    expect(recommendManagementPlane(completeAnswers({ monitoring: true })).stack).toContain('classic')
   })
 
   it('adds Azure Arc-enabled servers without changing the management stack', () => {

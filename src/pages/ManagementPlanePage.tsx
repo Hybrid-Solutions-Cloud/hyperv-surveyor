@@ -270,9 +270,9 @@ function RecommendationPanel({
                   <strong>Arc-enabled servers</strong>
                 </div>
               )}
-              {recommendation.monitoring === 'scom' && (
+              {recommendation.monitoring !== 'none' && (
                 <div className="stack-node">
-                  <span>Monitoring</span>
+                  <span>{recommendation.monitoring === 'scom' ? 'Monitoring' : 'Reporting and forecasting'}</span>
                   <strong>SCOM 2025</strong>
                 </div>
               )}
@@ -428,6 +428,8 @@ function DeploymentDesignerPanel({
           ? 'Could not compare'
           : hostDelta > 0 ? `Adds ${hostDelta} host${hostDelta === 1 ? '' : 's'}` : 'No additional hosts'
 
+  const scomPlanned = inputs.monitoring === 'scom' || (inputs.monitoring === 'scom-features' && inputs.foundation === 'scvmm')
+
   const setNumber = (key: keyof ManagementDeploymentInputs, value: number) => {
     setInputs({ ...inputs, [key]: Math.max(0, value) })
   }
@@ -475,12 +477,19 @@ function DeploymentDesignerPanel({
           </select>
         </Field>
 
-        <Field label="Monitoring solution">
+        <Field label="System Center Operations Manager (SCOM)" hint="Capacity reporting, forecasting, and PRO come from connecting SCVMM to SCOM, even if another product does your monitoring.">
           <select value={inputs.monitoring} onChange={(event) => setInputs({ ...inputs, monitoring: event.target.value as ManagementDeploymentInputs['monitoring'] })}>
-            <option value="none">None / existing monitoring</option>
-            <option value="scom">System Center Operations Manager 2025</option>
+            <option value="none">No SCOM</option>
+            <option value="scom-features">SCOM for reporting and forecasting only, not monitoring</option>
+            <option value="scom">SCOM for monitoring, reporting, and forecasting</option>
           </select>
         </Field>
+        {inputs.monitoring === 'scom-features' && inputs.foundation !== 'scvmm' && (
+          <div className="note warn"><strong>This choice needs SCVMM</strong>These reports and PRO come from the VMM integration, so no SCOM servers are planned until SCVMM is the fabric foundation.</div>
+        )}
+        {inputs.monitoring === 'scom-features' && inputs.foundation === 'scvmm' && (
+          <div className="note"><strong>SCOM for features only</strong>Gives you Capacity Utilization, Host Group Forecasting, SAN Usage Forecasting, and PRO, with agents on the hosts and VMM servers. This is a planning choice, not a Microsoft product mode: it still needs SCOM servers, databases, and licensing, plus SQL Server Analysis Services on the reporting server for forecasting. SCOM still monitors the VMM fabric, but you keep it out of your alert and ticket process.</div>
+        )}
 
         <Field label="Management VM placement" hint="Choose whether the management plane shares the workload failure domain or runs on independent infrastructure.">
           <select value={inputs.managementPlacement} onChange={(event) => setInputs({ ...inputs, managementPlacement: event.target.value as ManagementDeploymentInputs['managementPlacement'] })}>
@@ -492,14 +501,14 @@ function DeploymentDesignerPanel({
 
         <div className="meter-toggles deployment-toggles">
           <CostToggle label={`${inputs.foundation === 'scvmm' ? 'SCVMM / WAC' : 'WAC'} high availability`} checked={inputs.fabricHighAvailability} onChange={(checked) => setInputs({ ...inputs, fabricHighAvailability: checked, highAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />
-          {inputs.monitoring === 'scom' && <CostToggle label="SCOM high availability" checked={inputs.scomHighAvailability} onChange={(checked) => setInputs({ ...inputs, scomHighAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />}
+          {scomPlanned && <CostToggle label="SCOM high availability" checked={inputs.scomHighAvailability} onChange={(checked) => setInputs({ ...inputs, scomHighAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />}
           <CostToggle label="Add Azure Arc-enabled servers" checked={inputs.includeArc} onChange={(checked) => setInputs({ ...inputs, includeArc: checked, arcServices: checked ? inputs.arcServices : [] })} />
           <CostToggle label="Add dedicated AD DS / DNS VMs" checked={inputs.includeIdentityServices} onChange={(checked) => setInputs({ ...inputs, includeIdentityServices: checked })} />
           {inputs.managementPlacement === 'workload-cluster' && platformKind !== 'management-only' && <CostToggle label="Include management VMs in workload-cluster sizing" checked={includeInSizing} onChange={setIncludeInSizing} />}
         </div>
         {inputs.managementPlacement !== 'workload-cluster' && <div className="note"><strong>Separate capacity domain</strong>Management VMs remain in the BOM but do not consume workload-cluster capacity for dedicated-cluster or external-fabric placement.</div>}
         {inputs.managementPlacement === 'workload-cluster' && platformKind === 'management-only' && <div className="note warn"><strong>Workload capacity not supplied</strong>The BOM is complete, but host impact cannot be calculated until a platform or existing-hardware profile is added.</div>}
-        {inputs.monitoring === 'scom' && inputs.scomHighAvailability && inputs.foundation === 'scvmm' && inputs.fabricHighAvailability && (
+        {scomPlanned && inputs.scomHighAvailability && inputs.foundation === 'scvmm' && inputs.fabricHighAvailability && (
           <Field label="SCOM database placement">
             <select value={inputs.scomSqlPlacement} onChange={(event) => setInputs({ ...inputs, scomSqlPlacement: event.target.value as ManagementDeploymentInputs['scomSqlPlacement'] })}>
               <option value="dedicated">Dedicated SCOM SQL Always On pair</option>
@@ -507,13 +516,13 @@ function DeploymentDesignerPanel({
             </select>
           </Field>
         )}
-        {inputs.monitoring === 'scom' && inputs.scomHighAvailability && inputs.foundation === 'scvmm' && !inputs.fabricHighAvailability && (
+        {scomPlanned && inputs.scomHighAvailability && inputs.foundation === 'scvmm' && !inputs.fabricHighAvailability && (
           <div className="note"><strong>Dedicated SCOM SQL required</strong>Sharing VMM's SQL Always On infrastructure becomes available when SCVMM / WAC high availability is enabled.</div>
         )}
-        {inputs.monitoring === 'scom' && !inputs.scomHighAvailability && (
+        {scomPlanned && !inputs.scomHighAvailability && (
           <div className="note warn"><strong>Single-server SCOM topology</strong>One VM contains the management server, databases, reporting, and web console roles. Microsoft positions this mainly for labs and only the smallest production loads.</div>
         )}
-        {inputs.monitoring === 'scom' && (
+        {scomPlanned && (
           <>
             <h3>SCOM workload and retention</h3>
             <div className="form-grid two-column deployment-scale-inputs">
@@ -1032,7 +1041,7 @@ function CostPanel({
     spareHosts,
     termYears: 3,
     sqlCores: Math.max(4, deploymentSqlCores),
-    includeScom: deploymentInputs?.monitoring === 'scom',
+    includeScom: deploymentInputs?.monitoring === 'scom' || (deploymentInputs?.monitoring === 'scom-features' && deploymentInputs.foundation === 'scvmm'),
     includeArcServers: arcEnabled,
     arcEnabledVms: deploymentInputs ? Math.ceil(initialVms * deploymentInputs.arcGuestScopePct / 100) : initialVms,
     waiveUpdateAndGuest: true,

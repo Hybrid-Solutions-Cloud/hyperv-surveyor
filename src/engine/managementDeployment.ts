@@ -3,7 +3,12 @@ import type { Vm } from './types'
 
 export type ManagementFoundation = 'classic' | 'scvmm'
 export type WacExperience = 'none' | 'wac-admin' | 'wac-virtual'
-export type MonitoringSolution = 'none' | 'scom'
+/**
+ * none           no SCOM.
+ * scom-features  SCOM for VMM reporting, forecasting, and PRO, while monitoring stays elsewhere.
+ * scom           SCOM as the monitoring platform, which also supplies those features with SCVMM.
+ */
+export type MonitoringSolution = 'none' | 'scom-features' | 'scom'
 export type ScomSqlPlacement = 'dedicated' | 'shared-vmm'
 export type ManagementPlacement = 'workload-cluster' | 'dedicated-management-cluster' | 'external-fabric'
 export type ArcConnectivity = 'public' | 'proxy' | 'private-link'
@@ -112,6 +117,7 @@ const SRC = {
   machineConfiguration: 'https://learn.microsoft.com/azure/governance/machine-configuration/',
   changeTracking: 'https://learn.microsoft.com/azure/automation/change-tracking/overview',
   scom: 'https://learn.microsoft.com/system-center/scom/system-requirements?view=sc-om-2025',
+  scomVmmIntegration: 'https://learn.microsoft.com/system-center/vmm/monitors-ops-manager?view=sc-vmm-2025',
   scomSingle: 'https://learn.microsoft.com/system-center/scom/deploy-single-server?view=sc-om-2025',
   scomHa: 'https://learn.microsoft.com/system-center/scom/plan-hadr-design?view=sc-om-2025',
   scomSql: 'https://learn.microsoft.com/system-center/scom/plan-sqlserver-design?view=sc-om-2025',
@@ -462,8 +468,14 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
     cautions.push('Azure Arc-enabled servers do not provide VM lifecycle operations from Azure. Arc-enabled SCVMM stopped new onboarding in October 2026 and retires in September 2029.')
   }
 
-  if (inputs.monitoring === 'scom') {
-    const monitoredComputers = hosts + vms
+  const scomFeaturesOnly = inputs.monitoring === 'scom-features'
+  if (scomFeaturesOnly && inputs.foundation !== 'scvmm') {
+    cautions.push('SCOM for features only needs SCVMM, because these reports and PRO come from the VMM integration. No SCOM servers are planned until SCVMM is the fabric foundation.')
+  }
+  if (inputs.monitoring === 'scom' || (scomFeaturesOnly && inputs.foundation === 'scvmm')) {
+    // Features only needs agents on the VMM servers and hosts, not on every guest.
+    const vmmServers = components.find((item) => item.id === 'vmm')?.count ?? 0
+    const monitoredComputers = scomFeaturesOnly ? hosts + vmmServers : hosts + vms
     const publishedManagementServers = Math.max(1, Math.ceil(monitoredComputers / 3_000))
     const managementSize = scaledSize(scale, {
       small: { vCpu: 4, ramGiB: 8, diskGiB: 100 },
@@ -509,7 +521,9 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
       components.push(component({
         id: 'scom-management',
         name: 'SCOM management server',
-        role: `Health, alert, performance, and availability monitoring for approximately ${monitoredComputers.toLocaleString()} managed computers.`,
+        role: scomFeaturesOnly
+          ? `Collects host and VM data for VMM reporting, forecasting, and PRO from approximately ${monitoredComputers.toLocaleString()} agent-managed hosts and VMM servers.`
+          : `Health, alert, performance, and availability monitoring for approximately ${monitoredComputers.toLocaleString()} managed computers.`,
         count: managementServerCount,
         ...managementSize,
         availability: 'Management server resource pool · agent failover',
@@ -602,7 +616,21 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
     }
 
     dependencies.add('SCOM service accounts for management, data access, data warehouse write, and reporting data reader roles')
-    dependencies.add('SCOM agents and applicable Microsoft or vendor management packs for monitored workloads')
+    if (scomFeaturesOnly) {
+      dependencies.add('SCOM agents on every VMM server and managed host, plus the VMM management packs imported by the integration wizard')
+      dependencies.add('Operations console on each VMM server and port 5724 open between VMM and the SCOM management servers')
+      dependencies.add('An owner for SCOM alerts: leave them unrouted or tuned so they do not duplicate your monitoring platform')
+      cautions.push('SCOM for features only is a planning choice, not a Microsoft product mode. SCOM still runs full servers and databases, needs System Center licensing, and still monitors the VMM fabric through the VMM management packs. PRO also acts on SCOM alerts. This choice only limits agents to the hosts and VMM servers and keeps SCOM out of your alert and ticket process.')
+    } else {
+      dependencies.add('SCOM agents and applicable Microsoft or vendor management packs for monitored workloads')
+    }
+    if (inputs.foundation === 'scvmm') {
+      dependencies.add('For forecasting reports: SQL Server Analysis Services on the same server as SCOM reporting, with an instance name matching SSRS, and a Run As account that is an administrator of both')
+      dependencies.add('For forecasting reports: connect VMM to Analysis Services (New-SCSSASConnection), which creates the VMMAnalysisServerDB database')
+      cautions.push('VMM 2025 documents SCOM on SQL Server 2019 or 2022 with reporting services for this integration. SCOM 2025 UR1 adds SQL Server 2025, but the VMM documentation does not list it, so use SQL Server 2019 or 2022 unless Microsoft confirms otherwise.')
+      cautions.push('Microsoft does not publish how much history forecasting reports need or their accuracy, or a sizing figure for Analysis Services on the reporting server. Validate these in a pilot.')
+      if (hosts > 400 || vms > 8_000) cautions.push('Microsoft states the VMM monitoring packs support up to 400 hosts and 8,000 VMs. This estate exceeds that, so validate the integration design.')
+    }
     dependencies.add('SQL Server Full-Text Search, supported collation, SSRS native mode, and current SQL client drivers')
     if (!inputs.includeIdentityServices) dependencies.add('Existing healthy Active Directory and DNS services for SCOM authentication and discovery')
     cautions.push(`SCOM database allowance uses ${resolved.scomDailyDataGiB.toFixed(1)} GiB/day, ${resolved.scomOperationalRetentionDays} operational days, ${resolved.scomWarehouseRetentionDays} warehouse days, and ${resolved.scomManagementPackCount} expected management packs. Validate these inputs and storage IOPS with the Sizing Helper.`)

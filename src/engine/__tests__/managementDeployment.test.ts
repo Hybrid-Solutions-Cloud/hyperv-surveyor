@@ -49,6 +49,62 @@ describe('management deployment planner', () => {
     expect(plan.cautions.some((item) => item.includes('not published an HA'))).toBe(true)
   })
 
+  describe('SCOM use', () => {
+    const scomIds = (plan: ReturnType<typeof planManagementDeployment>) => plan.components.filter((item) => item.id.startsWith('scom')).map((item) => item.id)
+
+    it('plans no SCOM when none is selected', () => {
+      expect(scomIds(planManagementDeployment({ ...base, monitoring: 'none' }))).toEqual([])
+    })
+
+    it('plans the same SCOM servers for features only as for monitoring', () => {
+      const features = planManagementDeployment({ ...base, monitoring: 'scom-features', scomHighAvailability: true })
+      const monitoring = planManagementDeployment({ ...base, monitoring: 'scom', scomHighAvailability: true })
+      expect(scomIds(features)).toEqual(scomIds(monitoring))
+      expect(scomIds(features).length).toBeGreaterThan(0)
+    })
+
+    it('counts agents on hosts and VMM servers for features only, not on every VM', () => {
+      const inputs = { ...base, managedHosts: 100, managedVms: 9_000, scomHighAvailability: true }
+      const features = planManagementDeployment({ ...inputs, monitoring: 'scom-features' })
+      const monitoring = planManagementDeployment({ ...inputs, monitoring: 'scom' })
+      expect(monitoring.components.find((item) => item.id === 'scom-management')?.count).toBe(4)
+      expect(features.components.find((item) => item.id === 'scom-management')?.count).toBe(2)
+      expect(features.components.find((item) => item.id === 'scom-management')?.role).toContain('forecasting')
+    })
+
+    it('lists what forecasting needs, and says it is still real infrastructure', () => {
+      const plan = planManagementDeployment({ ...base, monitoring: 'scom-features' })
+      expect(plan.dependencies.some((item) => item.includes('SQL Server Analysis Services on the same server as SCOM reporting'))).toBe(true)
+      expect(plan.dependencies.some((item) => item.includes('New-SCSSASConnection'))).toBe(true)
+      expect(plan.dependencies.some((item) => item.includes('port 5724'))).toBe(true)
+      expect(plan.dependencies.some((item) => item.includes('monitored workloads'))).toBe(false)
+      expect(plan.cautions.some((item) => item.includes('not a Microsoft product mode'))).toBe(true)
+      expect(plan.cautions.some((item) => item.includes('SQL Server 2019 or 2022'))).toBe(true)
+      expect(plan.cautions.some((item) => item.includes('Validate these in a pilot'))).toBe(true)
+    })
+
+    it('plans nothing for features only without SCVMM, and says why', () => {
+      const plan = planManagementDeployment({ ...base, foundation: 'classic', monitoring: 'scom-features' })
+      expect(scomIds(plan)).toEqual([])
+      expect(plan.cautions.some((item) => item.includes('needs SCVMM'))).toBe(true)
+    })
+
+    it('gives the same forecasting requirements when SCOM is also the monitoring platform', () => {
+      const plan = planManagementDeployment({ ...base, monitoring: 'scom' })
+      expect(plan.dependencies.some((item) => item.includes('New-SCSSASConnection'))).toBe(true)
+      expect(plan.cautions.some((item) => item.includes('not a Microsoft product mode'))).toBe(false)
+    })
+
+    it('keeps SCOM monitoring available without SCVMM', () => {
+      expect(scomIds(planManagementDeployment({ ...base, foundation: 'classic', monitoring: 'scom' })).length).toBeGreaterThan(0)
+    })
+
+    it('warns above the published VMM monitoring pack limits', () => {
+      const plan = planManagementDeployment({ ...base, monitoring: 'scom-features', managedHosts: 401 })
+      expect(plan.cautions.some((item) => item.includes('400 hosts'))).toBe(true)
+    })
+  })
+
   it('offers Azure Arc-enabled servers on any foundation', () => {
     for (const foundation of ['classic', 'scvmm'] as const) {
       const plan = planManagementDeployment({ ...base, foundation, includeArc: true })

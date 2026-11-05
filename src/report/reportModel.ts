@@ -145,8 +145,12 @@ function managementLabel(inputs: ManagementDeploymentInputs) {
     : inputs.wac === 'wac-virtual'
       ? 'WAC Virtualization Mode'
       : 'No WAC gateway'
-  const monitoring = inputs.monitoring === 'scom'
-    ? resolved.scomHighAvailability
+  const monitoring = inputs.monitoring === 'scom-features' && inputs.foundation !== 'scvmm'
+    ? 'SCOM for features only not planned, because it needs SCVMM'
+    : inputs.monitoring !== 'none'
+    ? inputs.monitoring === 'scom-features'
+      ? `SCOM 2025 for reporting and forecasting only${resolved.scomHighAvailability ? ' (HA)' : ' (single server)'}`
+      : resolved.scomHighAvailability
       ? `SCOM 2025 HA${resolved.scomSqlPlacement === 'shared-vmm' && inputs.foundation === 'scvmm' ? ' on shared VMM SQL infrastructure' : ''}`
       : 'SCOM 2025 single-server management group'
     : 'Existing / no monitoring platform'
@@ -872,7 +876,8 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Azure Arc services', value: managementInputs.includeArc ? `Core + ${managementInputs.arcServices.length} add-on${managementInputs.arcServices.length === 1 ? '' : 's'}` : 'Not selected' },
         { label: 'Arc connectivity', value: managementInputs.includeArc ? `${managementInputs.arcConnectivity} · ${managementInputs.arcRegion}` : 'Not applicable' },
         { label: 'Arc guest scope', value: managementInputs.includeArc ? `${number(managementInputs.arcGuestScopePct, 1)}% of managed VMs` : 'Not applicable' },
-        { label: 'SCOM collection', value: managementInputs.monitoring === 'scom' ? `${number(managementInputs.scomDailyDataGiB, 1)} GiB/day · ${managementInputs.scomWarehouseRetentionDays} warehouse days` : 'Not selected' },
+        { label: 'SCOM use', value: managementInputs.monitoring === 'scom' ? 'Monitoring, reporting, and forecasting' : managementInputs.monitoring === 'scom-features' ? managementInputs.foundation === 'scvmm' ? 'Reporting and forecasting only' : 'Not planned: needs SCVMM' : 'Not selected' },
+        { label: 'SCOM collection', value: managementInputs.monitoring === 'scom' || (managementInputs.monitoring === 'scom-features' && managementInputs.foundation === 'scvmm') ? `${number(managementInputs.scomDailyDataGiB, 1)} GiB/day · ${managementInputs.scomWarehouseRetentionDays} warehouse days` : 'Not selected' },
       ] : [{ label: 'Management decision', value: managementDecisionLabel }],
       reasoning: managementDecision === 'design' ? [
         {
@@ -901,7 +906,13 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
           explanation: `Arc-enabled servers connect the guest operating systems in the selected scope to the chosen Azure management services. The selected connection method is ${managementInputs.arcConnectivity} in ${managementInputs.arcRegion}.`,
           tradeoff: 'Arc-enabled servers do not provide VM lifecycle operations from Azure and do not replace the management plane. They require the Connected Machine agent on each server, Azure identity and subscription ownership, and outbound connectivity. Arc-enabled SCVMM stopped new onboarding in October 2026 and retires in September 2029.',
         }] : []),
-        ...(managementInputs.monitoring === 'scom' ? [{
+        ...(managementInputs.monitoring === 'scom-features' && managementInputs.foundation === 'scvmm' ? [{
+          decision: 'Use SCOM 2025 for SCVMM reporting and forecasting, not monitoring',
+          basis: 'User-selected' as const,
+          explanation: 'Capacity Utilization, Host Group Forecasting, SAN Usage Forecasting, and PRO come from integrating SCVMM with SCOM. Agents are planned for the hosts and VMM servers, and operational monitoring stays with the existing platform. This is a planning choice, not a Microsoft product mode.',
+          tradeoff: 'This still requires SCOM servers, databases, System Center licensing, and SQL Server Analysis Services on the reporting server for forecasting. SCOM still monitors the VMM fabric, so its alerts need an owner to avoid duplicating the monitoring platform.',
+        }] : []),
+        ...(managementInputs.monitoring === 'scom' || (managementInputs.monitoring === 'scom-features' && managementInputs.foundation === 'scvmm') ? [{
           decision: `Add SCOM 2025 with ${managementInputs.scomHighAvailability ? 'high availability' : 'a standalone management server'}`,
           basis: 'User-selected' as const,
           explanation: managementInputs.scomHighAvailability

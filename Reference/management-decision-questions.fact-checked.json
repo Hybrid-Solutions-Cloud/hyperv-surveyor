@@ -162,6 +162,17 @@
       ]
     },
     {
+      "id": "scomFeatures",
+      "question": "Do you need SCVMM capacity reporting and forecasting, or Performance and Resource Optimization (PRO)?",
+      "ifYes": "Use SCVMM and add SCOM 2025 for these features. If SCOM is not also your monitoring platform, select SCOM for features only so agents are planned for the hosts and VMM servers.",
+      "ifNo": "These features do not justify adding SCOM. Answer the monitoring question separately.",
+      "why": "Capacity Utilization, Host Group Forecasting, SAN Usage Forecasting, and PRO come from integrating VMM with Operations Manager, so they need SCOM even when another product does the monitoring. Forecasting reports also need SQL Server Analysis Services on the SCOM reporting server. SCOM still monitors the VMM fabric in this design; Microsoft documents no feature-only mode.",
+      "sources": [
+        { "label": "Integrate VMM with Operations Manager", "url": "https://learn.microsoft.com/system-center/vmm/monitors-ops-manager?view=sc-vmm-2025" },
+        { "label": "VMM reports", "url": "https://learn.microsoft.com/system-center/vmm/monitor?view=sc-vmm-2025" }
+      ]
+    },
+    {
       "id": "monitoring",
       "question": "Should this solution include SCOM 2025 as its centralized monitoring platform?",
       "ifYes": "Include SCOM 2025 and size its management servers, operational database, data warehouse, reporting dependencies, agents, and HA design in the deployment section.",

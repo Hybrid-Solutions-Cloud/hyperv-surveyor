@@ -4,7 +4,7 @@ import { MANAGEMENT_WORKBOOK } from '../managementWorkbook.generated'
 
 describe('management workbook coverage', () => {
   it('retains every qualifying question and capability row', () => {
-    expect(DECISION_QUESTIONS).toHaveLength(18)
+    expect(DECISION_QUESTIONS).toHaveLength(19)
     expect(CAPABILITIES).toHaveLength(85)
     expect(new Set(CAPABILITIES.map((row) => row.category)).size).toBe(10)
   })

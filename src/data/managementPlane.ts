@@ -82,7 +82,7 @@ export interface AdvisorRecommendation {
     reason: string
   }>
   unansweredDecisionIds: string[]
-  monitoring: 'none' | 'scom'
+  monitoring: 'none' | 'scom-features' | 'scom'
   highAvailability: boolean
   /** Azure Arc-enabled servers are an add-on to the stack, not a management plane. */
   arcServers: boolean
@@ -92,7 +92,7 @@ export interface AdvisorRecommendation {
 
 export function recommendManagementPlane(answers: AdvisorAnswers): AdvisorRecommendation {
   const answered = Object.values(answers).filter((answer) => answer !== undefined).length
-  const hardScvmmDrivers = ['bareMetal', 'tenantSelfService', 'pureIntegration', 'drs'] as const
+  const hardScvmmDrivers = ['bareMetal', 'tenantSelfService', 'pureIntegration', 'drs', 'scomFeatures'] as const
   const wacModeGates = ['gaRequired', 'managementHa', 'wacSoftwareDefinedFabric'] as const
   const hasHardScvmmDriver = hardScvmmDrivers.some((id) => answers[id] === true)
   const arcRequested = answers.azureServices === true
@@ -166,7 +166,7 @@ export function recommendManagementPlane(answers: AdvisorAnswers): AdvisorRecomm
   const stack: PlaneId[] = []
   if (foundation) stack.push(foundation)
   if (wacPlane) stack.push(wacPlane)
-  const monitoring = answers.monitoring === true ? 'scom' : 'none'
+  const monitoring = answers.monitoring === true ? 'scom' : answers.scomFeatures === true ? 'scom-features' : 'none'
   const highAvailability = answers.managementHa !== false
 
   const rationale: string[] = []
@@ -183,6 +183,8 @@ export function recommendManagementPlane(answers: AdvisorAnswers): AdvisorRecomm
   if (arcRequested && !arcBlocked) rationale.push('Add Azure Arc-enabled servers to connect the guest operating systems to the requested Azure management services. This does not change the management stack.')
   if (answers.azureReady && !arcRequested) rationale.push('Azure Arc-enabled servers are technically eligible, but no Azure management-service requirement has been selected.')
   if (monitoring === 'scom') rationale.push('Add SCOM 2025 as the centralized monitoring solution and include its components in deployment sizing.')
+  if (answers.scomFeatures) rationale.push('SCVMM capacity reporting, forecasting, and PRO require SCVMM integrated with SCOM 2025.')
+  if (monitoring === 'scom-features') rationale.push('Use SCOM 2025 for those features only, with agents on the hosts and VMM servers. Monitoring stays with your existing platform.')
   if (answers.automation) rationale.push('Validate every required automation workflow against the selected PowerShell, REST, and ARM surfaces.')
   if (answers.managementHa) rationale.push('Size and design the management services and their databases for the stated availability objective.')
   if (rationale.length === 0) rationale.push('The current answers narrow the candidates but have not established a component requirement yet.')
@@ -198,7 +200,7 @@ export function recommendManagementPlane(answers: AdvisorAnswers): AdvisorRecomm
   if (answers.pureIntegration) cautions.push('Validate the exact Pure Storage, provider, SCVMM, and WAC compatibility matrix before committing the design.')
   if (answers.migration && answers.migrationConstraints) cautions.push('SCVMM V2V alone does not meet the selected migration constraints; pilot a compatible third-party method.')
   if (answers.automation && stack.some((id) => id === 'wac-admin' || id === 'wac-virtual')) cautions.push('Do not assume WAC exposes a supported general-purpose automation API; map each workflow to PowerShell or another documented interface.')
-  if (answers.operationsOwnership === false && (requiresScvmm || monitoring === 'scom')) cautions.push('The selected stack adds lifecycle responsibilities the current operations team cannot own; assign them to a managed service or simplify the design.')
+  if (answers.operationsOwnership === false && (requiresScvmm || monitoring !== 'none')) cautions.push('The selected stack adds lifecycle responsibilities the current operations team cannot own; assign them to a managed service or simplify the design.')
   if (answers.smallEdge && requiresScvmm) cautions.push('The footprint is small, but one or more required capabilities still justify SCVMM; price the overhead explicitly.')
 
   const headline = answered === 0

@@ -13,6 +13,7 @@ export interface ManagementCostInputs {
   termYears: number
   sqlCores: number
   /** SCOM independently requires System Center licensing even when SCVMM is not selected. */
+  /** SCOM needs System Center licensing whether it is used for monitoring or for features only. */
   includeScom?: boolean
   /** Azure Arc-enabled servers are an add-on to any plane. Their Azure services bill only when true. */
   includeArcServers?: boolean
