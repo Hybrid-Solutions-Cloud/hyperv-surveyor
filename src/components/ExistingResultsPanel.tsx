@@ -17,6 +17,13 @@ interface Props {
   managementImpact: string
 }
 
+/** The "More VMs" card's subtext. Zero with no limiting resource means today's workload does not fit. */
+export function profileLimitText(profile: Pick<ExistingAssessment['profile'], 'count' | 'limitedBy'>): string {
+  if (profile.limitedBy === 'host-size') return 'the profile is larger than a host'
+  if (profile.limitedBy) return `limited by ${RESOURCE_LABELS[profile.limitedBy]}`
+  return profile.count === 0 ? 'no room until today\'s workload fits' : 'not limited'
+}
+
 const amount = (value: number, unit: string) => `${Number.isFinite(value) ? value.toLocaleString('en-US', { maximumFractionDigits: 1 }) : '—'} ${unit}`
 
 export function ExistingResultsPanel({ assessment, hardware, tiers, fitPath, setProfile, setAddSpec, managementImpact }: Props) {
@@ -55,7 +62,7 @@ export function ExistingResultsPanel({ assessment, hardware, tiers, fitPath, set
         <div className="grid cards">
           <Card k="Your hosts" v={assessment.totalHosts.toLocaleString()} s={`${assessment.workloadHosts.toLocaleString()} carry workload${multi ? `, ${assessment.clusters.length} clusters` : ''}`} />
           <Card k="First to run out" v={assessment.firstToRunOut ? assessment.firstToRunOut.label : 'Nothing yet'} s={assessment.firstToRunOut ? `${usedShareText(assessment.firstToRunOut.worstPct)} used${assessment.firstToRunOut.worstCluster ? ` on ${assessment.firstToRunOut.worstCluster}` : ''}` : 'no workloads included'} />
-          <Card k={`More VMs: ${assessment.profile.label}`} v={fmt0(assessment.profile.count)} s={assessment.profile.limitedBy === 'host-size' ? 'the profile is larger than a host' : assessment.profile.limitedBy ? `limited by ${RESOURCE_LABELS[assessment.profile.limitedBy]}` : 'not limited'} />
+          <Card k={`More VMs: ${assessment.profile.label}`} v={fmt0(assessment.profile.count)} s={profileLimitText(assessment.profile)} />
           <Card k="Workloads tested" v={assessment.includedVms.toLocaleString()} s={assessment.managementVms > 0 ? `plus ${assessment.managementVms} management VMs (${managementImpact.toLowerCase()})` : 'management VMs not counted on this hardware'} />
         </div>
         <p className="small muted">{assessment.spareRule} {assessment.placement.rule}</p>
