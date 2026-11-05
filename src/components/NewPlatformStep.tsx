@@ -3,7 +3,20 @@ import { PageHeader } from './Shared'
 import { JourneyBar } from './JourneyBar'
 import { WorkflowNav } from './WorkflowNav'
 import { useSurveyorStore } from '../state/store'
-import { ENGAGEMENT_LABELS, newPlatformStep, type NewPlatformRoute } from '../state/journey'
+import { ENGAGEMENT_LABELS, newPlatformStep, type EngagementMode, type NewPlatformRoute } from '../state/journey'
+
+/**
+ * What a new-platform page means on another path. On Management solution only, the server and host
+ * reserves (Refine assumptions) and the spare nodes (Goals) still size a dedicated management cluster.
+ */
+export function offPathNotice(mode: EngagementMode, route: NewPlatformRoute): string {
+  const current = `Your current path is ${ENGAGEMENT_LABELS[mode]}.`
+  if (mode === 'management-only' && (route === '/configuration' || route === '/goals')) {
+    const used = route === '/goals' ? 'the spare nodes' : 'the server and host reserves'
+    return `${current} One thing here still applies to it: ${used} size a dedicated management cluster, when you place the management VMs on one. Nothing else on this page changes your results.`
+  }
+  return `${current} The report, Implementation plan and Management page use that path, not this page.`
+}
 
 /** Header for a new-platform walkthrough page: step eyebrow, and a notice when opened from another path. */
 export function NewPlatformHeader({ route, title, description, actions }: { route: NewPlatformRoute; title?: string; description: string; actions?: React.ReactNode }) {
@@ -22,7 +35,7 @@ export function NewPlatformHeader({ route, title, description, actions }: { rout
       {offPath && (
         <div className="note warn" style={{ marginBottom: 16 }}>
           <strong>This page is for the new-platform path</strong>
-          Your current path is {ENGAGEMENT_LABELS[engagementMode!]}. The report, Implementation plan and Management page use that path, not this page.
+          {offPathNotice(engagementMode!, route)}
         </div>
       )}
     </>
