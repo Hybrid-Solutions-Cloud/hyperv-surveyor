@@ -8,12 +8,14 @@ import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMo
 import type { StorageDecisionAnswers } from '../engine/storageDecision'
 import { normalizeAdvisorAnswers, type AdvisorAnswers } from '../data/managementPlane'
 import { normalizeExistingHardware, type ExistingHardware } from '../engine/existingHardware'
+import { normalizeCostModelInputs, type CostModelInputs } from '../engine/licensing'
 
 /**
  * 5 added savedScenarios to the project file. 6 added the Management Plane Advisor answers. 7 added
- * existing hardware as clusters of host groups; older files migrate from the single-spec fields.
+ * existing hardware as clusters of host groups; older files migrate from the single-spec fields. 8 added
+ * the Cost Model inputs; older files open with the defaults.
  */
-export const PROJECT_SCHEMA_VERSION = 7 as const
+export const PROJECT_SCHEMA_VERSION = 8 as const
 export const ENGINE_VERSION = '1.2.0'
 
 export interface ReportMetadata {
@@ -66,6 +68,8 @@ export interface ProjectPayload {
   storageDecisionAnswers: StorageDecisionAnswers
   /** Management Plane Advisor answers. Absent in files written before schema 6. */
   managementAdvisorAnswers?: AdvisorAnswers
+  /** Cost Model inputs. Absent in files written before schema 8. */
+  costModel?: CostModelInputs
 }
 
 export interface SurveyorProject {
@@ -211,6 +215,7 @@ export function normalizeProjectPayload(value: unknown): ProjectPayload {
     drDesignInputs: { ...DEFAULT_DR_INPUTS, ...(record(value.drDesignInputs) ? value.drDesignInputs : {}) },
     reportMetadata: { ...DEFAULT_REPORT_METADATA, ...(record(value.reportMetadata) ? value.reportMetadata : {}) },
     storageDecisionAnswers: normalizeStorageDecisionAnswers(value.storageDecisionAnswers),
+    costModel: normalizeCostModelInputs(value.costModel),
     dataSources: Array.isArray(value.dataSources) ? value.dataSources.filter(record).map((source, index) => ({
       id: typeof source.id === 'string' ? source.id : `source-${index + 1}`,
       kind: source.kind === 'performance' || source.kind === 'inventory' ? source.kind : 'rvtools',

@@ -45,8 +45,13 @@ export default function ReportPage() {
     existingCapacityNodes,
     existingHardware,
     lastImport,
+    costModel,
+    setCostModel,
   } = useSurveyorStore()
-  const [selection, setSelection] = useState(() => defaultReportSelection(engagementMode))
+  const [baseSelection, setSelection] = useState(() => defaultReportSelection(engagementMode))
+  // The licensing estimate is one saved choice, so the workbook export follows the same checkbox.
+  const selection = { ...baseSelection, licensing: costModel.includeInReport }
+  const setIncludeLicensing = (includeInReport: boolean) => setCostModel({ ...costModel, includeInReport })
   const [generatedAt] = useState(() => new Date().toISOString())
   const [exporting, setExporting] = useState<'word' | null>(null)
   const [exportError, setExportError] = useState('')
@@ -75,7 +80,8 @@ export default function ReportPage() {
     existingHardware,
     lastImport,
     generatedAt,
-  }), [lastImport, engagementMode, managementDecision, cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, managementAdvisorAnswers, placementInputs, storageDecisionAnswers, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, existingHardware, tiers, vms])
+    costModel,
+  }), [costModel, lastImport, engagementMode, managementDecision, cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, managementAdvisorAnswers, placementInputs, storageDecisionAnswers, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, existingHardware, tiers, vms])
   const visibleSections = selectedReportSections(report, selection, outputOptions)
   const selectedCount = Object.values(selection).filter(Boolean).length
 
@@ -85,6 +91,7 @@ export default function ReportPage() {
   const toggleArchitecture = (key: string) => setShownKeys(shownKeys.includes(key) ? shownKeys.filter((item) => item !== key) : [...shownKeys, key])
 
   const toggleSection = (id: ReportSectionId) => setSelection((current) => ({ ...current, [id]: !current[id] }))
+  const listedSections = REPORT_SECTION_DEFINITIONS.filter(({ id }) => id !== 'licensing')
   const exportWord = async () => {
     setExportError('')
     setExporting('word')
@@ -116,12 +123,12 @@ export default function ReportPage() {
           </div>
 
           <div className="report-selection-actions">
-            <button type="button" onClick={() => setSelection(defaultReportSelection())}><CheckSquare size={14} /> Include all</button>
+            <button type="button" onClick={() => setSelection(Object.fromEntries(REPORT_SECTION_DEFINITIONS.map(({ id }) => [id, true])) as typeof selection)}><CheckSquare size={14} /> Include all</button>
             <button type="button" onClick={() => setSelection(Object.fromEntries(REPORT_SECTION_DEFINITIONS.map(({ id }) => [id, false])) as typeof selection)}><Square size={14} /> Clear all</button>
           </div>
 
           <div className="report-section-options">
-            {REPORT_SECTION_DEFINITIONS.map(({ id, label }) => (
+            {listedSections.map(({ id, label }) => (
               <label key={id}>
                 <input type="checkbox" checked={selection[id]} onChange={() => toggleSection(id)} />
                 <span>{label}</span>
@@ -156,6 +163,17 @@ export default function ReportPage() {
               <span>
                 <b><Lightbulb size={14} /> Decision reasoning and explanations</b>
                 <small>Add why a result follows from the inputs, whether it was selected or calculated, and the main tradeoff or validation item.</small>
+              </span>
+            </label>
+          </div>
+
+          <div className="report-detail-options">
+            <strong>Optional</strong>
+            <label>
+              <input type="checkbox" checked={costModel.includeInReport} onChange={(event) => setIncludeLicensing(event.target.checked)} />
+              <span>
+                <b>Licensing (estimate, not a quote)</b>
+                <small>Adds hosts, cores, editions, products and totals from the Cost Model, with what needs a quote. Also adds a Licensing sheet to the Excel workbook. Sell prices and margins are never included.</small>
               </span>
             </label>
           </div>

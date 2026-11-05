@@ -23,6 +23,8 @@ import {
 } from '../engine/existingHardware'
 import { DEFAULT_CONFIG, defaultTiers } from '../state/defaults'
 import { ENGAGEMENT_LABELS, type EngagementMode, type ManagementDecision } from '../state/journey'
+import { DEFAULT_COST_MODEL_INPUTS, type CostModelInputs } from '../engine/licensing'
+import { buildLicensingContent, LICENSING_SECTION_TITLE } from './licensingReport'
 
 export const REPORT_SECTION_DEFINITIONS = [
   { id: 'executive', label: 'Executive summary' },
@@ -38,6 +40,7 @@ export const REPORT_SECTION_DEFINITIONS = [
   { id: 'network', label: 'Network design' },
   { id: 'recovery', label: 'Backup and disaster recovery' },
   { id: 'management', label: 'Management plane' },
+  { id: 'licensing', label: LICENSING_SECTION_TITLE },
   { id: 'assumptions', label: 'Assumptions and policies' },
   { id: 'findings', label: 'Findings and cautions' },
   { id: 'inventory', label: 'VM inventory' },
@@ -120,6 +123,8 @@ export interface SolutionReportInputs {
   existingHardware?: ExistingHardware
   /** The last inventory import, for excluded-record counts and import warnings. */
   lastImport?: ImportSummary | null
+  /** Cost Model inputs for the optional licensing section. */
+  costModel?: CostModelInputs
 }
 
 export function defaultReportSelection(engagementMode?: EngagementMode | null): ReportSelection {
@@ -129,6 +134,8 @@ export function defaultReportSelection(engagementMode?: EngagementMode | null): 
   if (engagementMode === 'management-only') {
     REPORT_SECTION_DEFINITIONS.forEach(({ id }) => { selection[id] = id === 'executive' || id === 'management' || id === 'sources' })
   }
+  // The licensing estimate is optional and off until you turn it on.
+  selection.licensing = false
   return selection
 }
 
@@ -389,6 +396,8 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'SAN effective capacity', value: tib(storage.sanEffectiveTiB), detail: `Usable × ${storage.sanDrr}:1 data reduction.` },
       ]
   const growthHasSan = !!growth?.points.some((point) => point.sanToBuyUsableTiB !== null)
+  // Optional licensing estimate: the same quantities and prices as the Cost Model tab.
+  const licensing = buildLicensingContent(design, input.vms, input.costModel ?? DEFAULT_COST_MODEL_INPUTS, reportedOptions)
 
   const sections: ReportSection[] = [
     {
@@ -1166,6 +1175,15 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         }] : []),
         ] : []),
       ],
+    },
+    {
+      id: 'licensing',
+      title: licensing.title,
+      paragraphs: licensing.paragraphs,
+      metrics: licensing.metrics,
+      reasoning: [],
+      bullets: [],
+      tables: licensing.tables,
     },
     {
       id: 'assumptions',

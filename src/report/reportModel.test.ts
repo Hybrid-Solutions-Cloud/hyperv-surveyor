@@ -50,7 +50,7 @@ describe('solution report', () => {
 
     expect(report.customerName).toBe('Contoso')
     // 17: the What to buy section was added in phase 5 (C1).
-    expect(report.sections).toHaveLength(17)
+    expect(report.sections).toHaveLength(18)
     expect(componentRows.some((row) => row[0] === 'SCOM management server')).toBe(true)
     expect(componentRows.some((row) => row[0] === 'Azure Arc resource bridge appliance')).toBe(false)
     expect(componentRows.some((row) => row[0] === 'Shared SQL Server for VMM and SCOM databases')).toBe(true)

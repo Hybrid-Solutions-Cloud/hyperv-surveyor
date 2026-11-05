@@ -33,7 +33,7 @@ export default function CapacityPage() {
           ? 'Test your workloads on your hosts. You get a verdict that reflects placement on real hosts, every limit and storage performance, and separate fixes for compute, storage and performance.'
           : 'Enter the hardware you already own to see its capacity, headroom by resource, what runs out first, how many more VMs of a profile you choose fit, and when growth uses it up.'}
         actions={<div className="row page-action-row">
-          <button className="btn ghost" type="button" onClick={() => exportExistingCapacity(design, vms)}><Download size={15} /> Download workbook</button>
+          <button className="btn ghost" type="button" onClick={() => exportExistingCapacity(design, vms, useSurveyorStore.getState().costModel)}><Download size={15} /> Download workbook</button>
           {included === 0
             ? <Link className="btn link-btn" to="/workloads">Add workload evidence <ArrowRight size={15} /></Link>
             : <Link className="btn link-btn" to="/management-plane">Continue to management <ArrowRight size={15} /></Link>}

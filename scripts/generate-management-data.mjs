@@ -113,6 +113,13 @@ const publicCopyReplacements = [
   // excludes vMode when Pure integration is required. The workbook says the same.
   ['Pure integrates via SCVMM SMI-S OR the WAC aMode extension. Neither works in vMode preview yet.', 'Pure integrates via SCVMM SMI-S OR the WAC aMode extension. Neither is documented for vMode Preview, so the advisor does not select vMode when Pure integration is required.'],
   ['and no vMode support yet.', 'and no vMode support is documented.'],
+  // Licensing references rechecked 2026-11-05 (audit E11, E12).
+  ['First 5 GB/day free per workspace.', 'The first 5 GB per billing account per month is free in the Analytics Logs pay-as-you-go tier (azure.microsoft.com/pricing/details/monitor).'],
+  ['FREE if the machine has active WS Software Assurance, WS pay-as-you-go, or Defender for Servers P2.', 'No charge when the Windows server is attested with active Software Assurance or a Windows Server subscription, is enrolled in Windows Server pay-as-you-go or ESU enabled by Azure Arc, or when Defender for Servers Plan 2 is enabled for its subscription. SPLA is not listed as eligible.'],
+  ['https://www.microsoft.com/content/dam/microsoft/final/en-us/microsoft-brand/documents/System-Center-2025-Pricing-Datasheet.pdf', 'https://www.microsoft.com/en-us/system-center/pricing'],
+  ['HIGH - Microsoft pricing datasheet', 'HIGH - Microsoft pricing page'],
+  ['MED - Microsoft Q&A, pricing page not scrapable', 'HIGH - Azure Retail Prices API ($0.33 per core per day)'],
+  ['https://learn.microsoft.com/answers/a/1910705', 'https://azure.microsoft.com/pricing/details/azure-local/'],
 ]
 
 /** Values replaced only in one field, where a general text replacement would be too broad. */

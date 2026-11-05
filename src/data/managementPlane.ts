@@ -294,21 +294,6 @@ export const CAPABILITIES: CapabilityRow[] = MANAGEMENT_WORKBOOK.featureMatrix.m
   values: { ...row.values },
 }))
 
-export const PRICE_BOOK = {
-  windowsPerTwoCorePack: 846.38,
-  windowsSplaPerTwoCorePackMonth: 25,
-  systemCenterPerTwoCorePack: 496,
-  systemCenterSplaPerTwoCorePackMonth: 21,
-  systemCenterStandardCspOneYearPerTwoCorePack: 57,
-  systemCenterStandardCspThreeYearPerTwoCorePack: 143,
-  sqlStandardPerCore: 1_859,
-  rdsSalPerUserMonth: 6.5,
-  rdsCalPerUser: 129.99,
-  softwareAssuranceAnnualRate: 0.25,
-  windowsPaygPerCoreMonth: 33.58,
-  azureLocalPerCoreMonth: 10,
-  updateManagerPerVmMonth: 5,
-  defenderP2PerVmMonth: 14.6,
-  guestConfigPerVmMonth: 6,
-  logAnalyticsPerGb: 2.3,
-}
+
+
+export { PRICE_BOOK, PRICE_ENTRIES, PRICES_CHECKED, LOG_ANALYTICS_FREE_GB_PER_MONTH, type PriceEntry, type PriceKey, type PriceConfidence } from './priceBook'

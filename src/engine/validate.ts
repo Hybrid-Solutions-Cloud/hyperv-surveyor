@@ -263,12 +263,12 @@ export function validateDesign(
   const licensable = licensableCores(node)
   if (cores < licensable) {
     f.push(warn('LICENSE_FLOOR',
-      `Hosts have ${cores} physical cores, but Windows Server Datacenter bills at least ${LIMITS.LICENSE_MIN_CORES_PER_SOCKET} cores per socket and ${LIMITS.LICENSE_MIN_CORES_PER_SERVER} per server, so each host is licensed for ${licensable}. You pay for ${licensable - cores} unused cores per node.`,
+      `Each host has ${node.sockets} × ${node.coresPerSocket} = ${cores} physical cores, but Windows Server (Standard and Datacenter) and System Center license at least ${LIMITS.LICENSE_MIN_CORES_PER_SOCKET} cores per processor and ${LIMITS.LICENSE_MIN_CORES_PER_SERVER} per server, so each host is licensed for ${licensable} cores. You pay for ${licensable - cores} unused cores per host.`,
       'MS'))
   }
   if (node.coresPerSocket < LIMITS.LICENSE_MIN_CORES_PER_SOCKET) {
     f.push(warn('LICENSE_SOCKET_FLOOR',
-      `${node.coresPerSocket} cores per socket is below the 8-core-per-socket licensing minimum.`, 'MS'))
+      `${node.coresPerSocket} cores per processor is below the ${LIMITS.LICENSE_MIN_CORES_PER_SOCKET}-core licensing minimum, so each processor is licensed for ${LIMITS.LICENSE_MIN_CORES_PER_SOCKET} cores.`, 'MS'))
   }
 
   // ---- Host limit ----------------------------------------------------------

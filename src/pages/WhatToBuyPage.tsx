@@ -54,7 +54,7 @@ export default function WhatToBuyPage() {
               </>
             )}
           </div>
-          <ResultsPanel design={design} tiers={tiers} onExport={() => exportDesign(design, vms)} />
+          <ResultsPanel design={design} tiers={tiers} onExport={() => exportDesign(design, vms, useSurveyorStore.getState().costModel)} />
           <ManagementCheckpoint context="new-platform" />
         </div>
       )}

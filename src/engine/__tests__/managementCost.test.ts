@@ -1,126 +1,64 @@
+/**
+ * Provider economics on top of the licensing estimate. The old calculatePlaneCost scenarios were
+ * replaced in Phase 7: they priced SQL inside System Center rights, SA from year 2, and Datacenter
+ * on every design (audit E1, E4, E6). The licensing rules are tested in licensing.test.ts.
+ */
 import { describe, expect, it } from 'vitest'
-import {
-  calculatePlaneCost,
-  calculateProviderEconomics,
-  DEFAULT_MANAGEMENT_RATE_CARD,
-  type CommercialInputs,
-  type ManagementCostInputs,
-} from '../managementCost'
+import { calculateProviderEconomics } from '../managementCost'
+import { countVms, DEFAULT_COST_MODEL_INPUTS, estimateLicensing, type CostModelInputs, type LicensingQuantities } from '../licensing'
+import { newVm } from '../../state/defaults'
 
-const base: ManagementCostInputs = {
-  hosts: 8,
-  sockets: 2,
-  coresPerSocket: 32,
-  vms: 320,
-  spareHosts: 1,
-  termYears: 3,
-  sqlCores: 4,
-  waiveUpdateAndGuest: true,
-  includeUpdateManager: true,
-  includeDefenderP2: true,
-  includeGuestConfig: true,
-  includeLogAnalytics: true,
-  logAnalyticsGbPerVm: 2,
-  model: 'perpetual',
+const vms = Array.from({ length: 320 }, (_, i) => newVm({ name: `SYN${i}`, vCpu: 4, ramGiB: 16, storageGiB: 100, guestOs: 'Windows Server 2022' }))
+const quantities: LicensingQuantities = {
+  path: 'new-platform', engagementMode: 'new-platform', status: 'ready', reason: null, label: 'Test', realVms: 320, windowsClaim: true, validationNote: null,
+  design: { plane: 'scvmm', systemCenter: true, scom: false, arc: false, arcMeters: { updateManager: false, defenderP2: false, machineConfig: false, changeTracking: false, logAnalytics: false }, arcGuestScopePct: 100, sqlCores: 8 },
+  scopes: [{
+    id: 'w', label: 'Workload cluster', role: 'workload', priced: true, architecture: 'san',
+    hostLines: [{ label: '2 × 32 cores', hosts: 9, sockets: 2, coresPerSocket: 32, physicalCoresPerHost: 64, licensableCoresPerHost: 64 }],
+    hosts: 9, spareHosts: 1, workloadHosts: 8, physicalCores: 576, licensableCores: 576, vms: countVms(vms), windowsVmsPerHost: 40, managedOsesPerHost: 40, note: null,
+  }],
 }
-
-describe('management-plane cost parity', () => {
-  it('includes System Center and SQL when SCOM is selected without SCVMM', () => {
-    const classic = calculatePlaneCost('classic', { ...base, includeScom: true })
-    expect(classic.systemCenter).toBeGreaterThan(0)
-    expect(classic.sql).toBeGreaterThan(0)
-  })
-
-  it('matches the reference perpetual scenario', () => {
-    expect(calculatePlaneCost('classic', base).total).toBeCloseTo(325_009.92, 2)
-    expect(calculatePlaneCost('scvmm', base).total).toBeCloseTo(526_627.92, 2)
-    expect(calculatePlaneCost('scvmm', { ...base, includeArcServers: true }).total).toBeCloseTo(747_811.92, 2)
-    expect(calculatePlaneCost('classic', base).perVmMonth).toBeCloseTo(32.24, 2)
-    expect(calculatePlaneCost('scvmm', { ...base, includeArcServers: true }).azurePerVmMonth).toBeCloseTo(19.2, 2)
-  })
-
-  it('matches the reference SPLA scenario', () => {
-    const spla = { ...base, model: 'spla' as const }
-    expect(calculatePlaneCost('classic', spla).total).toBeCloseTo(230_400, 2)
-    expect(calculatePlaneCost('scvmm', spla).total).toBeCloseTo(431_372, 2)
-    expect(calculatePlaneCost('scvmm', { ...spla, includeArcServers: true }).total).toBeCloseTo(652_556, 2)
-  })
-
-  it('prices Azure Arc-enabled servers on any plane, and only when selected', () => {
-    expect(calculatePlaneCost('classic', base).azure).toBe(0)
-    expect(calculatePlaneCost('classic', { ...base, includeArcServers: true }).azure).toBeGreaterThan(0)
-    expect(calculatePlaneCost('classic', { ...base, includeArcServers: true }).systemCenter).toBe(calculatePlaneCost('classic', base).systemCenter)
-  })
-
-  it('applies Microsoft core licensing floors', () => {
-    const smallHost = { ...base, sockets: 1, coresPerSocket: 4, hosts: 1, vms: 10, termYears: 1 }
-    expect(calculatePlaneCost('classic', smallHost).total).toBeCloseTo(8 * 846.38, 2)
-  })
-
-  it('accepts an editable rate card without changing the default workbook result', () => {
-    const custom = { ...DEFAULT_MANAGEMENT_RATE_CARD, windowsPerTwoCorePack: 1_000 }
-    expect(calculatePlaneCost('classic', base).total).toBeCloseTo(325_009.92, 2)
-    expect(calculatePlaneCost('classic', base, custom).total).toBeCloseTo(384_000, 2)
-  })
+const inputs = (commercial: Partial<CostModelInputs['commercial']> = {}, patch: Partial<CostModelInputs> = {}): CostModelInputs => ({
+  ...structuredClone(DEFAULT_COST_MODEL_INPUTS),
+  ...patch,
+  commercial: { ...DEFAULT_COST_MODEL_INPUTS.commercial, ...commercial },
 })
 
-const commercial: CommercialInputs = {
-  motion: 'csp',
-  tenantCount: 2,
-  rdsUsers: 10,
-  microsoftDiscountPct: 10,
-  licenseMarkupPct: 10,
-  azureMarkupPct: 8,
-  onboardingDeliveryCostPerTenant: 1_000,
-  onboardingFeePerTenant: 5_000,
-  monthlyPlatformFeePerTenant: 1_000,
-  monthlyManagedFeePerVm: 20,
-  monthlyOpsCostPerVm: 5,
-  monthlySharedOpsCost: 500,
-  targetGrossMarginPct: 30,
-  useLighthouse: true,
-}
-
-describe('CSP and MSP provider economics', () => {
-  it('models CSP discounts, resale markups, service revenue, and Lighthouse guidance', () => {
-    const spla = { ...base, model: 'spla' as const }
-    const plane = calculatePlaneCost('classic', spla)
-    const result = calculateProviderEconomics('classic', plane, spla, commercial)
-
-    expect(result.softwareCost).toBeCloseTo(207_360, 2)
-    expect(result.accessLicensingCost).toBeCloseTo(2_106, 2)
-    expect(result.licenseRevenue).toBeCloseTo(230_412.6, 2)
-    expect(result.serviceRevenue).toBeCloseTo(312_400, 2)
-    expect(result.recommendations.some((item) => item.title.includes('Lighthouse'))).toBe(true)
-    expect(result.recommendations.some((item) => item.title.includes('channel and licensing'))).toBe(true)
+describe('provider economics', () => {
+  it('Internal TCO has no revenue and costs the licensing estimate plus delivery', () => {
+    const model = inputs()
+    const estimate = estimateLicensing(quantities, model)
+    const result = calculateProviderEconomics('scvmm', estimate, model)
+    expect(result.totalRevenue).toBe(0)
+    expect(result.softwareCost).toBeCloseTo(estimate.total, 2)
   })
 
-  it('shows when MSP service pricing does not recover provider COGS at target margin', () => {
-    const spla = { ...base, model: 'spla' as const }
-    const plane = calculatePlaneCost('scvmm', spla)
-    const result = calculateProviderEconomics('scvmm', plane, spla, { ...commercial, motion: 'msp' })
+  it('models CSP discount, resale markup and Lighthouse guidance', () => {
+    const model = inputs({ motion: 'csp', microsoftDiscountPct: 10, licenseMarkupPct: 10, tenantCount: 2 })
+    const estimate = estimateLicensing(quantities, model)
+    const result = calculateProviderEconomics('scvmm', estimate, model)
+    expect(result.softwareCost).toBeCloseTo(estimate.total * 0.9, 2)
+    expect(result.licenseRevenue).toBeCloseTo(result.softwareCost * 1.1, 2)
+    expect(result.recommendations.some((item) => item.title.includes('Lighthouse'))).toBe(true)
+  })
 
-    expect(result.licenseRevenue).toBe(0)
-    expect(result.totalProviderCost).toBeGreaterThan(result.totalRevenue)
+  it('shows when MSP fees do not recover cost at the target margin', () => {
+    const model = inputs({ motion: 'msp', monthlyManagedFeePerVm: 1, monthlyPlatformFeePerTenant: 0 }, { basis: 'spla' })
+    const result = calculateProviderEconomics('scvmm', estimateLicensing(quantities, model), model)
     expect(result.revenueGap).toBeGreaterThan(0)
-    expect(result.requiredMonthlyPerVmIncrease).toBeGreaterThan(0)
     expect(result.recommendations.some((item) => item.title.includes('below the target'))).toBe(true)
   })
 
-  it('switches RDS access from one-time CALs to monthly SPLA SALs', () => {
-    const perpetualPlane = calculatePlaneCost('classic', base)
-    const perpetual = calculateProviderEconomics('classic', perpetualPlane, base, { ...commercial, microsoftDiscountPct: 0 })
-    const splaInputs = { ...base, model: 'spla' as const }
-    const splaPlane = calculatePlaneCost('classic', splaInputs)
-    const spla = calculateProviderEconomics('classic', splaPlane, splaInputs, { ...commercial, microsoftDiscountPct: 0 })
-
-    expect(perpetual.accessLicensingCost).toBeCloseTo(10 * 129.99, 2)
-    expect(spla.accessLicensingCost).toBeCloseTo(10 * 6.5 * 36, 2)
+  it('flags perpetual licensing for a provider-hosted MSP service', () => {
+    const model = inputs({ motion: 'msp' })
+    const result = calculateProviderEconomics('scvmm', estimateLicensing(quantities, model), model)
+    expect(result.recommendations.some((item) => item.detail.includes('provider-hosted service normally needs SPLA'))).toBe(true)
   })
 
-  it('flags perpetual licensing for a provider-hosted MSP service', () => {
-    const plane = calculatePlaneCost('scvmm', base)
-    const result = calculateProviderEconomics('scvmm', plane, base, { ...commercial, motion: 'msp' })
-    expect(result.recommendations.some((item) => item.title.includes('hosted licensing'))).toBe(true)
+  it('counts RDS access as monthly SALs under SPLA and one-time CALs otherwise', () => {
+    const spla = inputs({}, { basis: 'spla', rds: { inScope: true, users: 10 } })
+    const perpetual = inputs({}, { rds: { inScope: true, users: 10 } })
+    expect(calculateProviderEconomics('classic', estimateLicensing(quantities, spla), spla).accessLicensingCost).toBeCloseTo(10 * 6.5 * 36, 2)
+    expect(calculateProviderEconomics('classic', estimateLicensing(quantities, perpetual), perpetual).accessLicensingCost).toBeCloseTo(10 * 129.99, 2)
   })
 })

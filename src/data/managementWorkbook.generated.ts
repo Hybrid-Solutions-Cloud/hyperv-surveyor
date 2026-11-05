@@ -1647,9 +1647,9 @@ export const MANAGEMENT_WORKBOOK = {
       "channel": "Perpetual + SA / Open",
       "unit": "per 16-core server license",
       "price": "$3,968.00",
-      "confidence": "HIGH - Microsoft pricing datasheet",
+      "confidence": "HIGH - Microsoft pricing page",
       "priceDate": "Nov 2024 datasheet",
-      "source": "https://www.microsoft.com/content/dam/microsoft/final/en-us/microsoft-brand/documents/System-Center-2025-Pricing-Datasheet.pdf",
+      "source": "https://www.microsoft.com/en-us/system-center/pricing",
       "note": "+10% vs System Center 2022. ALL physical cores of every managed host must be licensed."
     },
     {
@@ -1661,7 +1661,7 @@ export const MANAGEMENT_WORKBOOK = {
       "price": "$496.00",
       "confidence": "MED - derived (3968/8)",
       "priceDate": "Nov 2024",
-      "source": "https://www.microsoft.com/content/dam/microsoft/final/en-us/microsoft-brand/documents/System-Center-2025-Pricing-Datasheet.pdf",
+      "source": "https://www.microsoft.com/en-us/system-center/pricing",
       "note": "Derived."
     },
     {
@@ -1671,9 +1671,9 @@ export const MANAGEMENT_WORKBOOK = {
       "channel": "Perpetual + SA / Open",
       "unit": "per 16-core server license",
       "price": "$1,455.00",
-      "confidence": "HIGH - Microsoft pricing datasheet",
+      "confidence": "HIGH - Microsoft pricing page",
       "priceDate": "Nov 2024",
-      "source": "https://www.microsoft.com/content/dam/microsoft/final/en-us/microsoft-brand/documents/System-Center-2025-Pricing-Datasheet.pdf",
+      "source": "https://www.microsoft.com/en-us/system-center/pricing",
       "note": "Only 2 managed OSEs. Uneconomical for dense hosting - Datacenter is effectively mandatory."
     },
     {
@@ -1685,7 +1685,7 @@ export const MANAGEMENT_WORKBOOK = {
       "price": "$181.88",
       "confidence": "MED - derived (1455/8)",
       "priceDate": "Nov 2024",
-      "source": "https://www.microsoft.com/content/dam/microsoft/final/en-us/microsoft-brand/documents/System-Center-2025-Pricing-Datasheet.pdf",
+      "source": "https://www.microsoft.com/en-us/system-center/pricing",
       "note": "Derived."
     },
     {
@@ -1794,7 +1794,7 @@ export const MANAGEMENT_WORKBOOK = {
       "confidence": "MED - model official, rate from secondary sources",
       "priceDate": "Aug 2026",
       "source": "https://learn.microsoft.com/azure/update-manager/update-manager-faq#pricing",
-      "note": "FREE if the machine has active WS Software Assurance, WS pay-as-you-go, or Defender for Servers P2."
+      "note": "No charge when the Windows server is attested with active Software Assurance or a Windows Server subscription, is enrolled in Windows Server pay-as-you-go or ESU enabled by Azure Arc, or when Defender for Servers Plan 2 is enabled for its subscription. SPLA is not listed as eligible."
     },
     {
       "ref": "DEF-P1",
@@ -1842,7 +1842,7 @@ export const MANAGEMENT_WORKBOOK = {
       "confidence": "HIGH - Azure Retail Prices API",
       "priceDate": "Aug 2026",
       "source": "https://prices.azure.com/api/retail/prices",
-      "note": "First 5 GB/day free per workspace. VM Insights typically 1-3 GB/server/month (PLANNING ESTIMATE, not a Microsoft figure)."
+      "note": "The first 5 GB per billing account per month is free in the Analytics Logs pay-as-you-go tier (azure.microsoft.com/pricing/details/monitor). VM Insights typically 1-3 GB/server/month (PLANNING ESTIMATE, not a Microsoft figure)."
     },
     {
       "ref": "BKP-PI",
@@ -1911,9 +1911,9 @@ export const MANAGEMENT_WORKBOOK = {
       "channel": "Azure",
       "unit": "per physical core / month",
       "price": "$10.00",
-      "confidence": "MED - Microsoft Q&A, pricing page not scrapable",
+      "confidence": "HIGH - Azure Retail Prices API ($0.33 per core per day)",
       "priceDate": "Aug 2026",
-      "source": "https://learn.microsoft.com/answers/a/1910705",
+      "source": "https://azure.microsoft.com/pricing/details/azure-local/",
       "note": "WAIVED entirely with Azure Hybrid Benefit (1 SA-covered WS DC core = 1 Azure Local core)."
     },
     {
@@ -2202,7 +2202,7 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "topic": "System Center pricing",
       "finding": "System Center 2025 Datacenter $3,968 per 16-core server; Standard $1,455. Both up ~10% vs System Center 2022.",
-      "source": "https://www.microsoft.com/content/dam/microsoft/final/en-us/microsoft-brand/documents/System-Center-2025-Pricing-Datasheet.pdf"
+      "source": "https://www.microsoft.com/en-us/system-center/pricing"
     },
     {
       "topic": "System Center core rule",

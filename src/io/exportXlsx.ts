@@ -10,6 +10,8 @@ import { RESILIENCY, TIER_IDS } from '../engine/rules'
 import type { SizingResult, Vm } from '../engine/types'
 import { additionalVmsByTier, computeHostsToAdd, exhaustionText, existingVerdictLabel, hostGroupLabel, RESOURCE_LABELS, usedShareText } from '../engine/existingHardware'
 import { singleClusterNodesLabel, type PlatformDesign } from '../engine/platformDesign'
+import type { CostModelInputs } from '../engine/licensing'
+import { buildLicensingContent, licensingSheetRows } from '../report/licensingReport'
 
 const r1 = (n: number) => Math.round(n * 10) / 10
 const r0 = (n: number) => Math.round(n)
@@ -19,6 +21,12 @@ const finite = (n: number, unit = 'n/a') => Number.isFinite(n) ? n : unit
 export interface WorkbookSheet {
   name: string
   rows: unknown[][]
+}
+
+/** The Licensing sheet, only when the report's licensing option is on. Same content as the report section. */
+export function licensingSheet(design: PlatformDesign, vms: Vm[], costModel: CostModelInputs | null | undefined): WorkbookSheet[] {
+  if (!costModel?.includeInReport) return []
+  return [{ name: 'Licensing', rows: licensingSheetRows(buildLicensingContent(design, vms, costModel, design.options)) }]
 }
 
 /** A design that does not fit reports the node count it needs, never the cluster limit. */
@@ -186,7 +194,7 @@ function storageRows(design: PlatformDesign): unknown[][] {
 }
 
 /** Sheets for the new-platform workbook. */
-export function designWorkbookSheets(design: PlatformDesign, vms: Vm[], generatedAt = new Date().toISOString()): WorkbookSheet[] {
+export function designWorkbookSheets(design: PlatformDesign, vms: Vm[], generatedAt = new Date().toISOString(), costModel?: CostModelInputs | null): WorkbookSheet[] {
   const chosen = design.chosen
   if (!chosen || !design.sizing) return [{ name: 'Summary', rows: [['Hyper-V Surveyor — Sizing Result'], ['No new-platform design to export.']] }]
   const r = design.sizing
@@ -327,11 +335,12 @@ export function designWorkbookSheets(design: PlatformDesign, vms: Vm[], generate
     { name: 'Tier Policy', rows: tierPolicy },
     { name: 'Inventory', rows: inventoryRows(vms) },
     { name: 'Data Quality', rows: dataQuality },
+    ...licensingSheet(design, vms, costModel),
   ]
 }
 
 /** Sheets for the existing-capacity and fit-gap workbook. */
-export function existingWorkbookSheets(design: PlatformDesign, vms: Vm[], generatedAt = new Date().toISOString()): WorkbookSheet[] {
+export function existingWorkbookSheets(design: PlatformDesign, vms: Vm[], generatedAt = new Date().toISOString(), costModel?: CostModelInputs | null): WorkbookSheet[] {
   const assessment = design.existing
   if (!assessment) return [{ name: 'Capacity and Fit', rows: [['Hyper-V Surveyor — Existing Capacity and Fit'], ['No existing-hardware design to export.']] }]
   const header: unknown[][] = [
@@ -453,6 +462,7 @@ export function existingWorkbookSheets(design: PlatformDesign, vms: Vm[], genera
     storagePlanSheet(design),
     { name: 'Findings', rows: findings },
     { name: 'Inventory', rows: inventory },
+    ...licensingSheet(design, vms, costModel),
   ]
 }
 
@@ -462,16 +472,17 @@ function writeWorkbook(sheets: WorkbookSheet[], filename: string) {
   XLSX.writeFile(wb, filename)
 }
 
-export function exportDesign(design: PlatformDesign, vms: Vm[], filename = 'HyperV_Surveyor_Sizing.xlsx') {
-  writeWorkbook(designWorkbookSheets(design, vms), filename)
+export function exportDesign(design: PlatformDesign, vms: Vm[], costModel?: CostModelInputs | null, filename = 'HyperV_Surveyor_Sizing.xlsx') {
+  writeWorkbook(designWorkbookSheets(design, vms, undefined, costModel), filename)
 }
 
 export function exportExistingCapacity(
   design: PlatformDesign,
   vms: Vm[],
+  costModel?: CostModelInputs | null,
   filename = design.engagementMode === 'fit-gap' ? 'HyperV_Surveyor_Fit_Gap.xlsx' : 'HyperV_Surveyor_Existing_Capacity.xlsx',
 ) {
-  writeWorkbook(existingWorkbookSheets(design, vms), filename)
+  writeWorkbook(existingWorkbookSheets(design, vms, undefined, costModel), filename)
 }
 
 export function summariseForClipboard(s: SizingResult, label: string): string {

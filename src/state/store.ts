@@ -17,6 +17,7 @@ import { normalizeAdvisorAnswers, type AdvisorAnswers } from '../data/management
 import { optionSelection, type MatrixOption } from '../engine/optionsMatrix'
 import { applyOutlierDecision } from '../engine/dataQuality'
 import type { OutlierDecision } from '../engine/types'
+import { DEFAULT_COST_MODEL_INPUTS, normalizeCostModelInputs, type CostModelInputs } from '../engine/licensing'
 import { blankExistingHardware, existingHardwareFromImport, normalizeExistingHardware, totalHostCount, type ExistingHardware } from '../engine/existingHardware'
 
 export interface SurveyorState {
@@ -48,6 +49,9 @@ export interface SurveyorState {
   lastImport: ImportSummary | null
   setLastImport: (summary: ImportSummary | null) => void
   storageDecisionAnswers: StorageDecisionAnswers
+  /** Cost Model inputs: licensing basis, editions, entitlements, rates and the report option. */
+  costModel: CostModelInputs
+  setCostModel: (inputs: CostModelInputs) => void
   setStorageDecisionAnswers: (answers: StorageDecisionAnswers) => void
   setEngagementMode: (mode: EngagementMode | null) => void
   setManagementDecision: (decision: ManagementDecision) => void
@@ -126,6 +130,7 @@ const defaults = () => ({
   dataSources: [] as ProjectDataSource[],
   lastImport: null as ImportSummary | null,
   storageDecisionAnswers: {} as StorageDecisionAnswers,
+  costModel: structuredClone(DEFAULT_COST_MODEL_INPUTS),
 })
 
 /** Settles once the persisted state has been read, whether or not reading succeeded. */
@@ -161,6 +166,7 @@ export function payloadFromState(state: SurveyorState): ProjectPayload {
     reportMetadata: structuredClone(state.reportMetadata),
     dataSources: structuredClone(state.dataSources),
     storageDecisionAnswers: structuredClone(state.storageDecisionAnswers),
+    costModel: structuredClone(state.costModel),
   }
 }
 
@@ -188,6 +194,8 @@ export function migratePersistedState(persisted: unknown): SurveyorState {
     savedScenarios: normalizeScenarioSnapshots(value.savedScenarios),
     managementDeploymentInputs: normalizeManagementInputs(value.managementDeploymentInputs),
     managementAdvisorAnswers: normalizeAdvisorAnswers(value.managementAdvisorAnswers),
+    // Saves before version 10 have no Cost Model inputs; they open with the defaults.
+    costModel: normalizeCostModelInputs(value.costModel),
   } as SurveyorState
 }
 
@@ -197,6 +205,7 @@ export const useSurveyorStore = create<SurveyorState>()(
       ...defaults(),
       setLastImport: (lastImport) => set({ lastImport }),
       setStorageDecisionAnswers: (storageDecisionAnswers) => set({ storageDecisionAnswers }),
+      setCostModel: (costModel) => set({ costModel: normalizeCostModelInputs(costModel) }),
       setEngagementMode: (engagementMode) => set({ engagementMode }),
       setManagementDecision: (managementDecision) => set({ managementDecision }),
       setCustomerName: (customerName) => set({ customerName }),
@@ -324,6 +333,7 @@ export const useSurveyorStore = create<SurveyorState>()(
         if (scenario.reportMetadata !== undefined) next.reportMetadata = scenario.reportMetadata
         if (scenario.dataSources !== undefined) next.dataSources = scenario.dataSources
         if (scenario.storageDecisionAnswers !== undefined) next.storageDecisionAnswers = normalizeStorageDecisionAnswers(scenario.storageDecisionAnswers)
+        if (scenario.costModel !== undefined) next.costModel = normalizeCostModelInputs(scenario.costModel)
         return next
       }),
       // The demo is a new inventory, so the previous import summary and sources no longer apply.
@@ -336,7 +346,8 @@ export const useSurveyorStore = create<SurveyorState>()(
       // 7 keeps the Management Plane Advisor answers and marks who owns the management stack.
       // 8 adds storage-outlier choices on VMs (Data check); malformed ones are dropped on load.
       // 9 keeps existing hardware as clusters of host groups, migrated from the single-spec fields.
-      version: 9,
+      // 10 keeps the Cost Model inputs; older saves open with the defaults.
+      version: 10,
       storage: createJSONStorage(() => surveyorStorage),
       onRehydrateStorage: () => () => settleHydration(),
       migrate: (persisted) => migratePersistedState(persisted),
@@ -361,6 +372,7 @@ export const useSurveyorStore = create<SurveyorState>()(
         dataSources: state.dataSources,
         lastImport: state.lastImport,
         storageDecisionAnswers: state.storageDecisionAnswers,
+        costModel: state.costModel,
         savedScenarios: state.savedScenarios,
         sharedInventoryOmitted: state.sharedInventoryOmitted,
         vms: state.vms,

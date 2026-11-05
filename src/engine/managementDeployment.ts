@@ -36,6 +36,10 @@ export interface ManagementDeploymentInputs {
   arcServices?: ArcServiceId[]
   managedHosts: number
   managedVms: number
+  /** Management-only: sockets per managed host, for System Center licensing. Absent or 0 means not entered. */
+  managedHostSockets?: number
+  /** Management-only: physical cores per socket of the managed hosts. Absent or 0 means not entered. */
+  managedHostCoresPerSocket?: number
   managedClusters: number
   libraryContentGiB: number
   includeIdentityServices: boolean
