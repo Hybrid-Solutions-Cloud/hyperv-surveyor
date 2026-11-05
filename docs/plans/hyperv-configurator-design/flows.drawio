@@ -1,0 +1,295 @@
+<mxfile host="Electron" version="31.1.8">
+  <diagram name="Hyper-V Configurator | Overall journey">
+    <mxGraphModel dx="1120" dy="1320" grid="1" gridSize="10" page="1" pageScale="1" pageWidth="1120" pageHeight="1320">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="&lt;b&gt;Hyper-V Configurator | Overall journey&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Proposed v0.2.0 • One design, conditional questions, consistent deliverables&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#123557;" vertex="1" parent="1">
+          <mxGeometry x="20" y="10" width="1080" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="start" value="&lt;b&gt;Start or import a project&lt;/b&gt;&lt;br&gt;Surveyor plan • saved design • inventory • manual" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="350" y="120" width="420" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="scope" value="&lt;b&gt;Choose scope and lifecycle&lt;/b&gt;&lt;br&gt;Management only • cluster only • both&lt;br&gt;New • existing • adoption • expansion" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="350" y="250" width="420" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="mgmt" value="&lt;b&gt;Management-plane design&lt;/b&gt;&lt;br&gt;&lt;br&gt;Capabilities, products and existing/new status&lt;br&gt;VMM, SCOM, SQL, WAC, Arc and Dell OME&lt;br&gt;Per-component placement and HA&lt;br&gt;OME: manual appliance deployment" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="40" y="410" width="480" height="235" as="geometry" />
+        </mxCell>
+        <mxCell id="cluster" value="&lt;b&gt;Cluster and SDN design&lt;/b&gt;&lt;br&gt;&lt;br&gt;Sites, hardware, storage and network authority&lt;br&gt;Bare metal / prepared / existing hosts&lt;br&gt;VMM or toolkit setup handoff&lt;br&gt;Optional SDN: controller, SLB and gateways" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="600" y="410" width="480" height="235" as="geometry" />
+        </mxCell>
+        <mxCell id="common" value="&lt;b&gt;Complete shared dependencies&lt;/b&gt;&lt;br&gt;Identity • security • media • licensing&lt;br&gt;Operations • ownership • runner and adapter versions" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="290" y="710" width="540" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="review" value="&lt;b&gt;Review design and readiness&lt;/b&gt;&lt;br&gt;Required fields • compatibility • provenance&lt;br&gt;Capacity • failure domains • adapter contract" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#fff3d7;strokeColor=#bb8b32;" vertex="1" parent="1">
+          <mxGeometry x="350" y="870" width="420" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="reports" value="&lt;b&gt;Save and export the design&lt;/b&gt;&lt;br&gt;JSON project • Markdown/PDF reports&lt;br&gt;XLSX/CSV schedules • editable diagrams&lt;br&gt;Incomplete drafts are clearly marked" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#e9f4ec;strokeColor=#518361;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1040" width="480" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="package" value="&lt;b&gt;Export a validated handoff&lt;/b&gt;&lt;br&gt;Scenario YAML + selected tool adapters&lt;br&gt;Ansible • Terraform • PowerShell • DSC • VMM&lt;br&gt;Manifest, versions and validation evidence" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#e9f4ec;strokeColor=#518361;" vertex="1" parent="1">
+          <mxGeometry x="600" y="1040" width="480" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="execute" value="&lt;b&gt;Optional external execution&lt;/b&gt;&lt;br&gt;Separate review → authorized runner&lt;br&gt;Return deployment and acceptance evidence" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#f0edf8;strokeColor=#8271a5;" vertex="1" parent="1">
+          <mxGeometry x="600" y="1210" width="480" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="start" target="scope">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="Management only / both" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="scope" target="mgmt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="Cluster only / both" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="scope" target="cluster">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="mgmt" target="common">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="cluster" target="common">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="common" target="review">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="Any design state" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="review" target="reports">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="Ready + supported adapter" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="review" target="package">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="Only if execution is selected" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="package" target="execute">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="Management plane | Component decisions">
+    <mxGraphModel dx="1120" dy="1320" grid="1" gridSize="10" page="1" pageScale="1" pageWidth="1120" pageHeight="1320">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="&lt;b&gt;Management plane | Component decisions&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Repeat the hosting, lifecycle and availability decisions for each selected component&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#123557;" vertex="1" parent="1">
+          <mxGeometry x="20" y="10" width="1080" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="requirements" value="&lt;b&gt;Choose capabilities and components&lt;/b&gt;&lt;br&gt;VMM • SCOM • SQL • WAC • Arc • Dell OME&lt;br&gt;SDN roles • identity • library/PXE • jump/runner" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="340" y="120" width="440" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="life" value="&lt;b&gt;For each component&lt;/b&gt;&lt;br&gt;Deploy new • configure existing • use existing&lt;br&gt;Supplied externally • not selected" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="340" y="260" width="440" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="hv" value="&lt;b&gt;Hyper-V VM&lt;/b&gt;&lt;br&gt;Workload cluster, dedicated management cluster or existing fabric&lt;br&gt;Placement, capacity and bootstrap" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="30" y="410" width="330" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="vmware" value="&lt;b&gt;VMware VM&lt;/b&gt;&lt;br&gt;vSphere or Cloud Director&lt;br&gt;Provider, resource pool/VDC, storage, networks and template" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="395" y="410" width="330" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="physical" value="&lt;b&gt;Dedicated physical server&lt;/b&gt;&lt;br&gt;Identity, BMC, boot/OS, disks and NICs&lt;br&gt;Assign component roles" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="760" y="410" width="330" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="inventory" value="&lt;b&gt;Record exact component inventory&lt;/b&gt;&lt;br&gt;Names, OS/product versions, CPU/RAM/disks, IPs&lt;br&gt;Create infrastructure? Configure guest?&lt;br&gt;Install products? Configure/integrate products?" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="290" y="600" width="540" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="ha" value="&lt;b&gt;Define availability independently&lt;/b&gt;&lt;br&gt;VMM service + SQL + library&lt;br&gt;SCOM management + databases + auxiliary recovery&lt;br&gt;WAC topology • infrastructure HA • site DR" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#fff3d7;strokeColor=#bb8b32;" vertex="1" parent="1">
+          <mxGeometry x="290" y="760" width="540" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="dependencies" value="&lt;b&gt;Resolve dependencies and licensing&lt;/b&gt;&lt;br&gt;SQL edition/features • identity/DKM • certificates&lt;br&gt;Windows/System Center entitlements and SQL rights&lt;br&gt;Shared services, ownership and connectivity" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="290" y="925" width="540" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="gate" value="&lt;b&gt;Check failure domains and support&lt;/b&gt;&lt;br&gt;HA peers separated? Independent bootstrap?&lt;br&gt;Versions and hosting supported? Existing services preserved?" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#fff3d7;strokeColor=#bb8b32;" vertex="1" parent="1">
+          <mxGeometry x="290" y="1090" width="540" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="output" value="&lt;b&gt;Management BOM and implementation contract&lt;/b&gt;&lt;br&gt;Placement, capacity, HA and license requirements&lt;br&gt;Dell OME: explicit manual appliance handoff" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#e9f4ec;strokeColor=#518361;" vertex="1" parent="1">
+          <mxGeometry x="290" y="1240" width="540" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="requirements" target="life">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="life" target="hv">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="life" target="vmware">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="life" target="physical">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="hv" target="inventory">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="vmware" target="inventory">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="physical" target="inventory">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="inventory" target="ha">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ha" target="dependencies">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="dependencies" target="gate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="Supported or clearly marked draft" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="gate" target="output">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="Cluster deployment | Ownership and handoff">
+    <mxGraphModel dx="1120" dy="1320" grid="1" gridSize="10" page="1" pageScale="1" pageWidth="1120" pageHeight="1320">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="&lt;b&gt;Cluster deployment | Ownership and handoff&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Design-only collection is a complete outcome; automated execution has additional prerequisites&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#123557;" vertex="1" parent="1">
+          <mxGeometry x="20" y="10" width="1080" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="intent" value="&lt;b&gt;Select intent and starting state&lt;/b&gt;&lt;br&gt;New / adopt / expand / reimage&lt;br&gt;Bare metal / OS ready / Hyper-V ready / existing cluster" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="340" y="120" width="440" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="topology" value="&lt;b&gt;Define the target estate&lt;/b&gt;&lt;br&gt;Sites, nodes, OS, storage, NICs and IP plan&lt;br&gt;Optional SDN → dedicated design/setup path&lt;br&gt;Identity, witness, reserves and operations" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="290" y="270" width="540" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="vmm" value="&lt;b&gt;VMM provisioning handoff&lt;/b&gt;&lt;br&gt;VMM owns the chosen host/fabric stages&lt;br&gt;Collect only or execute via qualified adapter" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="25" y="455" width="340" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="toolkit" value="&lt;b&gt;Toolkit / external automation&lt;/b&gt;&lt;br&gt;OEM imaging or prepared-host configuration&lt;br&gt;Ansible / PowerShell / scoped Terraform / DSC" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="390" y="455" width="340" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="manual" value="&lt;b&gt;Prepared hosts / manual handoff&lt;/b&gt;&lt;br&gt;Native tools, WAC or another owner&lt;br&gt;Adopt existing resources explicitly" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="755" y="455" width="340" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="vmminputs" value="&lt;b&gt;VMM-specific collection&lt;/b&gt;&lt;br&gt;&lt;br&gt;BMC protocol + Run As references&lt;br&gt;SMBIOS UUID + PXE NIC/MAC&lt;br&gt;WDS/PXE + ADK/WinPE&lt;br&gt;Generalized VHDX + drivers&lt;br&gt;Physical computer profile&lt;br&gt;Host group, switches and IP pools" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="25" y="630" width="340" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="toolinputs" value="&lt;b&gt;Adapter-specific collection&lt;/b&gt;&lt;br&gt;&lt;br&gt;Exact toolkit/module versions&lt;br&gt;Runner connectivity and identity&lt;br&gt;Media and boot-disk targets&lt;br&gt;Engine/stage ownership&lt;br&gt;Data schemas and secret references&lt;br&gt;Resume and evidence contracts" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="390" y="630" width="340" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="manualinputs" value="&lt;b&gt;Operator handoff collection&lt;/b&gt;&lt;br&gt;&lt;br&gt;Full host and cluster worksheet&lt;br&gt;Existing-resource inventory&lt;br&gt;Ordered build/configuration steps&lt;br&gt;Dependencies and responsible teams&lt;br&gt;Validation commands/checklist&lt;br&gt;Open decisions and acceptance" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="755" y="630" width="340" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="gate" value="&lt;b&gt;Readiness gate&lt;/b&gt;&lt;br&gt;Complete data and supported configuration?&lt;br&gt;No conflicting writers or accidental replacements?&lt;br&gt;Correct profile/image/adapter and validation evidence?" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#fff3d7;strokeColor=#bb8b32;" vertex="1" parent="1">
+          <mxGeometry x="290" y="930" width="540" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="package" value="&lt;b&gt;Produce the selected deliverables&lt;/b&gt;&lt;br&gt;Design report + canonical project + environment YAML&lt;br&gt;VMM or toolkit adapter when qualified" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#e9f4ec;strokeColor=#518361;" vertex="1" parent="1">
+          <mxGeometry x="290" y="1105" width="540" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="execution" value="&lt;b&gt;Optional execution outside the website&lt;/b&gt;&lt;br&gt;Preflight → selected stages → cluster validation&lt;br&gt;Return results; never mark an export as deployed" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=14;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#f0edf8;strokeColor=#8271a5;" vertex="1" parent="1">
+          <mxGeometry x="290" y="1260" width="540" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="intent" target="topology">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="VMM" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="topology" target="vmm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="Automation" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="topology" target="toolkit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="Collect / adopt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="topology" target="manual">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="vmm" target="vmminputs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="toolkit" target="toolinputs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="manual" target="manualinputs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="vmminputs" target="gate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="toolinputs" target="gate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="manualinputs" target="gate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="Draft or ready status is explicit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="gate" target="package">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="Separate execution request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="package" target="execution">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="SDN | Design and setup">
+    <mxGraphModel grid="1" page="1" pageWidth="1120" pageHeight="1410">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="&lt;b&gt;SDN | Design and setup path&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Proposed v0.2.0 • Optional services, explicit ownership, version-qualified setup&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#123557;" vertex="1" parent="1">
+          <mxGeometry x="20" y="10" width="1080" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="start" value="&lt;b&gt;SDN scope&lt;/b&gt;&lt;br&gt;None • use existing • deploy new • expand&lt;br&gt;Design only • setup handoff • qualified automation" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=12;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="340" y="115" width="440" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="features" value="&lt;b&gt;Select required capabilities&lt;/b&gt;&lt;br&gt;Tenant virtual networks and isolation • network policies&lt;br&gt;Load balancing / NAT • routed or tunnel connectivity&lt;br&gt;Derive components from the selected version profile" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=12;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="280" y="255" width="560" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="authority" value="&lt;b&gt;Choose controller architecture and setup owner&lt;/b&gt;&lt;br&gt;Service Fabric / controller VMs or supported WS2025 host role&lt;br&gt;VMM or qualified PowerShell tooling; one writer per resource" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=12;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="280" y="410" width="560" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="vmm" value="&lt;b&gt;VMM setup&lt;/b&gt;&lt;br&gt;Fabric integration, profiles/templates&lt;br&gt;Controller service registration&lt;br&gt;OS / VMM / architecture compatibility" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=12;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="30" y="565" width="330" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="scripts" value="&lt;b&gt;PowerShell setup&lt;/b&gt;&lt;br&gt;Versioned scripts / SDN Express&lt;br&gt;Controller-specific deployment profile&lt;br&gt;Runner and lifecycle ownership" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=12;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="395" y="565" width="330" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="existing" value="&lt;b&gt;Existing SDN&lt;/b&gt;&lt;br&gt;Controller and resource references&lt;br&gt;Preserve shared services&lt;br&gt;Requested additions only" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=12;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="760" y="565" width="330" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="inputs" value="&lt;b&gt;Complete design and prerequisites&lt;/b&gt;&lt;br&gt;Underlay VLANs / routing / MTU • HNV / VIP address pools&lt;br&gt;BGP peers / ASNs • tenant networks / policy&lt;br&gt;Controller endpoint / certificates • SLB / gateway placement&lt;br&gt;Capacity, availability, licensing and physical-network owner" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=12;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="280" y="740" width="560" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="gate" value="&lt;b&gt;Check setup readiness&lt;/b&gt;&lt;br&gt;Feature dependencies, support and complete inputs&lt;br&gt;Qualified adapter? No → export a marked design / manual handoff" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=12;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#fff3d7;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="280" y="930" width="560" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="setup" value="&lt;b&gt;Ordered setup plan&lt;/b&gt;&lt;br&gt;Prepare underlay, hosts, identity and certificates&lt;br&gt;Deploy/register NC → host networking&lt;br&gt;Required SLB/MUX and gateways → tenant services/policies&lt;br&gt;OME appliance remains a separate manual task" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=12;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#eaf3fb;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="280" y="1085" width="560" height="125" as="geometry" />
+        </mxCell>
+        <mxCell id="validate" value="&lt;b&gt;Validate and export&lt;/b&gt;&lt;br&gt;Isolation • connectivity • BGP • VIP/NAT • failover&lt;br&gt;SDN YAML/JSON + tool inputs + topology + setup report&lt;br&gt;Execution evidence is separate from the design" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;spacing=12;fontSize=17;fontFamily=Arial;strokeWidth=2;fillColor=#e9f4ec;strokeColor=#547da5;" vertex="1" parent="1">
+          <mxGeometry x="280" y="1270" width="560" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="start" target="features">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="features" target="authority">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="authority" target="vmm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="authority" target="scripts">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="authority" target="existing">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="vmm" target="inputs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="scripts" target="inputs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="existing" target="inputs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="inputs" target="gate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="gate" target="setup">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;endFill=1;strokeColor=#526477;strokeWidth=2;" edge="1" parent="1" source="setup" target="validate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
