@@ -17,6 +17,9 @@ interface Props {
   setReport: (report: ImportSummary | null) => void
 }
 
+const SHOW_ALL_ROWS_UP_TO = 1000
+const DEFAULT_ROWS_PER_PAGE = 200
+
 export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setReport }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const performanceFileRef = useRef<HTMLInputElement>(null)
@@ -28,6 +31,8 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
   const [powerFilter, setPowerFilter] = useState<'all' | PowerState>('all')
   const [reviewOnly, setReviewOnly] = useState(false)
   const [page, setPage] = useState(0)
+  // Null means automatic: show the whole list unless it is too long to render smoothly.
+  const [rowsPerPage, setRowsPerPage] = useState<number | null>(null)
   const [bulkTier, setBulkTier] = useState<TierId>('general')
   const [bulk, setBulk] = useState({ count: 100, tier: 'general' as TierId, vCpu: 4, ramGiB: 16, storageGiB: 200, prefix: 'VM' })
 
@@ -94,7 +99,9 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
     }
   }, [vms])
   const setStoppedIncluded = (include: boolean) => setVms(vms.map(v => v.powerState === 'poweredOn' ? v : { ...v, include }))
-  const pageSize = 200
+  const pageSize = Math.max(1, rowsPerPage === null
+    ? shown.length <= SHOW_ALL_ROWS_UP_TO ? shown.length : DEFAULT_ROWS_PER_PAGE
+    : rowsPerPage === 0 ? shown.length : rowsPerPage)
   const pageCount = Math.max(1, Math.ceil(shown.length / pageSize))
   const currentPage = Math.min(page, pageCount - 1)
   const visibleRows = shown.slice(currentPage * pageSize, (currentPage + 1) * pageSize)
@@ -262,6 +269,13 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
               <option value="suspended">Suspended</option>
             </select>
           </Field>
+          <Field label="Rows shown">
+            <select value={rowsPerPage === null ? (shown.length <= SHOW_ALL_ROWS_UP_TO ? 0 : DEFAULT_ROWS_PER_PAGE) : rowsPerPage} onChange={e => { setRowsPerPage(Number(e.target.value)); setPage(0) }}>
+              <option value={0}>All</option>
+              <option value={200}>200 per page</option>
+              <option value={500}>500 per page</option>
+            </select>
+          </Field>
           <Field label="Tier review">
             <select value={reviewOnly ? 'review' : 'all'} onChange={e => { setReviewOnly(e.target.value === 'review'); setPage(0) }}>
               <option value="all">All VMs</option>
@@ -281,6 +295,13 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setRep
           </div>
         )}
 
+        {vms.length > 0 && (
+          <p className="small muted" style={{ marginBottom: 6 }}>
+            {shown.length === 0
+              ? `No VMs match these filters, out of ${vms.length.toLocaleString()} in the inventory.`
+              : `Showing rows ${(currentPage * pageSize + 1).toLocaleString()}–${Math.min((currentPage + 1) * pageSize, shown.length).toLocaleString()} of ${shown.length.toLocaleString()}${shown.length < vms.length ? ` matching VMs, out of ${vms.length.toLocaleString()} in the inventory` : ' VMs'}. Scroll the list to see them all.`}
+          </p>
+        )}
         {vms.length === 0 ? (
           <p className="muted">No workloads yet. Import an RVTools export, add rows by hand, or load the demo fleet.</p>
         ) : (
