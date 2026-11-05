@@ -777,6 +777,11 @@ export interface ExistingAssessmentInput {
   fixedVms?: Vm[]
 }
 
+/** Workload VMs at a growth factor, counted the same way for remedies and growth years. */
+function grownVmCount(vms: Vm[], factor: number): number {
+  return Math.ceil(vms.length * factor)
+}
+
 /** Per-VM demand as the engine counts it, at a growth factor. */
 function vmNeed(vm: Vm, tiers: Record<TierId, TierPolicy>, factor: number, policy: ClusterConfig, fixed: boolean): VmNeed {
   const demand = computeDemand([vm], tiers, factor, policy)
@@ -789,6 +794,8 @@ export function assessExistingHardware(input: ExistingAssessmentInput): Existing
   const workloadVms = input.vms.filter((vm) => vm.include)
   const growth = resolveGrowthPlan(policy)
   const factor = growth.currentDesignGrowthFactor
+  // Demand in a given year starts from the base factor; build-now already carries the horizon in factor.
+  const yearDemandFactor = (year: number) => growth.baseGrowthFactor * (1 + growth.annualGrowthPct) ** year
   const entered = hardwareEntered(hardware)
   const activeClusters = hardware.clusters.filter((cluster) => clusterHostCount(cluster) > 0)
   const notices: string[] = []
@@ -981,7 +988,7 @@ export function assessExistingHardware(input: ExistingAssessmentInput): Existing
   if (annual > 0 && clusters.some((cluster) => cluster.vms.length > 0)) {
     // A straight-line estimate bounds the search, so a resource that never runs out costs nothing.
     const linearYear = (item: { available: number; used: number; fixed: number }) => {
-      const workload = Math.max(0, item.used - item.fixed)
+      const workload = Math.max(0, item.used - item.fixed) * (growth.baseGrowthFactor / factor)
       if (workload <= 0) return null
       const room = item.available - item.fixed
       if (room <= 0) return 0
@@ -996,7 +1003,7 @@ export function assessExistingHardware(input: ExistingAssessmentInput): Existing
     const lastYear = Math.min(EXHAUSTION_SEARCH_YEARS, bound + 3)
     const capacityOf = new Map(activeClusters.map((cluster) => [cluster.id, capacities.get(cluster.id)!]))
     for (let year = 1; year <= lastYear && [...exhaustion.values()].some((value) => value === null); year++) {
-      const yearFactor = factor * (1 + annual) ** year
+      const yearFactor = yearDemandFactor(year)
       const reverses = new Map(clusters.map((cluster) => [cluster.id, solveReverse(
         { ...cluster.cfg, growthFactor: yearFactor, annualGrowthPct: 0, growthStrategy: 'phased' },
         cluster.hosts, cluster.vms, tiers, cluster.fixedVms, capacityOf.get(cluster.id),
@@ -1055,7 +1062,7 @@ export function assessExistingHardware(input: ExistingAssessmentInput): Existing
   if (anyWorkload && addSpec) {
     clusters.forEach((cluster) => {
       const extra = overflowTarget?.id === cluster.id ? overflowDemand : { cores: 0, ram: 0, vms: 0 }
-      const plannedVms = TIER_IDS.reduce((total, id) => total + Math.ceil(cluster.vms.filter((vm) => vm.tier === id).length * factor), 0) + cluster.fixedVms.length
+      const plannedVms = grownVmCount(cluster.vms, factor) + cluster.fixedVms.length
       const demand = { cores: cluster.reverse.usedPCores + extra.cores, ram: cluster.reverse.usedRamGiB + extra.ram, vms: plannedVms + extra.vms }
       const source = hardware.clusters.find((item) => item.id === cluster.id)!
       const hosts = hostsToCarry(source, cluster.cfg, addSpec.group, demand)
@@ -1159,7 +1166,8 @@ export function assessExistingHardware(input: ExistingAssessmentInput): Existing
   // Growth by year.
   const horizon = growth.horizonYears
   const growthYears: ExistingGrowthYear[] = !anyWorkload || !addSpec ? [] : Array.from({ length: horizon + 1 }, (_, year) => {
-    const scale = (1 + annual) ** year
+    // Used figures are at the design factor; scale them to this year's demand.
+    const scale = yearDemandFactor(year) / factor
     let worstPct = 0
     let worstResource: ExistingResource | null = null
     rows.forEach((row) => {
@@ -1177,12 +1185,12 @@ export function assessExistingHardware(input: ExistingAssessmentInput): Existing
       const demand = {
         cores: (cluster.reverse.usedPCores - fixed.cores + extra.cores) * scale + fixed.cores,
         ram: (cluster.reverse.usedRamGiB - fixed.ram + extra.ram) * scale + fixed.ram,
-        vms: Math.ceil((cluster.vms.length * factor + extra.vms) * scale) + cluster.fixedVms.length,
+        vms: grownVmCount(cluster.vms, yearDemandFactor(year)) + Math.ceil(extra.vms * scale) + cluster.fixedVms.length,
       }
       const hosts = hostsToCarry(hardware.clusters.find((item) => item.id === cluster.id)!, cluster.cfg, addSpec.group, demand)
       hostsToAdd = hosts === null || hostsToAdd === null ? null : hostsToAdd + hosts
     })
-    return { year, demandFactor: factor * scale, worstResource, worstPct, fits: worstPct <= 1 + 1e-9 && unplaced.length === 0 && blockers.length === 0, hostsToAdd }
+    return { year, demandFactor: yearDemandFactor(year), worstResource, worstPct, fits: worstPct <= 1 + 1e-9 && unplaced.length === 0 && blockers.length === 0, hostsToAdd }
   })
 
   const errorFindings = findings.filter((finding) => finding.severity === 'error')

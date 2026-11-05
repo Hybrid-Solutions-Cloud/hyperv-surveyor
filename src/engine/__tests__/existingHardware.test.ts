@@ -291,6 +291,25 @@ describe('existing capacity outputs', () => {
     expect(result.growthYears).toEqual([])
   })
 
+  it('build-now growth is applied once: 50% a year over 2 years reaches 2.25, not 5.06', () => {
+    const cfg = policy({ annualGrowthPct: 0.5, growthHorizonYears: 2, growthStrategy: 'build-now', growthFactor: 1 })
+    const hw = hardware([cluster('Only', [[4, 2, 32, 2048]], { san: { usableTiB: 1000, drr: 1, thinProvisioningSavings: 0 } })])
+    const result = assessExistingHardware({ hardware: hw, policy: cfg, tiers: defaultTiers(), vms: fleet(20) })
+    expect(result.growthYears.map((point) => point.demandFactor)).toEqual([1, 1.5, 2.25])
+  })
+
+  it('remedies and the year-0 growth row count planned VMs the same way', () => {
+    // One workload host, so the 1,024 VMs-per-host limit binds. 311, 311 and 308 VMs at 1.1: per-tier
+    // rounding plans 1,025 VMs, whole-estate rounding 1,023. Both must use the same count.
+    const cfg = policy({ growthFactor: 1.1 })
+    const hw = hardware([cluster('Only', [[2, 4, 96, 8192]], { san: { usableTiB: 1000, drr: 1, thinProvisioningSavings: 0 } })])
+    const small = { vCpu: 1, ramGiB: 1, storageGiB: 1 }
+    const vms = [...fleet(311, { ...small, tier: 'general' }), ...fleet(311, { ...small, tier: 'vdi' }, 'VDI'), ...fleet(308, { ...small, tier: 'infrastructure' }, 'INF')]
+    const result = assessExistingHardware({ hardware: hw, policy: cfg, tiers: defaultTiers(), vms })
+    const remedyHosts = result.remedies.compute.reduce((sum, item) => sum + item.hostsToAdd, 0)
+    expect(result.growthYears[0].hostsToAdd).toBe(remedyHosts)
+  })
+
   it('reports the year each resource runs out at the entered growth', () => {
     // One cluster of 3 hosts (N+1). CPU sits near 50% today; 20% a year passes 100% in year 4.
     const cfg = policy({ annualGrowthPct: 0.2, growthHorizonYears: 5 })
