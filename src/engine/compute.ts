@@ -59,7 +59,14 @@ export function usableRamPerHost(node: NodeSpec, cfg: ClusterConfig): number {
 
 const emptyTier = () => ({ pCores: 0, ramGiB: 0, vms: 0, plannedVms: 0, storageGiB: 0 })
 
-/** Aggregate workload demand, applying per-tier oversubscription and right-sizing. */
+/**
+ * Aggregate workload demand.
+ *
+ * Allocation: physical cores = vCPU x right-sizing / tier oversubscription.
+ * Measured:   physical cores = vCPU x CPU P95 x comfort / benchmark factor. A measurement is what the
+ * VM actually uses, so dividing it by an oversubscription ratio would discount the same contention
+ * twice. VMs without a CPU measurement stay on allocation.
+ */
 export function computeDemand(
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
@@ -85,12 +92,12 @@ export function computeDemand(
     const cpuFactor = measuredDemandFactor(vm.performance?.cpuP95Pct, comfort)
     const memoryFactor = measuredDemandFactor(vm.performance?.memoryP95Pct, comfort)
     const cpuPerformanceFactor = measured ? Math.max(0.1, sizing?.cpuPerformanceFactor ?? 1) : 1
-    // A measured P95 factor replaces the allocation right-sizing factor for that resource.
-    // Applying both would discount the same workload twice. Missing measurements retain the
-    // tier policy as the explicit allocation fallback.
-    const cpuDemandFactor = measured && cpuFactor !== null ? cpuFactor : rsf
+    // A measured P95 replaces both the right-sizing factor and the vCPU ratio for that resource.
+    // Missing measurements retain the tier policy as the explicit allocation fallback.
     const memoryDemandFactor = measured && memoryFactor !== null ? memoryFactor : rsf
-    byTier[vm.tier].pCores += (vm.vCpu * cpuDemandFactor) / t.oversubscription / cpuPerformanceFactor
+    byTier[vm.tier].pCores += measured && cpuFactor !== null
+      ? (vm.vCpu * cpuFactor) / cpuPerformanceFactor
+      : (vm.vCpu * rsf) / t.oversubscription / cpuPerformanceFactor
     byTier[vm.tier].ramGiB += vm.ramGiB * memoryDemandFactor
     byTier[vm.tier].storageGiB += vm.storageGiB
     byTier[vm.tier].vms += 1
@@ -111,7 +118,28 @@ export function computeDemand(
     requiredRamGiB += byTier[id].ramGiB
   }
 
-  return { requiredPCores, requiredRamGiB, totalVCpu, vmCount, byTier }
+  return { requiredPCores, requiredRamGiB, totalVCpu: totalVCpu * growthFactor, vmCount, byTier }
+}
+
+/** Sum two demands, so fixed VMs such as the management plane can skip workload growth. */
+export function mergeDemand(a: ComputeDemand, b: ComputeDemand): ComputeDemand {
+  const byTier = {} as ComputeDemand['byTier']
+  for (const id of TIER_IDS) {
+    byTier[id] = {
+      pCores: a.byTier[id].pCores + b.byTier[id].pCores,
+      ramGiB: a.byTier[id].ramGiB + b.byTier[id].ramGiB,
+      vms: a.byTier[id].vms + b.byTier[id].vms,
+      plannedVms: a.byTier[id].plannedVms + b.byTier[id].plannedVms,
+      storageGiB: a.byTier[id].storageGiB + b.byTier[id].storageGiB,
+    }
+  }
+  return {
+    requiredPCores: a.requiredPCores + b.requiredPCores,
+    requiredRamGiB: a.requiredRamGiB + b.requiredRamGiB,
+    totalVCpu: a.totalVCpu + b.totalVCpu,
+    vmCount: a.vmCount + b.vmCount,
+    byTier,
+  }
 }
 
 export function requiredStorageGiB(demand: ComputeDemand): number {

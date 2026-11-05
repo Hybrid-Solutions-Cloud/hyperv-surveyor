@@ -4,10 +4,12 @@ import { useSurveyorStore } from '../state/store'
 import { FitGapPanel } from '../components/FitGapPanel'
 import { JourneyBar } from '../components/JourneyBar'
 import { ManagementCheckpoint } from '../components/ManagementCheckpoint'
+import { useMemo } from 'react'
 import { ArrowRight, Download } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { exportExistingCapacity } from '../io/exportXlsx'
 import { WorkflowNav } from '../components/WorkflowNav'
+import { managementVmsForSizing } from '../engine/managementDeployment'
 
 export default function CapacityPage() {
   const {
@@ -20,9 +22,20 @@ export default function CapacityPage() {
     resetExistingCapacity,
     vms,
     engagementMode,
+    managementDecision,
+    includeManagementInSizing,
+    managementDeploymentInputs,
   } = useSurveyorStore()
   const fitGap = engagementMode === 'fit-gap'
   const included = vms.filter((vm) => vm.include).length
+  // Counted only when the management plane really shares this hardware.
+  const managementVms = useMemo(() => managementVmsForSizing({
+    decision: managementDecision,
+    includeInSizing: includeManagementInSizing,
+    storedInputs: managementDeploymentInputs,
+    platformNodes: existingCapacityNodes,
+    workloadVmCount: included,
+  }), [managementDecision, includeManagementInSizing, managementDeploymentInputs, existingCapacityNodes, included])
 
   return (
     <>
@@ -31,14 +44,14 @@ export default function CapacityPage() {
         title={fitGap ? 'Workload fit and hardware gap' : 'Existing-hardware capacity'}
         description={fitGap ? 'Test the included workload against fixed hardware, identify every deficit, and determine whether same-spec node expansion can close the gap.' : 'Fix the hardware the customer already owns and calculate its capacity envelope, workload headroom, and first exhausted resource.'}
         actions={<div className="row page-action-row">
-          <button className="btn ghost" type="button" onClick={() => exportExistingCapacity(existingCapacityCfg, existingCapacityNodes, existingCapacityTiers, vms, engagementMode)}><Download size={15} /> Download workbook</button>
+          <button className="btn ghost" type="button" onClick={() => exportExistingCapacity(existingCapacityCfg, existingCapacityNodes, existingCapacityTiers, vms, engagementMode, managementVms)}><Download size={15} /> Download workbook</button>
           {included === 0
             ? <Link className="btn link-btn" to="/workloads">Add workload evidence <ArrowRight size={15} /></Link>
             : <Link className="btn link-btn" to="/management-plane">Continue to management <ArrowRight size={15} /></Link>}
         </div>}
       />
       <JourneyBar detail={fitGap ? 'The workload inventory and existing-hardware profile are combined here without changing the proposed-design assumptions.' : 'An inventory is optional for total capacity and required for an estate-specific utilization result.'} />
-      {fitGap && <FitGapPanel cfg={existingCapacityCfg} nodes={existingCapacityNodes} vms={vms} tiers={existingCapacityTiers} />}
+      {fitGap && <FitGapPanel cfg={existingCapacityCfg} nodes={existingCapacityNodes} vms={vms} tiers={existingCapacityTiers} managementVms={managementVms} />}
       <ReversePanel
         cfg={existingCapacityCfg}
         setCfg={setExistingCapacityCfg}
@@ -48,8 +61,9 @@ export default function CapacityPage() {
         setNodes={setExistingCapacityNodes}
         reset={resetExistingCapacity}
         vms={vms}
+        managementVms={managementVms}
       />
-      <ManagementCheckpoint context={fitGap ? 'fit-gap' : 'existing-capacity'} />
+      <ManagementCheckpoint context={fitGap ? 'fit-gap' : 'existing-capacity'} countedManagementVms={managementVms.length} />
       <WorkflowNav
         previous={{ to: fitGap ? '/workloads' : '/', label: fitGap ? 'Workload inventory' : 'Choose planning path' }}
         next={fitGap && included === 0

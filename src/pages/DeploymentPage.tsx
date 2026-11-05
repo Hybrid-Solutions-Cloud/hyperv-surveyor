@@ -34,7 +34,7 @@ export default function DeploymentPage() {
   const readiness = useMemo(() => assessMigrationReadiness(store.vms, platformCfg), [store.vms, platformCfg])
   const clusters = useMemo(() => planMultipleClusters(platformCfg, store.vms, platformTiers, store.placementInputs, embeddedManagementVms), [platformCfg, store.vms, platformTiers, store.placementInputs, embeddedManagementVms])
   const dedicatedManagement = store.managementDecision === 'design' && managementInputs.managementPlacement === 'dedicated-management-cluster' && managementVms.length > 0
-    ? solveForward(platformCfg, managementVms, platformTiers)
+    ? solveForward(platformCfg, [], platformTiers, managementVms)
     : null
   const networkNodeCount = (usesExistingHardware ? platformNodes : clusters.totalNodes) + (dedicatedManagement?.feasible ? dedicatedManagement.nodes : 0)
   const network = useMemo(() => designNetwork(platformCfg, networkNodeCount, store.networkDesignInputs), [platformCfg, networkNodeCount, store.networkDesignInputs])

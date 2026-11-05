@@ -8,6 +8,8 @@ const rules = [
   ['MS', 'Capacity reserve is one drive per server, capped at four drives across the pool.'],
   ['MS', 'Cache contributes no usable capacity and requires host memory for pool metadata.'],
   ['MS-REC', 'Create at least one CSV per node; CSV ownership is automatically distributed across cluster nodes.'],
+  ['TOOL', 'A VM with a measured CPU P95 is sized on physical cores = vCPU x P95 x comfort factor / benchmark factor, with no vCPU-to-core ratio, because the measurement is actual use. VMs without a measurement use allocation / ratio.'],
+  ['TOOL', 'A VM must fit on one host: vCPU up to the host cores times the SMT factor, and RAM up to the usable RAM per host. Fixed SAN arrays keep an editable free-space target; above it is a warning, above 100% fails.'],
   ['TOOL', 'vCPU-to-core ratios, host reserves, right-sizing factors, maximum recovery-unit size, and target VMs per recovery unit are editable assumptions.'],
 ] as const
 

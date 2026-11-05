@@ -8,7 +8,9 @@ describe('measured performance sizing', () => {
     const vm = newVm({ vCpu: 8, ramGiB: 64, performance: { cpuP95Pct: 25, memoryP95Pct: 50, observationDays: 30, storageIopsP95: 1000, storageThroughputMBpsP95: 100 } })
     const allocation = computeDemand([vm], defaultTiers(), 1)
     const measured = computeDemand([vm], defaultTiers(), 1, { sizingBasis: 'measured-p95', performanceComfortFactor: 1.2 })
-    expect(measured.requiredPCores).toBeCloseTo(allocation.requiredPCores * 0.3)
+    // 8 vCPU x 25% x 1.2 is actual use, so the 4:1 tier ratio in the allocation figure does not apply.
+    expect(measured.requiredPCores).toBeCloseTo(2.4)
+    expect(allocation.requiredPCores).toBeCloseTo(2)
     expect(measured.requiredRamGiB).toBeCloseTo(allocation.requiredRamGiB * 0.6)
   })
 
@@ -17,7 +19,7 @@ describe('measured performance sizing', () => {
     tiers.general.rightSizingFactor = 0.25
     const vm = newVm({ vCpu: 8, ramGiB: 64, performance: { cpuP95Pct: 50, memoryP95Pct: 50 } })
     const measured = computeDemand([vm], tiers, 1, { sizingBasis: 'measured-p95', performanceComfortFactor: 1, cpuPerformanceFactor: 2 })
-    expect(measured.requiredPCores).toBeCloseTo(0.5) // 8 × 50% / 4:1 / 2x benchmark
+    expect(measured.requiredPCores).toBeCloseTo(2) // 8 × 50% / 2x benchmark, no 4:1 division
     expect(measured.requiredRamGiB).toBeCloseTo(32)
   })
 

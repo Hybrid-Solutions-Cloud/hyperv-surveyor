@@ -15,7 +15,7 @@ import { assessMigrationReadiness } from '../engine/readiness'
 import { DEFAULT_NETWORK_INPUTS, designNetwork, type NetworkDesignInputs } from '../engine/networkDesign'
 import { DEFAULT_DR_INPUTS, designDisasterRecovery, type DrDesignInputs } from '../engine/drDesign'
 import { DEFAULT_REPORT_METADATA, ENGINE_VERSION, type ProjectDataSource, type ReportMetadata } from '../state/project'
-import { assessFitGap } from '../engine/fitGap'
+import { assessFitGap, fitGapAdditionalLabel, fitGapRequiredLabel } from '../engine/fitGap'
 import { DEFAULT_CONFIG, defaultTiers } from '../state/defaults'
 import { ENGAGEMENT_LABELS, type EngagementMode, type ManagementDecision } from '../state/journey'
 
@@ -233,13 +233,13 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   const placementPlan = planMultipleClusters(platformCfg, platformVms, platformTiers, placementInputs, managementConsumesPlatform ? managementVms : [])
   const splitSelected = engagementMode === 'new-platform' && placementInputs.clusterLayout === 'split' && placementPlan.feasible
   const splitLicensableCores = placementPlan.clusters.reduce((sum, cluster) => sum + cluster.result.totalLicensableCores, 0)
-  const overLimitText = (result: { nodesNeeded: number | null; clusterNodeLimit: number }) => result.nodesNeeded === null
-    ? 'Review required'
+  const overLimitText = (result: { nodesNeeded: number | null; computeNodesNeeded: number | null; clusterNodeLimit: number }) => result.nodesNeeded === null
+    ? result.computeNodesNeeded === null ? 'Review required' : `${number(result.computeNodesNeeded)} for compute (storage blocks)`
     : result.nodesNeeded > result.clusterNodeLimit
       ? `${number(result.nodesNeeded)} needed (limit ${result.clusterNodeLimit})`
       : `${number(result.nodesNeeded)} (blocked, see findings)`
   const dedicatedManagementSizing = engagementMode !== 'management-only' && managementDecision === 'design' && managementInputs.managementPlacement === 'dedicated-management-cluster' && managementVms.length > 0
-    ? solveForward(platformCfg, managementVms, platformTiers)
+    ? solveForward(platformCfg, [], platformTiers, managementVms)
     : null
   const readiness = assessMigrationReadiness(platformVms, platformCfg)
   const networkNodes = (usesExistingHardware ? existingNodes : placementPlan.totalNodes) + (dedicatedManagementSizing?.feasible ? dedicatedManagementSizing.nodes : 0)
@@ -264,7 +264,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
     : usesExistingHardware
       ? Math.max(0, finalSizing.nodes - existingNodes)
       : baselineGrowthPoint.result.feasible ? finalSizing.nodes - baselineGrowthPoint.result.nodes : null
-  const fitGap = assessFitGap(existingCfg, existingNodes, input.vms, existingTiers)
+  const fitGap = assessFitGap(existingCfg, existingNodes, input.vms, existingTiers, usesExistingHardware && managementConsumesPlatform ? managementVms : [])
   const recovery = designDisasterRecovery(platformVms, finalSizing, input.drDesignInputs ?? DEFAULT_DR_INPUTS)
 
   const storageGuide = assessStorageDecision(input.storageDecisionAnswers ?? {}, options)
@@ -305,7 +305,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   }
 
   const engagementOutcome = engagementMode === 'new-platform'
-    ? `${input.customerName || 'This solution'} is sized on ${chosen.label}. ${splitSelected ? `The selected layout splits the design into ${placementPlan.clusters.length} clusters using ${placementPlan.totalNodes} total nodes, with ${platformCfg.spareNodes} spare nodes in each cluster.` : finalSizing.feasible ? `The calculated design requires ${finalSizing.nodes} nodes, including ${platformCfg.spareNodes} spare nodes.` : 'The selected design does not fit one cluster within the platform limits, and no split has been selected.'}`
+    ? `${input.customerName || 'This solution'} is sized on ${chosen.label}. ${splitSelected ? `The selected layout splits the design into ${placementPlan.clusters.length} clusters using ${placementPlan.totalNodes} total nodes, with ${platformCfg.spareNodes} spare nodes in each cluster.` : finalSizing.feasible ? `The calculated design requires ${finalSizing.nodes} nodes, including ${platformCfg.spareNodes} spare nodes.` : finalSizing.nodesNeeded !== null && finalSizing.nodesNeeded > finalSizing.clusterNodeLimit ? 'The selected design does not fit one cluster within the platform limits, and no split has been selected.' : 'The selected design is blocked by the findings below, and adding nodes does not resolve them.'}`
     : engagementMode === 'existing-capacity'
       ? `${input.customerName || 'This solution'} assesses an existing ${existingNodes}-node ${existingCfg.architecture.toUpperCase()} estate. ${includedVms.length > 0 ? `${includedVms.length.toLocaleString()} included workloads are applied to the capacity envelope.` : 'No workload inventory was supplied, so estate-specific utilization is not asserted.'}`
       : engagementMode === 'fit-gap'
@@ -542,9 +542,10 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Usable memory', value: gib(fitGap.reverse.availableRamGiB) },
         { label: 'Usable storage', value: tib(fitGap.reverse.availableStorageTiB) },
         { label: 'Assessed workloads', value: number(fitGap.assessedVms) },
+        { label: 'Management VMs counted', value: number(fitGap.managementVms) },
         { label: 'Fit decision', value: fitGap.fits === null ? 'Not assessed' : fitGap.fits ? 'Fits' : 'Does not fit' },
-        { label: 'Same-spec nodes required', value: fitGap.requiredNodesAtSameSpec === null ? 'Not resolved' : number(fitGap.requiredNodesAtSameSpec) },
-        { label: 'Additional nodes', value: fitGap.additionalNodes === null ? 'Cannot resolve with nodes alone' : number(fitGap.additionalNodes) },
+        { label: 'Same-spec nodes required', value: String(fitGapRequiredLabel(fitGap)) },
+        { label: 'Additional nodes', value: String(fitGapAdditionalLabel(fitGap)) },
       ],
       reasoning: engagementMode === 'management-only' ? [] : [
         {
@@ -554,7 +555,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
             ? 'A hardware envelope was entered, but there is not enough included workload evidence to make an inventory-specific fit decision.'
             : `The fit test compares workload demand with ${existingNodes} entered nodes after host reserves and failure capacity. The current deficits are ${number(fitGap.deficits.physicalCores, 1)} physical cores, ${number(fitGap.deficits.ramGiB, 1)} GiB memory, ${number(fitGap.deficits.s2dTiB, 1)} TiB S2D, and ${number(fitGap.deficits.sanTiB, 1)} TiB SAN.`,
           tradeoff: fitGap.additionalNodes === null
-            ? 'A storage or hard platform constraint cannot be solved by adding identical nodes alone; revise that constraint directly.'
+            ? `A storage or hard platform constraint cannot be solved by adding identical nodes alone; revise that constraint directly.${fitGap.requiredNodesForCompute === null ? '' : ` Compute alone needs ${number(fitGap.requiredNodesForCompute)} total nodes.`}`
             : `At the entered node specification, the model requires ${fitGap.requiredNodesAtSameSpec ?? 'an unresolved number of'} total nodes, or ${fitGap.additionalNodes} additional nodes beyond the current estate.`,
         },
       ],
@@ -671,7 +672,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         'Platform workload-sizing evidence was not assessed for this management-only engagement.',
       ] : [
         finalSizing.performanceAssessment.basis === 'measured-p95'
-          ? `CPU and memory use per-VM P95 measurements where available, multiplied by a ${number(platformCfg.performanceComfortFactor ?? 1.25, 2)}x comfort factor. A ${number(platformCfg.cpuPerformanceFactor ?? 1, 2)}x target/source per-core benchmark factor is applied to CPU. Missing measurements fall back to the tier allocation policy; a measured resource does not also receive the tier right-sizing factor.`
+          ? `CPU and memory use per-VM P95 measurements where available, multiplied by a ${number(platformCfg.performanceComfortFactor ?? 1.25, 2)}x comfort factor. A measured CPU is actual use, so the tier vCPU-to-core ratio is not applied to it. A ${number(platformCfg.cpuPerformanceFactor ?? 1, 2)}x target/source per-core benchmark factor is applied to CPU. Missing measurements fall back to the tier allocation policy; a measured resource does not also receive the tier right-sizing factor.`
           : 'CPU and memory are sized from allocation. Imported performance data is informational until measured P95 sizing is selected.',
       ],
       metrics: engagementMode === 'management-only' ? [
@@ -796,7 +797,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
             `ceil(${number(plan.totalTiB, 1)} / ${number(plan.maxSizeTiB, 1)}) = ${number(plan.countByCapacity)}`,
             `ceil(${number(plan.plannedVms)} / ${number(plan.maxVmsPerCsv)}) = ${number(plan.countByVmLimit)}${plan.recoveryGroupingApplied ? '' : ' (advisory)'}`,
             number(plan.granularAdvisoryCount),
-            `${number(plan.count)} × ${tib(plan.sizeTiB)}; up to ${number(plan.vmsPerCsv)} VMs each`,
+            `${number(plan.count)} × ${tib(plan.sizeTiB)}; up to ${number(plan.vmsPerCsv)} VMs each${(plan.freeSpaceTargetPct ?? 0) > 0 ? `; size keeps ${number((plan.freeSpaceTargetPct ?? 0) * 100)}% free` : ''}`,
             plan.driver === 'node-count' ? 'S2D node ownership' : plan.driver === 'operational-balance' ? 'Operational balance' : plan.driver === 'custom-target' ? 'Custom target' : plan.driver === 'vm-count' ? 'VM recovery grouping' : plan.driver === 'both' ? 'Both requirements' : 'Volume-size requirement',
           ]),
         },

@@ -9,14 +9,18 @@ const labels = {
   deferred: 'Management decision deferred',
 } as const
 
-export function ManagementCheckpoint({ context }: { context: 'new-platform' | 'existing-capacity' | 'fit-gap' }) {
+export function ManagementCheckpoint({ context, countedManagementVms = 0 }: {
+  context: 'new-platform' | 'existing-capacity' | 'fit-gap'
+  /** Management VMs already counted in the results on this page. */
+  countedManagementVms?: number
+}) {
   const decision = useSurveyorStore((state) => state.managementDecision)
   const setDecision = useSurveyorStore((state) => state.setManagementDecision)
   const contextCopy = context === 'new-platform'
     ? 'Use the calculated platform size to build the VMM, WAC, SCOM, SQL, Arc, placement, and HA design.'
-    : context === 'fit-gap'
-      ? 'If management VMs share this hardware, include their demand before the final fit decision.'
-      : 'Management VMs placed on this estate consume the headroom shown above; dedicated or external placement is calculated separately.'
+    : countedManagementVms > 0
+      ? `The ${countedManagementVms.toLocaleString()} management VMs from your design are placed on this hardware and are counted in the results above.`
+      : 'Management VMs are not counted in the results above. They count once you design the management plane, place it on the workload cluster, and keep it included in sizing.'
 
   return (
     <section className="panel management-checkpoint">

@@ -669,6 +669,25 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
   }
 }
 
+/**
+ * The management VMs that consume workload-cluster capacity. Empty unless the management decision is
+ * design, including them in sizing is on, and they are placed on the workload cluster.
+ */
+export function managementVmsForSizing(args: {
+  decision: string
+  includeInSizing: boolean
+  storedInputs: ManagementDeploymentInputs | null | undefined
+  platformNodes: number
+  workloadVmCount: number
+}): Vm[] {
+  if (args.decision !== 'design' || !args.includeInSizing) return []
+  const inputs = normalizeManagementDeploymentInputs(args.storedInputs
+    ? { ...args.storedInputs, monitoring: args.storedInputs.monitoring ?? 'none' }
+    : deploymentInputsFromStack(args.platformNodes <= 4 ? ['classic', 'wac-admin'] : ['scvmm', 'wac-admin'], args.platformNodes, args.workloadVmCount))
+  if (inputs.managementPlacement !== 'workload-cluster') return []
+  return deploymentComponentsToVms(planManagementDeployment(inputs).components)
+}
+
 export function deploymentComponentsToVms(components: ManagementComponent[]): Vm[] {
   return components.filter((item) => item.resourceType === 'vm').flatMap((item) => Array.from({ length: item.count }, (_, index) => ({
     id: `management-${item.id}-${index + 1}`,

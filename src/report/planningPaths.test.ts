@@ -111,6 +111,55 @@ describe('fit workloads to existing hardware', () => {
   it('keeps its entered node count in the report', () => {
     expect(metric(report('fit-gap', { existingCapacityNodes: 12 }), 'executive', 'Existing nodes')).toBe('12')
   })
+
+  describe('counts management VMs in the verdict only when they share the hardware', () => {
+    // 2 nodes, N+1: one 96-core host left. The workload fits; adding HA SCVMM and SCOM does not.
+    const tight = () => {
+      const cfg = structuredClone(DEFAULT_CONFIG)
+      cfg.architecture = 'san'
+      cfg.spareNodes = 1
+      cfg.node = { ...cfg.node, sockets: 2, coresPerSocket: 48, ramGiB: 512 }
+      return cfg
+    }
+    const heavy = { ...management, monitoring: 'scom', highAvailability: true, fabricHighAvailability: true, scomHighAvailability: true } as typeof management
+    const verdict = (overrides: Partial<SolutionReportInputs>) => {
+      const r = report('fit-gap', { existingCapacityCfg: tight(), existingCapacityNodes: 2, vms: fleet(12), managementDeploymentInputs: heavy, ...overrides })
+      return { fit: metric(r, 'existing', 'Fit decision'), counted: metric(r, 'existing', 'Management VMs counted') }
+    }
+
+    it('counts them for design, included in sizing, on the workload cluster', () => {
+      const result = verdict({ includeManagementInSizing: true })
+      expect(Number(result.counted)).toBeGreaterThan(0)
+      expect(result.fit).toBe('Does not fit')
+    })
+
+    it('does not count them when excluded, deferred, or placed elsewhere', () => {
+      for (const overrides of [
+        { includeManagementInSizing: false },
+        { includeManagementInSizing: true, managementDecision: 'deferred' as const },
+        { includeManagementInSizing: true, managementDeploymentInputs: { ...heavy, managementPlacement: 'dedicated-management-cluster' as const } },
+      ]) {
+        const result = verdict(overrides)
+        expect(result.counted).toBe('0')
+        expect(result.fit).toBe('Fits')
+      }
+    })
+  })
+
+  it('states the compute answer in the report when the array blocks', () => {
+    const cfg = structuredClone(DEFAULT_CONFIG)
+    cfg.architecture = 'san'
+    cfg.san = { ...cfg.san, usableTiB: 1, drr: 1 }
+    const r = report('fit-gap', { existingCapacityCfg: cfg, existingCapacityNodes: 2, vms: fleet(50) })
+    expect(metric(r, 'existing', 'Fit decision')).toBe('Does not fit')
+    expect(metric(r, 'existing', 'Same-spec nodes required')).toMatch(/for compute/)
+  })
+
+  it('asks for workloads rather than reporting a shortfall', () => {
+    const r = report('fit-gap', { vms: [] })
+    expect(metric(r, 'existing', 'Same-spec nodes required')).toBe('Add workloads')
+    expect(metric(r, 'existing', 'Additional nodes')).toBe('Add workloads')
+  })
 })
 
 describe('management solution only', () => {

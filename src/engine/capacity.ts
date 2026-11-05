@@ -13,6 +13,11 @@ import { LIMITS, resiliencyEfficiency } from './rules'
 import { giBToTiB, tbToGiB } from './compute'
 import type { CapacityResult, ClusterConfig, NodeSpec, SanSpec } from './types'
 
+/** Free space to keep on a SAN, calculated or fixed. Default 20%, capped at 90%. [TOOL] */
+export function sanFreeSpaceTarget(cfg: Pick<ClusterConfig, 'sanFreeSpaceTargetPct'>): number {
+  return Math.min(0.9, Math.max(0, cfg.sanFreeSpaceTargetPct ?? 0.2))
+}
+
 /**
  * Reserve capacity for in-place repair [MS-REC]:
  *   one capacity drive per server, capped at 4 drives' worth TOTAL regardless of cluster size.
@@ -80,6 +85,7 @@ export function cacheRatio(node: NodeSpec): number {
   return cap > 0 ? cache / cap : 0
 }
 
+/** A cache tier needs both drives and a size: 2 x 0 TB is no cache at all. */
 export function usesCacheTier(node: NodeSpec): boolean {
-  return node.cacheDrivesPerNode > 0
+  return node.cacheDrivesPerNode > 0 && node.cacheDriveTB > 0
 }

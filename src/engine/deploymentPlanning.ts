@@ -114,12 +114,13 @@ function planPool(
     const candidate = bins.map((bin, index): PlannedCluster => {
       const management = index === 0 ? fixedManagementVms : []
       const plannedVms = [...bin, ...management]
+      // Management VMs stay fixed while the workload grows, the same as in forecastGrowth.
       return {
         id: `${purpose.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index + 1}`,
         name: `${purpose} ${index + 1}`,
         purpose,
         vms: plannedVms,
-        result: solveForward(cfg, plannedVms, tiers),
+        result: solveForward(cfg, bin, tiers, management),
         sourceClusters: [...new Set(bin.map((vm) => vm.sourceCluster).filter((value): value is string => !!value))],
         managementVmCount: management.length,
       }
@@ -143,7 +144,7 @@ function planSingleCluster(
     return { feasible: true, clusters: [], totalNodes: 0, totalWorkloadNodes: 0, warnings: [] }
   }
   const vms = [...included, ...fixedManagementVms]
-  const result = solveForward(cfg, vms, tiers)
+  const result = solveForward(cfg, included, tiers, fixedManagementVms)
   const warnings: string[] = []
   if (!result.feasible) {
     warnings.push(result.nodesNeeded !== null && result.nodesNeeded > result.clusterNodeLimit

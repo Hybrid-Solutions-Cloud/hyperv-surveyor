@@ -21,6 +21,7 @@ export const SRC = {
     'https://learn.microsoft.com/windows-server/storage/storage-spaces/fault-tolerance',
   nestedResiliency:
     'https://learn.microsoft.com/windows-server/storage/storage-spaces/nested-resiliency',
+  chooseDrives: 'https://learn.microsoft.com/windows-server/storage/storage-spaces/choose-drives',
   planVolumes: 'https://learn.microsoft.com/windows-server/storage/storage-spaces/plan-volumes',
   csv: 'https://learn.microsoft.com/windows-server/failover-clustering/failover-cluster-csvs',
   quorum: 'https://learn.microsoft.com/windows-server/storage/storage-spaces/quorum',
@@ -32,8 +33,6 @@ export const SRC = {
     'https://learn.microsoft.com/windows-server/failover-clustering/storage-architectures',
   dynamicMemory:
     'https://learn.microsoft.com/windows-server/virtualization/hyper-v/dynamic-memory',
-  sqlBestPractice:
-    'https://learn.microsoft.com/sql/linux/configure/performance-best-practices-operating-system',
   s2dOverview:
     'https://learn.microsoft.com/windows-server/storage/storage-spaces/storage-spaces-direct-overview',
   networkAtc: 'https://learn.microsoft.com/windows-server/networking/network-atc/network-atc',
@@ -53,6 +52,9 @@ export const LIMITS = {
   /** [MS] Max running VMs per cluster / per host, WS2025. */
   MAX_VMS_PER_CLUSTER: 8000,
   MAX_VMS_PER_HOST: 1024,
+  /** [MS] Gen 1 VM maxima. */
+  MAX_VCPU_PER_GEN1_VM: 64,
+  MAX_RAM_PER_GEN1_VM_GIB: 1024,
   /** [MS] WS2025 Gen 2 VM maxima. */
   MAX_VCPU_PER_VM: 2048,
   MAX_RAM_PER_VM_GIB: 240 * 1024,
@@ -63,16 +65,21 @@ export const LIMITS = {
   S2D_MAX_RAW_PER_SERVER_TB: 400,
   /** [MS] Storage pool maximum, WS2019+. */
   S2D_MAX_POOL_TB: 4000,
-  /** [MS-REC] Volume/CSV recommendations. */
+  /** [MS-REC] Microsoft recommends no more than 64 volumes per cluster. */
   MAX_CSVS_PER_CLUSTER: 64,
+  /**
+   * [MS-REC for S2D, TOOL for SAN] Microsoft recommends limiting an S2D volume to 64 TB. Surveyor
+   * applies it as 64 TiB, and also as a planning cap on SAN CSVs, where Microsoft publishes no such
+   * limit. Both of those uses are tool choices.
+   */
   MAX_CSV_SIZE_TIB: 64,
-  /** [MS] VSS/volsnap-based backup reliability limit. */
+  /** [MS-REC] Microsoft suggests 10 TB for VSS/volsnap backup reliability. Applied as TiB. [TOOL] */
   VSS_CSV_LIMIT_TIB: 10,
   /** [MS] Minimum capacity drives per server, Windows Server (not Azure Local). */
   MIN_CAPACITY_DRIVES: 4,
   /** [MS] Minimum cache drives per server when a cache tier is used. */
   MIN_CACHE_DRIVES: 2,
-  /** [MS] Minimum cache device size. */
+  /** [MS] Minimum cache device size. Microsoft states 32 GB, so it is compared in decimal GB. */
   MIN_CACHE_DRIVE_GIB: 32,
   /** [MS] SET team maximum adapters. */
   MAX_SET_ADAPTERS: 8,
@@ -83,11 +90,14 @@ export const LIMITS = {
   S2D_MAX_SIMULTANEOUS_FAILURES: 2,
   /** [MS] S2D host RAM for pool metadata: 4 GiB per TB of cache capacity per server. */
   S2D_RAM_PER_TB_CACHE_GIB: 4,
-  /** [MS-REC] Cache:capacity starting ratios. Azure Local imposes a hard 15% for hybrid. */
+  /**
+   * [MS-REC] Cache:capacity starting ratios, from choose-drives. Azure Local requires at least 15%
+   * for hybrid: https://learn.microsoft.com/azure/azure-local/concepts/system-requirements-23h2
+   */
   CACHE_RATIO_HYBRID: 0.1,
   CACHE_RATIO_ALLFLASH: 0.05,
   CACHE_RATIO_AZURE_LOCAL_HYBRID: 0.15,
-  /** [MS] Minimum cache drive endurance. */
+  /** [MS-REC] Recommended minimum cache drive endurance. */
   MIN_CACHE_DWPD: 3,
   /** [MS] WS2025 campus cluster maximum. */
   CAMPUS_MAX_NODES: 10,

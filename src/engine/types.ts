@@ -145,7 +145,10 @@ export type SanSizingMode = 'fixed' | 'calculated'
 export interface ClusterConfig {
   architecture: StorageArchitecture
   sanSizingMode?: SanSizingMode
-  /** Free space kept on a calculated SAN. 0.2 plans the array to be no more than 80% full. [TOOL] */
+  /**
+   * Free space to keep on the SAN, calculated or fixed. Default 20%. A calculated array is sized to
+   * it; a fixed array above it gets a warning, and only a fixed array above 100% fails. [TOOL]
+   */
   sanFreeSpaceTargetPct?: number
   spareNodes: number
   resiliency: Resiliency
@@ -170,7 +173,10 @@ export interface ClusterConfig {
   growthHorizonYears?: number
   /** Build the terminal forecast now, or add nodes as demand crosses thresholds. */
   growthStrategy?: GrowthStrategy
-  /** Allocation is conservative. Measured mode uses per-VM P95 metrics where present. */
+  /**
+   * Allocation divides vCPU by the tier ratio. Measured mode sizes a VM with a CPU P95 on that actual
+   * use, with no oversubscription division; VMs without a measurement stay on allocation.
+   */
   sizingBasis?: SizingBasis
   /** Safety multiplier applied to measured P95 CPU and memory demand. */
   performanceComfortFactor?: number
@@ -220,6 +226,8 @@ export interface CsvPlan {
   countByCapacity: number
   countByVmLimit: number
   maxVmsPerCsv: number
+  /** Free space included in sizeTiB. SAN only; S2D volumes report 0. totalTiB stays the data held. */
+  freeSpaceTargetPct?: number
   /** Count that would result if the editable per-tier recovery targets were enforced. */
   granularAdvisoryCount: number
   /** True when the editable recovery-unit size and VM grouping targets control this plan. */
@@ -241,7 +249,7 @@ export interface Finding {
   source?: string
 }
 
-export type BindingConstraint = 'cpu' | 'memory' | 'storage' | 'node-floor' | 'none'
+export type BindingConstraint = 'cpu' | 'memory' | 'storage' | 'node-floor' | 'vm-count' | 'none'
 
 /** The array a new design needs. Present only when the SAN is calculated. */
 export interface SanSizing {
@@ -262,8 +270,13 @@ export interface SizingResult {
   /** The design's node count when feasible. When infeasible this is the ceiling, not a design. */
   nodes: number
   workloadNodes: number
-  /** Nodes the workload needs in one cluster, even above the limit. Null when no count can work. */
+  /**
+   * Nodes the workload needs in one cluster, even above the limit. Null when no count can work,
+   * such as a fixed array that is too small or a VM larger than one host.
+   */
   nodesNeeded: number | null
+  /** Nodes needed for CPU, memory and VM count alone, shown even when storage blocks the design. */
+  computeNodesNeeded: number | null
   /** Most nodes one cluster of this storage type and resiliency may have. */
   clusterNodeLimit: number
   sanSizing: SanSizing | null
@@ -320,7 +333,21 @@ export interface PerformanceAssessment {
   notes: string[]
 }
 
+/**
+ * no-workload  nothing to test; the result states capacity only.
+ * fits         every resource holds the workload and no hard finding blocks the design.
+ * over         a resource is above 100%, which forward sizing also fails.
+ * blocked      a hard finding makes the design invalid whatever the utilization is.
+ */
+export type ReverseStatus = 'no-workload' | 'fits' | 'over' | 'blocked'
+
 export interface ReverseResult {
+  status: ReverseStatus
+  /** Short statement of the status, safe to use as a heading. */
+  headline: string
+  /** Hard findings that make the design invalid, excluding resource shortfalls. */
+  blockers: string[]
+  storagePerformance: StoragePerformanceAssessment
   nodes: number
   workloadNodes: number
   availablePCores: number
@@ -337,5 +364,16 @@ export interface ReverseResult {
   additionalVmsByTier: Record<TierId, number>
   findings: Finding[]
   capacity: CapacityResult | null
-  storageDomains: Array<{ domain: 's2d' | 'san'; availableTiB: number; usedTiB: number; headroomTiB: number; utilisationPct: number }>
+  storageDomains: Array<{
+    domain: 's2d' | 'san'
+    availableTiB: number
+    usedTiB: number
+    /** Up to 100% of the domain. */
+    headroomTiB: number
+    utilisationPct: number
+    /** Free space kept on this domain; 0 on S2D, which has its own reserve. */
+    freeSpaceTargetPct: number
+    /** Room left before the free-space target. Negative once the target is exceeded. */
+    headroomToTargetTiB: number
+  }>
 }

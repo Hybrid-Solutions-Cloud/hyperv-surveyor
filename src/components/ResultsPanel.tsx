@@ -19,7 +19,8 @@ interface Props {
 }
 
 function nodesNeededText(result: ArchitectureOption['result']): string {
-  return result.nodesNeeded === null ? '—' : `${result.nodesNeeded.toLocaleString()} needed`
+  if (result.nodesNeeded !== null) return `${result.nodesNeeded.toLocaleString()} needed`
+  return result.computeNodesNeeded === null ? '—' : `${result.computeNodesNeeded.toLocaleString()} for compute`
 }
 
 const driverLabel: Record<string, string> = {
@@ -154,7 +155,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
         </div>
 
         <div className="grid cards">
-          <Card k="Nodes" v={r.feasible ? r.nodes : r.nodesNeeded ?? '—'} s={r.feasible ? `${r.workloadNodes} workload + ${spare} spare` : r.nodesNeeded === null ? 'fix the inputs above' : `needed in one cluster, limit ${r.clusterNodeLimit}`} />
+          <Card k="Nodes" v={r.feasible ? r.nodes : r.nodesNeeded ?? r.computeNodesNeeded ?? '—'} s={r.feasible ? `${r.workloadNodes} workload + ${spare} spare` : r.nodesNeeded !== null ? `needed in one cluster, limit ${r.clusterNodeLimit}` : r.computeNodesNeeded !== null ? 'for compute; more hosts will not fix the storage' : 'fix the inputs above'} />
           <Card k="If CPU alone" v={Number.isFinite(r.nodesIfCpuOnly) ? r.nodesIfCpuOnly : '—'} s="nodes" />
           <Card k="If memory alone" v={Number.isFinite(r.nodesIfMemoryOnly) ? r.nodesIfMemoryOnly : '—'} s="nodes" />
           <Card k="If storage alone"
@@ -307,6 +308,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
                   </td>
                   <td className="nowrap">
                     <strong>{p.count} × <span className="mono">{fmt1(p.sizeTiB)} TiB</span></strong>
+                    {(p.freeSpaceTargetPct ?? 0) > 0 && <div className="small muted">Size keeps {((p.freeSpaceTargetPct ?? 0) * 100).toFixed(0)}% free</div>}
                     <div className="small muted">Up to {p.vmsPerCsv} planned VMs each</div>
                     {p.count !== p.roundedUpFrom && (
                       <div className="small muted">{p.layoutMode === 's2d' ? 'Node-balanced' : p.layoutMode === 'custom' ? 'Custom target' : 'Operationally balanced'} from {p.roundedUpFrom} to {p.count}</div>

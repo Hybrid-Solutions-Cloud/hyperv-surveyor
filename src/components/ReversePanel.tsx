@@ -13,10 +13,14 @@ interface Props {
   setNodes: (nodes: number) => void
   reset: () => void
   vms: Vm[]
+  /** Management VMs that share this hardware. Counted at a fixed size. */
+  managementVms?: Vm[]
 }
 
-export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, reset, vms }: Props) {
-  const r = useMemo(() => solveReverse(cfg, nodes, vms, tiers), [cfg, nodes, vms, tiers])
+const NO_MANAGEMENT_VMS: Vm[] = []
+
+export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, reset, vms, managementVms = NO_MANAGEMENT_VMS }: Props) {
+  const r = useMemo(() => solveReverse(cfg, nodes, vms, tiers, managementVms), [cfg, nodes, vms, tiers, managementVms])
   const set = (partial: Partial<ClusterConfig>) => setCfg({ ...cfg, ...partial })
   const setNode = (partial: Partial<ClusterConfig['node']>) => setCfg({ ...cfg, node: { ...cfg.node, ...partial } })
   const setSan = (partial: Partial<ClusterConfig['san']>) => setCfg({ ...cfg, san: { ...cfg.san, ...partial } })
@@ -31,8 +35,16 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
 
   const pctCpu = r.availablePCores > 0 ? r.usedPCores / r.availablePCores : 0
   const pctRam = r.availableRamGiB > 0 ? r.usedRamGiB / r.availableRamGiB : 0
-  const pctSto = r.storageDomains.length > 0 ? Math.max(...r.storageDomains.map((domain) => domain.utilisationPct / 100)) : 0
-  const over = pctCpu >= 1 || pctRam >= 1 || r.storageDomains.some((domain) => domain.utilisationPct >= 100)
+  const noteClass = r.status === 'fits' ? 'ok' : r.status === 'no-workload' ? '' : 'err'
+  const includedVms = vms.filter(vm => vm.include).length
+  const performance = r.storagePerformance
+  const performanceMeters = [
+    ['S2D IOPS', performance.requiredS2dIops, performance.availableS2dIops],
+    ['S2D throughput (MB/s)', performance.requiredS2dThroughputMBps, performance.availableS2dThroughputMBps],
+    ['SAN IOPS', performance.requiredSanIops, performance.availableSanIops],
+    ['SAN throughput (MB/s)', performance.requiredSanThroughputMBps, performance.availableSanThroughputMBps],
+  ] as const
+  const sanDomain = r.storageDomains.find((domain) => domain.domain === 'san')
 
   return (
     <div className="stack">
@@ -96,6 +108,9 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
               <Field label="Measured data reduction ratio" hint="Use 1.0 when reduction is unavailable or uncertain.">
                 <NumberInput value={cfg.san.drr} min={1} step={0.1} onChange={n => setSan({ drr: Math.max(1, n) })} />
               </Field>
+              <Field label="Free space to keep %" hint="Tool assumption. Going above it gives a warning, not a failure; only above 100% full does the workload not fit. Room for more VMs stops at this target.">
+                <NumberInput value={(cfg.sanFreeSpaceTargetPct ?? 0.2) * 100} min={0} max={90} step={5} onChange={n => set({ sanFreeSpaceTargetPct: Math.min(90, Math.max(0, n)) / 100 })} />
+              </Field>
             </div>
           </div>
         )}
@@ -155,21 +170,21 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
           <Card k="Workload hosts" v={r.workloadNodes} s={`${nodes} total, ${cfg.spareNodes} unavailable`} />
         </div>
         <h3>Current workload fit</h3>
-        <p className="small muted">Testing {vms.filter(vm => vm.include).length.toLocaleString()} included VMs from the workload inventory.</p>
-        <div className={`note ${over ? 'err' : 'ok'}`}>
-          <strong>{r.binding === 'cpu' ? 'CPU' : r.binding === 'memory' ? 'Memory' : 'Storage'} binds first</strong>
+        <p className="small muted">Testing {includedVms.toLocaleString()} included VMs from the workload inventory{managementVms.length > 0 ? ` and ${managementVms.length.toLocaleString()} management VMs placed on this hardware` : ''}.</p>
+        <div className={`note ${noteClass}`}>
+          <strong>{r.headline}</strong>
           {r.bindingExplanation}
         </div>
         <Meter label={`CPU — ${fmt1(r.usedPCores)} of ${fmt1(r.availablePCores)} physical cores`} pct={pctCpu} />
         <Meter label={`Memory — ${fmt0(r.usedRamGiB)} of ${fmt0(r.availableRamGiB)} GiB`} pct={pctRam} />
-        <Meter label={`Storage — ${fmt1(r.usedStorageTiB)} of ${fmt1(r.availableStorageTiB)} TiB`} pct={pctSto} />
-        {r.storageDomains.map((domain) => <Meter key={domain.domain} label={`${domain.domain.toUpperCase()} domain — ${fmt1(domain.usedTiB)} of ${fmt1(domain.availableTiB)} TiB`} pct={domain.utilisationPct / 100} />)}
+        {r.storageDomains.map((domain) => <Meter key={domain.domain} label={`${domain.domain === 'san' ? 'SAN' : 'S2D'} storage — ${fmt1(domain.usedTiB)} of ${fmt1(domain.availableTiB)} TiB`} pct={domain.utilisationPct / 100} />)}
+        {performanceMeters.map(([label, required, available]) => available !== null && <Meter key={label} label={`${label} — ${fmt0(required)} of ${fmt0(available)}`} pct={available > 0 ? required / available : 0} />)}
 
         <div className="grid cards" style={{ marginTop: 16 }}>
           <Card k="Spare cores" v={fmt1(r.headroomPCores)} s={r.headroomPCores < 0 ? 'over-committed' : 'physical'} />
           <Card k="Spare memory" v={fmt1(r.headroomRamGiB / 1024)} s="TiB" />
-          <Card k="Spare storage" v={fmt1(r.headroomStorageTiB)} s="TiB" />
-          <Card k="Included workloads" v={vms.filter(vm => vm.include).length.toLocaleString()} s="VMs assessed" />
+          <Card k="Spare storage" v={fmt1(r.headroomStorageTiB)} s={r.storageDomains.length > 1 ? r.storageDomains.map((domain) => `${domain.domain === 'san' ? 'SAN' : 'S2D'} ${fmt1(domain.headroomTiB)}`).join(' · ') + ' TiB' : sanDomain ? `TiB, ${fmt1(sanDomain.headroomToTargetTiB)} to the ${(sanDomain.freeSpaceTargetPct * 100).toFixed(0)}% free-space target` : 'TiB'} />
+          <Card k="Included workloads" v={includedVms.toLocaleString()} s={managementVms.length > 0 ? `VMs assessed, plus ${managementVms.length.toLocaleString()} management VMs` : 'VMs assessed'} />
         </div>
       </div>
 
@@ -190,7 +205,7 @@ export function ReversePanel({ cfg, setCfg, tiers, setTiers, nodes, setNodes, re
           </thead>
           <tbody>
             {TIER_IDS.map(id => {
-              const now = vms.filter(v => v.include && v.tier === id).length
+              const now = [...vms, ...managementVms].filter(v => v.include && v.tier === id).length
               const more = r.additionalVmsByTier[id] ?? 0
               return (
                 <tr key={id}>

@@ -4,7 +4,7 @@ import { forecastGrowth, type ArchitectureOption } from '../engine/solve'
 import { giBToTiB } from '../engine/compute'
 import { RESILIENCY, TIER_IDS } from '../engine/rules'
 import type { ClusterConfig, SizingResult, TierId, TierPolicy, Vm } from '../engine/types'
-import { assessFitGap } from '../engine/fitGap'
+import { assessFitGap, fitGapAdditionalLabel, fitGapRequiredLabel } from '../engine/fitGap'
 import type { EngagementMode } from '../state/journey'
 
 const r1 = (n: number) => Math.round(n * 10) / 10
@@ -13,7 +13,7 @@ const r0 = (n: number) => Math.round(n)
 /** A design that does not fit reports the node count it needs, never the cluster limit. */
 function nodesForExport(result: SizingResult): number | string {
   if (result.feasible) return result.nodes
-  if (result.nodesNeeded === null) return 'Review required'
+  if (result.nodesNeeded === null) return result.computeNodesNeeded === null ? 'Review required' : `${result.computeNodesNeeded} for compute (storage blocks)`
   return result.nodesNeeded > result.clusterNodeLimit
     ? `${result.nodesNeeded} needed (limit ${result.clusterNodeLimit})`
     : `${result.nodesNeeded} (blocked)`
@@ -67,7 +67,7 @@ export function exportDesign(
     ['Media', cfg.node.media],
     [], ['WORKLOAD DEMAND'],
     ['VMs included', chosen.result.demand.vmCount],
-    ['Total vCPU allocated', chosen.result.demand.totalVCpu],
+    ['Total vCPU allocated', r0(chosen.result.demand.totalVCpu)],
     ['Physical cores required (after oversubscription)', r1(chosen.result.demand.requiredPCores)],
     ['RAM required (GiB)', r0(chosen.result.demand.requiredRamGiB)],
     ['Storage required (TiB)', r1(chosen.result.requiredStorageTiB)],
@@ -230,10 +230,11 @@ export function exportExistingCapacity(
   tiers: Record<TierId, TierPolicy>,
   vms: Vm[],
   mode: EngagementMode | null,
+  managementVms: Vm[] = [],
   filename = mode === 'fit-gap' ? 'HyperV_Surveyor_Fit_Gap.xlsx' : 'HyperV_Surveyor_Existing_Capacity.xlsx',
 ) {
   const wb = XLSX.utils.book_new()
-  const assessment = assessFitGap(cfg, nodes, vms, tiers)
+  const assessment = assessFitGap(cfg, nodes, vms, tiers, managementVms)
   const r = assessment.reverse
   const status = assessment.fits === null ? 'NOT ASSESSED' : assessment.fits ? 'FITS' : 'DOES NOT FIT'
   const summary: any[][] = [
@@ -252,11 +253,12 @@ export function exportExistingCapacity(
     [],
     ['WORKLOAD FIT'],
     ['Included VMs', assessment.assessedVms],
+    ['Management VMs counted', assessment.managementVms],
     ['Decision', status],
     ['Binding resource', r.binding],
     ['Explanation', r.bindingExplanation],
-    ['Same-spec nodes required', assessment.requiredNodesAtSameSpec ?? 'Not resolved'],
-    ['Additional same-spec nodes', assessment.additionalNodes ?? 'Cannot resolve with nodes alone'],
+    ['Same-spec nodes required', fitGapRequiredLabel(assessment)],
+    ['Additional same-spec nodes', fitGapAdditionalLabel(assessment)],
     ['CPU deficit (physical cores)', r1(assessment.deficits.physicalCores)],
     ['Memory deficit (GiB)', r1(assessment.deficits.ramGiB)],
     ['S2D capacity deficit (TiB)', r1(assessment.deficits.s2dTiB)],
@@ -273,7 +275,7 @@ export function exportExistingCapacity(
     [],
     ['Tier', 'Current VMs', 'Additional VMs', 'Ceiling', 'vCPU:pCore', 'Demand factor'],
     ...TIER_IDS.map((id) => {
-      const current = vms.filter((vm) => vm.include && vm.tier === id).length
+      const current = [...vms, ...managementVms].filter((vm) => vm.include && vm.tier === id).length
       const more = r.additionalVmsByTier[id]
       return [tiers[id].label, current, more, current + more, tiers[id].oversubscription, tiers[id].rightSizingFactor]
     }),

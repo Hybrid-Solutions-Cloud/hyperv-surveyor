@@ -18,9 +18,13 @@
  *
  * S2D continues to enforce the per-tier recovery targets and then applies the documented
  * minimum of one volume per node. Microsoft recommends no maximum VM count per CSV.
+ *
+ * Counts come from the data held. SAN object sizes then add the free-space target, so a presented
+ * LUN has room for it. S2D sizes stay at the data held because the pool keeps its own reserve.
  */
 import { LIMITS, TIER_IDS } from './rules'
 import { giBToTiB } from './compute'
+import { sanFreeSpaceTarget } from './capacity'
 import type {
   BackupMethod,
   ClusterConfig,
@@ -30,6 +34,10 @@ import type {
   TierId,
   TierPolicy,
 } from './types'
+
+function objectSizeTiB(dataTiB: number, count: number, freeSpaceTargetPct: number): number {
+  return Math.ceil((dataTiB / (1 - freeSpaceTargetPct) / count) * 10) / 10
+}
 
 export function roundUpToMultiple(value: number, multiple: number): number {
   if (multiple <= 0) return value
@@ -56,6 +64,8 @@ interface PlanArgs {
   backup: BackupMethod
   domain: 's2d' | 'san'
   layoutMode?: SanCsvLayoutMode | 's2d'
+  /** Added to the reported object size only; never changes the count. */
+  freeSpaceTargetPct?: number
 }
 
 export function planTierCsvs(a: PlanArgs): CsvPlan | null {
@@ -85,8 +95,9 @@ export function planTierCsvs(a: PlanArgs): CsvPlan | null {
     storageTier: a.policy.storageTier,
     domain: a.domain,
     count,
-    sizeTiB: Math.ceil((a.capacityTiB / count) * 10) / 10,
+    sizeTiB: objectSizeTiB(a.capacityTiB, count, a.freeSpaceTargetPct ?? 0),
     totalTiB: a.capacityTiB,
+    freeSpaceTargetPct: a.freeSpaceTargetPct ?? 0,
     plannedVms: a.vmCount,
     vmsPerCsv: Math.ceil(a.vmCount / count),
     maxSizeTiB: maxSize,
@@ -116,6 +127,7 @@ export function planCsvs(
 ): CsvPlan[] {
   const plans: CsvPlan[] = []
   const sanLayoutMode = cfg.sanCsvLayoutMode ?? 'balanced'
+  const freeSpaceTargetPct = sanFreeSpaceTarget(cfg)
 
   for (const id of TIER_IDS) {
     const t = demand.byTier[id]
@@ -126,7 +138,7 @@ export function planCsvs(
     if (cfg.architecture === 'san') {
       const p = planTierCsvs({
         tier: id, policy, capacityTiB, vmCount: t.plannedVms,
-        nodes, backup: cfg.backupMethod, domain: 'san', layoutMode: sanLayoutMode,
+        nodes, backup: cfg.backupMethod, domain: 'san', layoutMode: sanLayoutMode, freeSpaceTargetPct,
       })
       if (p) plans.push(p)
     } else if (cfg.architecture === 's2d') {
@@ -139,21 +151,24 @@ export function planCsvs(
       const placement = policy.hybridPlacement ?? (policy.storageTier === 'performance' ? 's2d' : 'san')
       const s2dShare = placement === 's2d' ? 1 : placement === 'san' ? 0 : cfg.hybridS2dShare
       const sanShare = 1 - s2dShare
-      if (s2dShare > 0.01) {
+      // The two domains share the planned VMs, so a 50/50 split of 3 VMs is 2 + 1, not 2 + 2.
+      const s2dVms = Math.max(1, Math.round(t.plannedVms * s2dShare))
+      const sanVms = Math.max(1, t.plannedVms - s2dVms)
+      if (s2dShare > 0) {
         const p = planTierCsvs({
           tier: id, policy,
           capacityTiB: capacityTiB * s2dShare,
-          vmCount: Math.max(1, Math.round(t.plannedVms * s2dShare)),
+          vmCount: s2dVms,
           nodes, backup: cfg.backupMethod, domain: 's2d',
         })
         if (p) plans.push(p)
       }
-      if (sanShare > 0.01) {
+      if (sanShare > 0) {
         const p = planTierCsvs({
           tier: id, policy,
           capacityTiB: capacityTiB * sanShare,
-          vmCount: Math.max(1, Math.round(t.plannedVms * sanShare)),
-          nodes, backup: cfg.backupMethod, domain: 'san', layoutMode: sanLayoutMode,
+          vmCount: sanVms,
+          nodes, backup: cfg.backupMethod, domain: 'san', layoutMode: sanLayoutMode, freeSpaceTargetPct,
         })
         if (p) plans.push(p)
       }
@@ -198,7 +213,7 @@ function distributeAdditionalVolumes(
     // produces a capacity-proportional layout while retaining distinct workload tiers.
     const target = [...plans].sort((a, b) => (b.totalTiB / b.count) - (a.totalTiB / a.count))[0]
     target.count += 1
-    target.sizeTiB = Math.ceil((target.totalTiB / target.count) * 10) / 10
+    target.sizeTiB = objectSizeTiB(target.totalTiB, target.count, target.freeSpaceTargetPct ?? 0)
     target.vmsPerCsv = Math.ceil(target.plannedVms / target.count)
     target.driver = driver
     current += 1

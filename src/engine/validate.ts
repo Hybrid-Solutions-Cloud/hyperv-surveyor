@@ -1,7 +1,7 @@
 /** Validation. Errors block a design; warnings annotate it. */
 import { LIMITS, RESILIENCY, SRC } from './rules'
 import { cacheRatio, rawPerServerTB, usesCacheTier } from './capacity'
-import { s2dMetadataRamGiB, totalCores, usableCoresPerHost, usableRamPerHost } from './compute'
+import { licensableCores, s2dMetadataRamGiB, totalCores, usableCoresPerHost, usableRamPerHost } from './compute'
 import { assessPerformanceData } from './performance'
 import type { ClusterConfig, CsvPlan, Finding, TierId, TierPolicy, Vm } from './types'
 
@@ -14,6 +14,9 @@ const warn = (code: string, message: string, basis: Finding['basis'], source?: s
 const info = (code: string, message: string, basis: Finding['basis'], source?: string): Finding => ({
   severity: 'info', code, message, basis, source,
 })
+
+/** A VM larger than one host. No node count fixes this, because a VM runs on one host at a time. */
+export const VM_LARGER_THAN_HOST = 'VM_LARGER_THAN_HOST'
 
 /** Hardware values that make every result meaningless. Names match the labels on the input forms. */
 export function hardwareInputProblems(cfg: ClusterConfig): string[] {
@@ -36,6 +39,8 @@ export function validateDesign(
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
   csvPlans: CsvPlan[],
+  /** VM count after growth. Defaults to the included VMs. */
+  plannedVmCount?: number,
 ): Finding[] {
   const f: Finding[] = []
   const node = cfg.node
@@ -92,6 +97,11 @@ export function validateDesign(
       f.push(err('RESILIENCY_MAX_NODES',
         `${def.label} is only valid up to ${def.maxNodes} nodes.`, 'MS', SRC.nestedResiliency))
     }
+    if (cfg.resiliency === 'two-way-mirror' && nodes > 2) {
+      f.push(warn('TWO_WAY_MIRROR_ABOVE_2_NODES',
+        `Two-way mirror tolerates one failure. With ${nodes} servers, Microsoft recommends three-way mirror instead.`,
+        'MS-REC', SRC.faultTolerance))
+    }
     f.push(info('S2D_FAILURE_CAP',
       `S2D dynamic quorum tolerates a maximum of ${LIMITS.S2D_MAX_SIMULTANEOUS_FAILURES} simultaneous node failures regardless of cluster size.`,
       'MS', SRC.quorum))
@@ -102,6 +112,11 @@ export function validateDesign(
     if (node.capacityDrivesPerNode < LIMITS.MIN_CAPACITY_DRIVES) {
       f.push(err('MIN_CAPACITY_DRIVES',
         `${node.capacityDrivesPerNode} capacity drives per node is below the Windows Server minimum of ${LIMITS.MIN_CAPACITY_DRIVES}.`,
+        'MS', SRC.s2dHardware))
+    }
+    if (usesCacheTier(node) && node.cacheDriveTB * 1000 < LIMITS.MIN_CACHE_DRIVE_GIB) {
+      f.push(err('MIN_CACHE_DRIVE_SIZE',
+        `Cache drives of ${(node.cacheDriveTB * 1000).toFixed(0)} GB are below the ${LIMITS.MIN_CACHE_DRIVE_GIB} GB minimum for a cache device.`,
         'MS', SRC.s2dHardware))
     }
     if (usesCacheTier(node) && node.cacheDrivesPerNode < LIMITS.MIN_CACHE_DRIVES) {
@@ -120,7 +135,7 @@ export function validateDesign(
       if (ratio < target) {
         f.push(warn('CACHE_RATIO',
           `Cache is ${(ratio * 100).toFixed(1)}% of capacity, below the ${(target * 100).toFixed(0)}% starting recommendation for ${node.media === 'hybrid' ? 'hybrid' : 'all-flash'}. Note Azure Local imposes a hard ${(LIMITS.CACHE_RATIO_AZURE_LOCAL_HYBRID * 100).toFixed(0)}% floor for hybrid.`,
-          'MS-REC', SRC.s2dHardware))
+          'MS-REC', SRC.chooseDrives))
       }
       if (node.capacityDrivesPerNode % node.cacheDrivesPerNode !== 0) {
         f.push(warn('CACHE_BINDING',
@@ -128,8 +143,8 @@ export function validateDesign(
           'MS-REC', SRC.s2dHardware))
       }
       f.push(info('CACHE_ENDURANCE',
-        `Cache drives require at least ${LIMITS.MIN_CACHE_DWPD} DWPD endurance. Cache contributes zero usable capacity.`,
-        'MS', SRC.s2dHardware))
+        `Microsoft recommends cache drives with at least ${LIMITS.MIN_CACHE_DWPD} DWPD endurance. Cache contributes zero usable capacity.`,
+        'MS-REC', SRC.s2dHardware))
     }
     const perServer = rawPerServerTB(node)
     if (perServer > LIMITS.S2D_MAX_RAW_PER_SERVER_TB) {
@@ -154,6 +169,11 @@ export function validateDesign(
   }
 
   // ---- Quorum --------------------------------------------------------------
+  if (usesS2d && cfg.witnessType === 'disk') {
+    f.push(err('DISK_WITNESS_ON_S2D',
+      'A disk witness is not supported with Storage Spaces Direct. Use a cloud witness or a file share witness.',
+      'MS', SRC.quorum))
+  }
   if (nodes === 2 && (cfg.witnessType ?? 'cloud') === 'none') {
     f.push(err('WITNESS_REQUIRED',
       'A 2-node cluster requires a witness. Without one, dynamic quorum zeroes a node vote and an unexpected failure of the surviving voter takes the cluster down. Use a cloud witness or a file share witness.',
@@ -176,14 +196,18 @@ export function validateDesign(
   }
   for (const p of csvPlans) {
     if (p.sizeTiB > LIMITS.MAX_CSV_SIZE_TIB) {
-      f.push(warn('CSV_SIZE',
-        `${p.tier} ${p.domain.toUpperCase()} CSVs at ${p.sizeTiB.toFixed(1)} TiB exceed the ${LIMITS.MAX_CSV_SIZE_TIB} TiB recommendation.`,
-        'MS-REC', SRC.planVolumes))
+      f.push(p.domain === 's2d'
+        ? warn('CSV_SIZE',
+          `${p.tier} S2D volumes at ${p.sizeTiB.toFixed(1)} TiB exceed Microsoft's recommended ${LIMITS.MAX_CSV_SIZE_TIB} TB volume limit, which Surveyor applies as TiB.`,
+          'MS-REC', SRC.planVolumes)
+        : warn('CSV_SIZE',
+          `${p.tier} SAN CSVs at ${p.sizeTiB.toFixed(1)} TiB, including free space, exceed the ${LIMITS.MAX_CSV_SIZE_TIB} TiB planning cap. This is a Surveyor assumption; check the array vendor's limits.`,
+          'TOOL'))
     }
     if (cfg.backupMethod === 'vss-volsnap' && p.sizeTiB > LIMITS.VSS_CSV_LIMIT_TIB) {
       f.push(warn('CSV_VSS_SIZE',
-        `${p.tier} CSVs at ${p.sizeTiB.toFixed(1)} TiB exceed the ${LIMITS.VSS_CSV_LIMIT_TIB} TiB limit for VSS/volsnap-based backup.`,
-        'MS', SRC.planVolumes))
+        `${p.tier} CSVs at ${p.sizeTiB.toFixed(1)} TiB exceed the ${LIMITS.VSS_CSV_LIMIT_TIB} TB Microsoft suggests for reliable VSS/volsnap-based backup, which Surveyor applies as TiB.`,
+        'MS-REC', SRC.planVolumes))
     }
   }
   const s2dCsvs = csvPlans.filter((plan) => plan.domain === 's2d').reduce((sum, plan) => sum + plan.count, 0)
@@ -231,9 +255,10 @@ export function validateDesign(
   }
 
   // ---- Licensing -----------------------------------------------------------
-  if (cores < LIMITS.LICENSE_MIN_CORES_PER_SERVER) {
+  const licensable = licensableCores(node)
+  if (cores < licensable) {
     f.push(warn('LICENSE_FLOOR',
-      `Hosts have ${cores} physical cores but Windows Server Datacenter bills a minimum of ${LIMITS.LICENSE_MIN_CORES_PER_SERVER} cores per server. You pay for ${LIMITS.LICENSE_MIN_CORES_PER_SERVER - cores} unused cores per node.`,
+      `Hosts have ${cores} physical cores, but Windows Server Datacenter bills at least ${LIMITS.LICENSE_MIN_CORES_PER_SOCKET} cores per socket and ${LIMITS.LICENSE_MIN_CORES_PER_SERVER} per server, so each host is licensed for ${licensable}. You pay for ${licensable - cores} unused cores per node.`,
       'MS'))
   }
   if (node.coresPerSocket < LIMITS.LICENSE_MIN_CORES_PER_SOCKET) {
@@ -241,7 +266,26 @@ export function validateDesign(
       `${node.coresPerSocket} cores per socket is below the 8-core-per-socket licensing minimum.`, 'MS'))
   }
 
+  // ---- Host limit ----------------------------------------------------------
+  const logicalProcessors = cores * cfg.smtFactor
+  if (logicalProcessors > LIMITS.MAX_LOGICAL_PROCESSORS) {
+    f.push(err('HOST_LOGICAL_PROCESSORS',
+      `Hosts have ${logicalProcessors.toLocaleString()} logical processors, above the ${LIMITS.MAX_LOGICAL_PROCESSORS.toLocaleString()} Hyper-V supports per host.`,
+      'MS', SRC.maxScale))
+  }
+
   // ---- Per-VM checks -------------------------------------------------------
+  // A VM runs on one host, so demand adding up across hosts does not make it placeable. This uses
+  // the allocation: a VM needs its configured vCPU and memory to start, whatever its P95 is.
+  const hostRamGiB = usableRamPerHost(node, cfg)
+  const hostLoad = (vm: Vm) => Math.max(logicalProcessors > 0 ? vm.vCpu / logicalProcessors : Infinity, hostRamGiB > 0 ? vm.ramGiB / hostRamGiB : Infinity)
+  const tooLarge = vms.filter((vm) => vm.include && (vm.vCpu > logicalProcessors || vm.ramGiB > hostRamGiB))
+  if (tooLarge.length > 0) {
+    const largest = tooLarge.reduce((a, b) => (hostLoad(b) > hostLoad(a) ? b : a))
+    f.push(err(VM_LARGER_THAN_HOST,
+      `${tooLarge.length} VM(s) cannot fit on a single host. The largest is ${largest.name} (${largest.vCpu} vCPU, ${largest.ramGiB.toFixed(0)} GiB) against ${logicalProcessors.toFixed(0)} cores and ${hostRamGiB.toFixed(0)} GiB of usable RAM per host. Adding hosts does not help: use a larger server or resize the VM.`,
+      'TOOL'))
+  }
   const spanning = vms.filter(v => v.include && v.vCpu > node.coresPerSocket)
   if (spanning.length > 0) {
     f.push(warn('NUMA_SPANNING',
@@ -253,16 +297,41 @@ export function validateDesign(
     f.push(err('VM_VCPU_MAX',
       `${oversizedVCpu.length} VM(s) exceed the ${LIMITS.MAX_VCPU_PER_VM} vCPU per-VM maximum.`, 'MS', SRC.maxScale))
   }
+  const oversizedRam = vms.filter(v => v.include && v.ramGiB > LIMITS.MAX_RAM_PER_VM_GIB)
+  if (oversizedRam.length > 0) {
+    f.push(err('VM_RAM_MAX',
+      `${oversizedRam.length} VM(s) exceed the ${LIMITS.MAX_RAM_PER_VM_GIB / 1024} TB per-VM memory maximum.`, 'MS', SRC.maxScale))
+  }
+  // Disk layout is rarely known in full, so an average above the limit is a warning to check.
+  const oversizedDisk = vms.filter(v => v.include
+    && Math.max(v.provisionedGiB, v.storageGiB) / Math.max(1, v.diskCount ?? 1) > LIMITS.MAX_VHDX_TIB * 1024)
+  if (oversizedDisk.length > 0) {
+    f.push(warn('VHDX_MAX',
+      `${oversizedDisk.length} VM(s) average more than the ${LIMITS.MAX_VHDX_TIB} TB VHDX maximum per disk. Split them across more virtual disks.`, 'MS', SRC.maxScale))
+  }
+  // A BIOS VM is Generation 1 unless it is converted to UEFI, so this is a warning and not a block.
+  const overGen1 = vms.filter(v => v.include && v.firmware === 'bios'
+    && (v.vCpu > LIMITS.MAX_VCPU_PER_GEN1_VM || v.ramGiB > LIMITS.MAX_RAM_PER_GEN1_VM_GIB))
+  if (overGen1.length > 0) {
+    f.push(warn('VM_GEN1_LIMIT',
+      `${overGen1.length} BIOS VM(s) exceed the Generation 1 maximum of ${LIMITS.MAX_VCPU_PER_GEN1_VM} vCPU and 1 TB. Convert them to UEFI and Generation 2, or reduce them.`, 'MS', SRC.maxScale))
+  }
   const dbDynamic = Object.values(tiers).find(t => t.id === 'database' && t.allowDynamicMemory)
   if (dbDynamic) {
     f.push(warn('DYNAMIC_MEMORY_DB',
-      'Dynamic Memory is enabled on the Database tier. Microsoft advises fixed memory for SQL Server, and Dynamic Memory is mutually exclusive with virtual NUMA — a VM using it has exactly one virtual NUMA node.',
-      'MS', SRC.sqlBestPractice))
+      'Dynamic Memory is enabled on the Database tier. Surveyor assumes fixed memory for databases, because Dynamic Memory and virtual NUMA cannot be used together: a VM with Dynamic Memory has one virtual NUMA node.',
+      'TOOL', SRC.numa))
   }
-  const includedVms = vms.filter(v => v.include).length
+  const includedVms = plannedVmCount ?? vms.filter(v => v.include).length
   if (includedVms > LIMITS.MAX_VMS_PER_CLUSTER) {
     f.push(err('VMS_PER_CLUSTER',
       `${includedVms} VMs exceeds the ${LIMITS.MAX_VMS_PER_CLUSTER} running VMs per cluster maximum.`,
+      'MS', SRC.maxScale))
+  }
+  const workloadNodes = nodes - cfg.spareNodes
+  if (workloadNodes > 0 && includedVms / workloadNodes > LIMITS.MAX_VMS_PER_HOST) {
+    f.push(err('VMS_PER_HOST',
+      `${includedVms} VMs across ${workloadNodes} workload hosts is above the ${LIMITS.MAX_VMS_PER_HOST} running VMs per host maximum.`,
       'MS', SRC.maxScale))
   }
 

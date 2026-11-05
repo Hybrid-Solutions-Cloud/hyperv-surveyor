@@ -83,7 +83,7 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
         </Field>
         {(cfg.sizingBasis ?? 'allocation') === 'measured-p95' && (
           <>
-            <Field label={`Measured-data comfort factor (${(cfg.performanceComfortFactor ?? 1.25).toFixed(2)}x)`} hint="Applied to each VM's CPU and memory P95 measurement. VMs without a matching metric remain sized on allocation.">
+            <Field label={`Measured-data comfort factor (${(cfg.performanceComfortFactor ?? 1.25).toFixed(2)}x)`} hint="Applied to each VM's CPU and memory P95 measurement. A measured CPU is actual use, so the tier vCPU ratio is not applied to it. VMs without a matching metric remain sized on allocation.">
               <NumberInput value={cfg.performanceComfortFactor ?? 1.25} min={1} max={2} step={0.05} onChange={n => set({ performanceComfortFactor: Math.max(1, n) })} />
             </Field>
             <Field label="Target/source per-core benchmark" hint="1.0 means equal per-core performance; 1.20 means the target benchmark is 20% faster. Use measured benchmark evidence, not clock speed alone.">
@@ -159,6 +159,9 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
             </Field>
             <Field label="Data reduction ratio" hint="Dedupe and compression only, not thin provisioning.">
               <NumberInput value={cfg.san.drr} min={1} max={10} step={0.1} onChange={n => setSan({ drr: n })} />
+            </Field>
+            <Field label="Free space to keep %" hint="Tool assumption. Going above it gives a warning, not a failure; only above 100% full is the design blocked.">
+              <NumberInput value={(cfg.sanFreeSpaceTargetPct ?? 0.2) * 100} min={0} max={90} step={5} onChange={n => set({ sanFreeSpaceTargetPct: n / 100 })} />
             </Field>
           </div>
         )}

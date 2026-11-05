@@ -19,6 +19,7 @@ export function assessPerformanceData(vms: Vm[], cfg?: Pick<ClusterConfig, 'sizi
   const storage = included.filter((vm) => present(vm.performance?.storageIopsP95) && present(vm.performance?.storageThroughputMBpsP95)).length
   const observation = included.filter((vm) => (vm.performance?.observationDays ?? 0) >= 7).length
   const measured = included.filter((vm) => present(vm.performance?.cpuP95Pct) || present(vm.performance?.memoryP95Pct)).length
+  const fullyMeasured = included.filter((vm) => present(vm.performance?.cpuP95Pct) && present(vm.performance?.memoryP95Pct)).length
   const cpuCoveragePct = pct(cpu, total)
   const memoryCoveragePct = pct(memory, total)
   const storagePerformanceCoveragePct = pct(storage, total)
@@ -32,7 +33,7 @@ export function assessPerformanceData(vms: Vm[], cfg?: Pick<ClusterConfig, 'sizi
   const notes: string[] = []
   if (basis === 'allocation') notes.push('CPU and memory are sized from allocation; imported performance metrics remain informational until measured P95 sizing is selected.')
   if (basis === 'measured-p95' && measured === 0) notes.push('Measured P95 sizing is selected, but no matching CPU or memory measurements are available; all VMs fall back to allocation.')
-  if (basis === 'measured-p95' && measured > 0 && measured < total) notes.push(`${total - measured} VM(s) have no CPU or memory measurement and fall back to allocation.`)
+  if (basis === 'measured-p95' && measured > 0 && fullyMeasured < total) notes.push(`${total - fullyMeasured} VM(s) are missing a CPU or memory measurement and use allocation for the missing resource.`)
   if (observationCoveragePct < 80 && measured > 0) notes.push('Fewer than 80% of included VMs have at least seven days of observation history.')
   if (storagePerformanceCoveragePct < 80) notes.push('Storage IOPS and throughput coverage is incomplete; capacity can be sized, but storage performance cannot yet be fully validated.')
 
@@ -46,7 +47,8 @@ export function assessPerformanceData(vms: Vm[], cfg?: Pick<ClusterConfig, 'sizi
     storagePerformanceCoveragePct,
     observationCoveragePct,
     measuredVms: measured,
-    fallbackVms: basis === 'measured-p95' ? total - measured : total,
+    // A VM missing either measurement uses allocation for that resource, so it counts as fallback.
+    fallbackVms: basis === 'measured-p95' ? total - fullyMeasured : total,
     observationDaysMedian: median(days),
     sources,
     notes,
