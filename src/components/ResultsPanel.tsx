@@ -12,6 +12,14 @@ interface Props {
   tiers: Record<TierId, TierPolicy>
   vms: Vm[]
   onExport: () => void
+  /** Shown above the comparison: help choosing a storage type. */
+  beforeComparison?: React.ReactNode
+  /** Shown after the selected design: cluster layout and server size. */
+  designChoices?: React.ReactNode
+}
+
+function nodesNeededText(result: ArchitectureOption['result']): string {
+  return result.nodesNeeded === null ? '—' : `${result.nodesNeeded.toLocaleString()} needed`
 }
 
 const driverLabel: Record<string, string> = {
@@ -23,7 +31,7 @@ const driverLabel: Record<string, string> = {
   'custom-target': 'custom target',
 }
 
-export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onExport }: Props) {
+export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onExport, beforeComparison, designChoices }: Props) {
   const chosen = options.find(o => o.key === chosenKey) ?? options[0]
   const r = chosen.result
   const availableStorageTiB = (r.capacity?.usableTiB ?? 0) + (r.sanCapacityTiB ?? 0)
@@ -47,7 +55,9 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
       if (point.result.sanCapacityTiB !== null && point.result.requiredSanTiB > point.result.sanCapacityTiB) {
         return `Expand SAN effective capacity by ${fmt1(point.result.requiredSanTiB - point.result.sanCapacityTiB)} TiB`
       }
-      return 'Review node density or split into multiple clusters'
+      return point.result.nodesNeeded !== null && point.result.nodesNeeded > point.result.clusterNodeLimit
+        ? `Above the ${point.result.clusterNodeLimit}-node limit: review server size, storage type, or cluster layout`
+        : 'Review the design findings'
     }
     if (growth.plan.strategy === 'build-now') {
       return index === 0
@@ -62,6 +72,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
 
   return (
     <div className="stack">
+      {beforeComparison}
       <div className="panel">
         <h2>Architecture comparison</h2>
         <p className="small muted" style={{ marginTop: -6 }}>
@@ -77,7 +88,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
                 <th className="num">Nodes</th>
                 <th className="num">Workload</th>
                 <th>Binding constraint</th>
-                <th className="num">Usable TiB</th>
+                <th className="num">Available TiB</th>
                 <th className="num">Required TiB</th>
                 <th className="num">CSVs</th>
                 <th className="num">Lic. cores</th>
@@ -100,18 +111,21 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
                       <strong>{o.label}</strong>
                       {!s.feasible && <span className="pill err" style={{ marginLeft: 6 }}>not feasible</span>}
                     </td>
-                    <td className="num"><strong>{s.feasible ? s.nodes : '—'}</strong></td>
+                    <td className="num">
+                      <strong>{s.feasible ? s.nodes : nodesNeededText(s)}</strong>
+                      {!s.feasible && s.nodesNeeded !== null && s.nodesNeeded > s.clusterNodeLimit && <div className="small muted">limit {s.clusterNodeLimit}</div>}
+                    </td>
                     <td className="num">{s.feasible ? s.workloadNodes : '—'}</td>
                     <td>
                       <span className={`pill ${s.binding === 'storage' ? 'warn' : 'info'}`}>{s.binding}</span>
                     </td>
                     <td className="num">
-                      {(s.capacity || s.sanCapacityTiB !== null) ? fmt1((s.capacity?.usableTiB ?? 0) + (s.sanCapacityTiB ?? 0)) : '—'}
+                      {s.feasible && (s.capacity || s.sanCapacityTiB !== null) ? fmt1((s.capacity?.usableTiB ?? 0) + (s.sanCapacityTiB ?? 0)) : '—'}
                     </td>
                     <td className="num">{fmt1(s.requiredStorageTiB)}</td>
-                    <td className="num">{s.totalCsvs}</td>
-                    <td className="num">{fmt0(s.totalLicensableCores)}</td>
-                    <td className="num">{fmt1(s.resiliencyOverheadPct)}%</td>
+                    <td className="num">{s.feasible ? s.totalCsvs : '—'}</td>
+                    <td className="num">{s.feasible ? fmt0(s.totalLicensableCores) : '—'}</td>
+                    <td className="num">{s.feasible ? `${fmt1(s.resiliencyOverheadPct)}%` : '—'}</td>
                   </tr>
                 )
               })}
@@ -126,7 +140,11 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
           <strong>
             {r.feasible
               ? `${r.nodes} nodes — ${r.workloadNodes} carrying workload after N+${spare}`
-              : 'Not feasible in a single cluster'}
+              : r.nodesNeeded === null
+                ? 'No node count works with these inputs'
+                : r.nodesNeeded > r.clusterNodeLimit
+                  ? `One cluster needs ${r.nodesNeeded} nodes; the limit is ${r.clusterNodeLimit}`
+                  : 'This design is blocked'}
           </strong>
           {r.bindingExplanation}
         </div>
@@ -136,7 +154,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
         </div>
 
         <div className="grid cards">
-          <Card k="Nodes" v={r.feasible ? r.nodes : '—'} s={`${r.workloadNodes} workload + ${spare} spare`} />
+          <Card k="Nodes" v={r.feasible ? r.nodes : r.nodesNeeded ?? '—'} s={r.feasible ? `${r.workloadNodes} workload + ${spare} spare` : r.nodesNeeded === null ? 'fix the inputs above' : `needed in one cluster, limit ${r.clusterNodeLimit}`} />
           <Card k="If CPU alone" v={Number.isFinite(r.nodesIfCpuOnly) ? r.nodesIfCpuOnly : '—'} s="nodes" />
           <Card k="If memory alone" v={Number.isFinite(r.nodesIfMemoryOnly) ? r.nodesIfMemoryOnly : '—'} s="nodes" />
           <Card k="If storage alone"
@@ -145,8 +163,9 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
           <Card k="Cores required" v={fmt0(r.demand.requiredPCores)} s={`from ${fmt0(r.demand.totalVCpu)} allocated vCPU`} />
           <Card k="RAM required" v={fmt1(r.demand.requiredRamGiB / 1024)} s="TiB" />
           <Card k="Storage required" v={fmt1(r.requiredStorageTiB)} s="TiB consumed" />
-          <Card k="Storage available" v={fmt1(availableStorageTiB)} s={chosen.cfg.architecture === 'hybrid' ? `${fmt1(r.capacity?.usableTiB ?? 0)} S2D + ${fmt1(r.sanCapacityTiB ?? 0)} SAN` : 'TiB effective / usable'} />
-          <Card k="Licensable cores" v={fmt0(r.totalLicensableCores)} s={`${r.licensableCoresPerNode} per node × ${r.nodes}`} />
+          {r.feasible && <Card k="Storage available" v={fmt1(availableStorageTiB)} s={chosen.cfg.architecture === 'hybrid' ? `${fmt1(r.capacity?.usableTiB ?? 0)} S2D + ${fmt1(r.sanCapacityTiB ?? 0)} SAN` : 'TiB effective / usable'} />}
+          {r.sanSizing && <Card k="SAN to buy" v={fmt1(r.sanSizing.usableToBuyTiB)} s={`TiB usable at ${r.sanSizing.drr}:1, keeping ${(r.sanSizing.freeSpaceTargetPct * 100).toFixed(0)}% free`} />}
+          <Card k="Licensable cores" v={r.nodesNeeded === null ? '—' : fmt0(r.licensableCoresPerNode * r.nodesNeeded)} s={r.nodesNeeded === null ? 'needs a valid node count' : `${r.licensableCoresPerNode} per node × ${r.nodesNeeded}`} />
         </div>
 
         <h3 style={{ marginTop: 18 }}>Storage performance validation</h3>
@@ -170,7 +189,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
           </table>
         </div>
 
-        {r.capacity && (
+        {r.capacity && r.feasible && (
           <>
             <h3 style={{ marginTop: 18 }}>S2D capacity chain</h3>
             <table>
@@ -189,6 +208,8 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
           </>
         )}
       </div>
+
+      {designChoices}
 
       <div className="panel">
         <h2>Capacity growth plan</h2>
@@ -211,6 +232,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
                 <th className="num">Demand multiplier</th>
                 <th className="num">Nodes required</th>
                 <th>Binding constraint</th>
+                {r.sanSizing && <th className="num">SAN to buy (TiB)</th>}
                 <th>Deployment action</th>
               </tr>
             </thead>
@@ -219,8 +241,9 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
                 <tr key={point.year}>
                   <td><strong>{point.year === 0 ? 'Today' : `Year ${point.year}`}</strong></td>
                   <td className="num mono">{point.demandFactor.toFixed(2)}×</td>
-                  <td className="num"><strong>{point.result.feasible ? point.result.nodes : 'Review'}</strong></td>
+                  <td className="num"><strong>{point.result.feasible ? point.result.nodes : point.result.nodesNeeded !== null ? nodesNeededText(point.result) : 'Review'}</strong></td>
                   <td><span className={`pill ${point.result.binding === 'storage' ? 'warn' : 'info'}`}>{point.result.binding}</span></td>
+                  {r.sanSizing && <td className="num mono">{fmt1(point.result.sanSizing?.usableToBuyTiB ?? 0)}</td>}
                   <td>{actionFor(point, index)}</td>
                 </tr>
               ))}
@@ -250,7 +273,8 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
             They are shown as an optional granular-recovery alternative and are not silently enforced in this mode.
           </div>
         )}
-        <div className="scroll">
+        {!r.feasible && <div className="note warn"><strong>Layout not calculated</strong>This option does not fit one cluster, so a volume layout here would describe a design that cannot be built. Resolve the node count first.</div>}
+        {r.feasible && <div className="scroll">
           <table>
             <thead>
               <tr>
@@ -298,7 +322,7 @@ export function ResultsPanel({ options, chosenKey, setChosenKey, tiers, vms, onE
               </tr>
             </tbody>
           </table>
-        </div>
+        </div>}
         <p className="small muted" style={{ marginTop: 8 }}>
           Recovery-unit size and target VMs per recovery unit are editable TOOL assumptions. Workload growth increases
           both logical capacity and the equivalent planned VM count; imported inventory counts remain unchanged elsewhere.

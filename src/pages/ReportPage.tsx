@@ -17,6 +17,7 @@ import {
   type ReportSectionId,
 } from '../report/reportModel'
 import { useSurveyorStore } from '../state/store'
+import { ARCHITECTURE_VARIANTS } from '../engine/solve'
 import { JourneyBar } from '../components/JourneyBar'
 import { WorkflowNav } from '../components/WorkflowNav'
 
@@ -32,6 +33,7 @@ export default function ReportPage() {
     managementDeploymentInputs,
     includeManagementInSizing,
     placementInputs,
+    storageDecisionAnswers,
     networkDesignInputs,
     drDesignInputs,
     reportMetadata,
@@ -58,6 +60,7 @@ export default function ReportPage() {
     managementDeploymentInputs,
     includeManagementInSizing,
     placementInputs,
+    storageDecisionAnswers,
     networkDesignInputs,
     drDesignInputs,
     reportMetadata,
@@ -66,9 +69,14 @@ export default function ReportPage() {
     existingCapacityTiers,
     existingCapacityNodes,
     generatedAt,
-  }), [engagementMode, managementDecision, cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, placementInputs, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, tiers, vms])
+  }), [engagementMode, managementDecision, cfg, chosenKey, customerName, generatedAt, includeManagementInSizing, managementDeploymentInputs, placementInputs, storageDecisionAnswers, networkDesignInputs, drDesignInputs, reportMetadata, dataSources, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, tiers, vms])
   const visibleSections = selectedReportSections(report, selection, outputOptions)
   const selectedCount = Object.values(selection).filter(Boolean).length
+
+  const reportOptions = ARCHITECTURE_VARIANTS
+  const shownKeys = reportMetadata.architectureKeys ?? reportOptions.map((option) => option.key)
+  const setShownKeys = (keys: string[] | undefined) => setReportMetadata({ ...reportMetadata, architectureKeys: keys })
+  const toggleArchitecture = (key: string) => setShownKeys(shownKeys.includes(key) ? shownKeys.filter((item) => item !== key) : [...shownKeys, key])
 
   const toggleSection = (id: ReportSectionId) => setSelection((current) => ({ ...current, [id]: !current[id] }))
   const exportWord = async () => {
@@ -114,6 +122,26 @@ export default function ReportPage() {
               </label>
             ))}
           </div>
+
+          {engagementMode === 'new-platform' && (
+            <div className="report-detail-options">
+              <strong>Storage designs to show</strong>
+              <div className="report-selection-actions">
+                <button type="button" onClick={() => setShownKeys(undefined)}>All</button>
+                <button type="button" onClick={() => setShownKeys(['san', 's2d-3wm'])}>SAN and S2D</button>
+                <button type="button" onClick={() => setShownKeys([])}>Selected only</button>
+              </div>
+              <div className="report-architecture-options">
+                {reportOptions.map((option) => (
+                  <label key={option.key}>
+                    <input type="checkbox" checked={option.key === chosenKey || shownKeys.includes(option.key)} disabled={option.key === chosenKey} onChange={() => toggleArchitecture(option.key)} />
+                    <span>{option.label}{option.key === chosenKey ? ' (selected design)' : ''}</span>
+                  </label>
+                ))}
+              </div>
+              <small className="muted">The selected design is always shown, and the detailed sections describe it. Change it on the results page.</small>
+            </div>
+          )}
 
           <div className="report-detail-options">
             <strong>Detail level</strong>

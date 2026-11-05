@@ -9,17 +9,13 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "airGap",
       "question": "Must the management plane operate without persistent outbound connectivity to Azure?",
-      "ifYes": "Exclude only Arc-enabled SCVMM. Classic Hyper-V tools, SCVMM without Arc, WAC Administration Mode, and WAC Virtualization Mode remain available unless another requirement rules them out.",
-      "ifNo": "Arc remains eligible, but add it only when an Azure control-plane requirement exists.",
-      "why": "Azure Arc-enabled SCVMM requires an Arc resource bridge with ongoing outbound HTTPS connectivity, external DNS resolution, and an Azure subscription. This is an architectural constraint, not a preference.",
+      "ifYes": "Exclude only Azure Arc-enabled servers. Classic Hyper-V tools, SCVMM, WAC Administration Mode, and WAC Virtualization Mode remain available unless another requirement rules them out.",
+      "ifNo": "Azure Arc-enabled servers remain eligible, but add them only when an Azure management-service requirement exists.",
+      "why": "The Azure Connected Machine agent on each Arc-enabled server communicates outbound to Azure over TCP 443, directly or through a proxy or private link scope. This is an architectural constraint, not a preference.",
       "sources": [
         {
-          "label": "Arc-enabled SCVMM support matrix",
-          "url": "https://learn.microsoft.com/en-us/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager"
-        },
-        {
-          "label": "Arc resource bridge networking",
-          "url": "https://learn.microsoft.com/en-us/azure/azure-arc/resource-bridge/network-requirements"
+          "label": "Connected Machine agent network requirements",
+          "url": "https://learn.microsoft.com/azure/azure-arc/servers/network-requirements"
         }
       ]
     },
@@ -43,8 +39,8 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "tenantSelfService",
       "question": "Do tenants require private-cloud quotas and self-service deployment of their own VMs or services?",
-      "ifYes": "Use SCVMM Clouds and self-service roles. Arc can be added separately when Azure portal access is also required.",
-      "ifNo": "Delegated operator access may be sufficient; continue to the Azure portal question.",
+      "ifYes": "Use SCVMM Clouds and self-service roles.",
+      "ifNo": "Delegated operator access may be sufficient; continue to the Azure management services question.",
       "why": "VMM supports role- and member-level quotas for vCPU, memory, storage, quota points, and VM count. Its native self-service experience uses the VMM console or PowerShell, so quota requirements must not be conflated with a modern tenant portal.",
       "sources": [
         {
@@ -54,19 +50,19 @@ export const MANAGEMENT_WORKBOOK = {
       ]
     },
     {
-      "id": "delegatedPortal",
-      "question": "Must operators or tenants manage on-premises VMs through Azure portal or ARM with Azure RBAC?",
-      "ifYes": "Use the Arc-enabled SCVMM stack: SCVMM remains the required underlying fabric and Azure Arc becomes the primary operator or tenant VM surface. Do not add WAC to the recommendation unless a separate requirement justifies it.",
+      "id": "azureServices",
+      "question": "Do you want Azure management services such as Update Manager, Defender for Cloud, Azure Monitor, or Azure Policy on these servers?",
+      "ifYes": "Add Azure Arc-enabled servers as an optional add-on to the selected stack. It does not change the fabric choice.",
       "ifNo": "Do not add Arc solely because the organization already uses Azure.",
-      "why": "Arc-enabled SCVMM projects VMM-managed resources into Azure for Azure RBAC and supported VM lifecycle operations. It does not replace the underlying SCVMM fabric; it adds an Azure control surface and a separate Arc resource bridge appliance VM.",
+      "why": "Arc-enabled servers connect the guest operating system to Azure management services on any platform. They do not provide VM lifecycle operations from Azure. Microsoft stopped new Arc-enabled SCVMM onboarding in October 2026 and retires it in September 2029, so if Azure-based VM lifecycle is a requirement, ask Microsoft for the current transition path.",
       "sources": [
         {
-          "label": "Arc resource bridge overview",
-          "url": "https://learn.microsoft.com/en-us/azure/azure-arc/resource-bridge/overview"
+          "label": "Arc-enabled SCVMM retirement and transition guidance",
+          "url": "https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/transition-guidance"
         },
         {
-          "label": "Arc-enabled SCVMM support matrix",
-          "url": "https://learn.microsoft.com/en-us/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager"
+          "label": "Azure Arc-enabled servers overview",
+          "url": "https://learn.microsoft.com/azure/azure-arc/servers/overview"
         }
       ]
     },
@@ -199,14 +195,14 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "id": "azureReady",
-      "question": "Can the organization accept an Azure subscription, Entra/RBAC ownership, external DNS, and persistent outbound HTTPS for this management path?",
-      "ifYes": "Arc is technically eligible when an Azure control-plane requirement also exists.",
-      "ifNo": "Exclude Arc-enabled SCVMM and keep management on premises.",
-      "why": "Existing Azure usage alone is insufficient. The design needs explicit ownership, permissions, networking, DNS, proxy/firewall rules, static addressing, and an operational owner for the resource bridge.",
+      "question": "Can the organization accept an Azure subscription, Entra/RBAC ownership, and outbound HTTPS from every connected server?",
+      "ifYes": "Azure Arc-enabled servers are technically eligible when an Azure management-service requirement also exists.",
+      "ifNo": "Exclude Azure Arc-enabled servers and keep management on premises.",
+      "why": "Existing Azure usage alone is insufficient. The design needs explicit ownership, permissions, networking, proxy/firewall rules, and an operational owner for the agents and their extensions.",
       "sources": [
         {
-          "label": "Arc resource bridge requirements",
-          "url": "https://learn.microsoft.com/en-us/azure/azure-arc/resource-bridge/system-requirements"
+          "label": "Connected Machine agent prerequisites",
+          "url": "https://learn.microsoft.com/azure/azure-arc/servers/prerequisites"
         }
       ]
     },
@@ -264,17 +260,13 @@ export const MANAGEMENT_WORKBOOK = {
     {
       "id": "automation",
       "question": "Must the platform integrate with service catalogs, CI/CD, or infrastructure-as-code through supported APIs?",
-      "ifYes": "Map each required workflow to a documented interface before selecting the stack. Hyper-V and SCVMM expose PowerShell; Arc-enabled SCVMM adds Azure REST, CLI, PowerShell, SDK, Terraform, Bicep, and ARM surfaces. Do not assume WAC provides a supported general-purpose automation API.",
+      "ifYes": "Map each required workflow to a documented interface before selecting the stack. Hyper-V and SCVMM expose PowerShell; Azure Arc-enabled servers add Azure surfaces for guest management, not VM lifecycle. Do not assume WAC provides a supported general-purpose automation API.",
       "ifNo": "Operator UI and standard administrative scripting may be sufficient.",
       "why": "An API checkbox is not enough: provisioning, networking, storage, approvals, secrets, rollback, and tenant isolation must all be covered by the chosen automation path.",
       "sources": [
         {
-          "label": "Arc-enabled SCVMM automation surfaces",
-          "url": "https://learn.microsoft.com/en-us/azure/azure-arc/system-center-virtual-machine-manager/overview"
-        },
-        {
-          "label": "Arc-enabled SCVMM REST API",
-          "url": "https://learn.microsoft.com/en-us/rest/api/azure-arc-scvmm/"
+          "label": "Azure Arc-enabled servers overview",
+          "url": "https://learn.microsoft.com/azure/azure-arc/servers/overview"
         },
         {
           "label": "Hyper-V PowerShell",
@@ -299,8 +291,8 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "situation": "Tenant already in Azure, accepts the dependency",
-      "answer": "Add Arc-enabled SCVMM only when Azure portal, ARM, or Azure RBAC management is a stated requirement.",
-      "because": "Arc projects the SCVMM fabric into Azure. Price each enabled Azure service separately because entitlement, per-resource, and ingestion charges vary."
+      "answer": "Add Azure Arc-enabled servers when Update Manager, Defender for Cloud, Azure Monitor, or Azure Policy is a stated requirement.",
+      "because": "Arc-enabled servers connect the guest OS to Azure services and do not add VM lifecycle control. Price each enabled Azure service separately because entitlement, per-resource, and ingestion charges vary."
     },
     {
       "situation": "Air-gapped or sovereign tenant",
@@ -353,17 +345,17 @@ export const MANAGEMENT_WORKBOOK = {
       "walkAwayWhen": "Any production or SLA-backed design while the required capabilities remain Preview or unsupported."
     },
     {
-      "plane": "5. Arc-enabled SCVMM",
-      "pros": "+  The Arc projection layer can enable Azure control; confirm current pricing for every enabled Azure service\n+  Azure portal and ARM lifecycle operations governed through Azure RBAC\n+  VMs become ARM resources: first-party Terraform, Bicep and full REST\n+  Azure Update Manager for guest patching — the best of any plane\n+  Defender for Cloud gives real security posture management\n+  Azure Monitor, Cost Management, Activity Log audit trail\n+  Azure Lighthouse (free) enables cross-tenant delegated management\n+  Update Manager and Guest Config are FREE if hosts carry WS SA, PAYG, or Defender P2",
-      "cons": "–  NOT air-gap capable — requires persistent outbound 443. Hard stop for sovereign tenants\n–  Additive only — you still need SCVMM underneath and must licence it\n–  Optional Azure services can add per-resource, consumption, and log-ingestion charges\n–  Resource bridge consumes 4 vCPU / 32 GB / 100 GB of your capacity\n–  Static IPs only, 3 contiguous, plus an extensive firewall allow-list\n–  Max 15,000 VMs per SCVMM server connection\n–  Tenant must accept an Azure dependency and an Entra ID relationship\n–  Product scope and roadmap differ across Arc-enabled SCVMM and Azure Local; validate the target platform explicitly",
-      "pickWhen": "On top of SCVMM when Azure portal, ARM, or Azure RBAC management is a stated requirement and the organization accepts the dependency.",
-      "walkAwayWhen": "Air-gapped or sovereign tenants, cost-sensitive tenants, or anywhere the customer has no existing Azure footprint."
+      "plane": "Optional add-on: Azure Arc-enabled servers",
+      "pros": "+  Connects the guest OS to Update Manager, Defender for Cloud, Azure Monitor, and Azure Policy\n+  Works with any management plane in this list\n+  No resource bridge appliance to host\n+  Microsoft's recommended path for Azure management services after Arc-enabled SCVMM",
+      "cons": "–  Does not provide VM lifecycle operations from Azure\n–  Needs the Connected Machine agent on every connected server\n–  Needs outbound 443, directly or through a proxy or private link scope\n–  Enabled Azure services can add per-resource, consumption, and log-ingestion charges",
+      "pickWhen": "Azure management services are a stated requirement and the organization accepts the Azure dependency.",
+      "walkAwayWhen": "Air-gapped or sovereign tenants, or when Azure-based VM lifecycle is the actual requirement."
     }
   ],
   "decisionCautions": [
     {
-      "statement": "Arc is not an alternative to SCVMM — it sits ON TOP of it.",
-      "explanation": "You still buy and run SCVMM underneath. Arc adds an Azure control plane; it does not replace the fabric manager."
+      "statement": "Arc-enabled SCVMM is closed to new deployments.",
+      "explanation": "Microsoft stopped new onboarding in October 2026 and retires the service in September 2029. Azure Arc-enabled servers cover guest management, and SCVMM itself stays supported under its own lifecycle."
     },
     {
       "statement": "WAC aMode and vMode cannot coexist on the same system.",
@@ -394,8 +386,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Full"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "vSphere Client / PowerCLI",
       "vmwareVcf9": "vSphere Client / PowerCLI",
@@ -408,8 +399,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Not documented in preview",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Not documented in preview"
       },
       "vmwareVsphere8": "Snapshot",
       "vmwareVcf9": "Snapshot (VSS-quiesced via Tools)",
@@ -422,8 +412,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "None"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "OVF/OVA export",
       "vmwareVcf9": "OVF/OVA export",
@@ -436,8 +425,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Full"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "vMotion",
       "vmwareVcf9": "vMotion",
@@ -450,8 +438,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "Enhanced vMotion (XVC)",
       "vmwareVcf9": "Enhanced vMotion (XVC)",
@@ -464,8 +451,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "Storage vMotion",
       "vmwareVcf9": "Storage vMotion",
@@ -478,12 +464,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "VM Web/Remote Console",
       "vmwareVcf9": "VM Web Console",
-      "note": "Classic uses vmconnect.exe. Arc gives portal-based serial/RDP paths, not a true VM console."
+      "note": "Classic uses vmconnect.exe. Azure Arc-enabled servers manage the guest OS and do not provide a VM console."
     },
     {
       "category": "Core VM Ops",
@@ -492,12 +477,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Partial",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Full"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "VM Web Console",
       "vmwareVcf9": "VCF Automation console",
-      "note": "Arc/Azure portal is the only plane with a real delegated web console for end tenants."
+      "note": "Arc-enabled SCVMM filled this role, but it closed to new deployments in October 2026."
     },
     {
       "category": "Core VM Ops",
@@ -506,8 +490,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Partial",
         "wac-admin": "Scripted only",
-        "wac-virtual": "Scripted only",
-        "arc-scvmm": "Scripted only"
+        "wac-virtual": "Scripted only"
       },
       "vmwareVsphere8": "Nested ESXi",
       "vmwareVcf9": "Nested ESXi",
@@ -520,8 +503,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Partial",
         "wac-admin": "Partial",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "vGPU / DirectPath I/O",
       "vmwareVcf9": "Assignable Hardware / Private AI Foundation",
@@ -534,8 +516,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Partial",
         "wac-admin": "Partial",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "NVIDIA vGPU profiles",
       "vmwareVcf9": "vGPU + Private AI Foundation; vMotion ~6x faster",
@@ -548,8 +529,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "None"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "Create Cluster wizard",
       "vmwareVcf9": "Create Cluster wizard",
@@ -562,8 +542,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "None"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "Add/Remove Host",
       "vmwareVcf9": "Add/Remove Host",
@@ -576,8 +555,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "None"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "Auto Deploy / vLCM",
       "vmwareVcf9": "VCF Installer / ZTP (ESXi hosts only)",
@@ -590,8 +568,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "Partial",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Full"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "vCenter / Enhanced Linked Mode",
       "vmwareVcf9": "VCF Fleet (Enhanced Linked Mode REMOVED)",
@@ -604,8 +581,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "vSphere Lifecycle Manager",
       "vmwareVcf9": "vLCM images only (baselines REMOVED) + Live Patch",
@@ -618,8 +594,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Partial",
         "wac-admin": "Full (via extension)",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "None"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "vLCM firmware baselines",
       "vmwareVcf9": "vLCM images, mixed-vendor clusters now allowed",
@@ -632,8 +607,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "None"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "Fault Domains / Host Groups",
       "vmwareVcf9": "Fault Domains / Host Groups",
@@ -646,8 +620,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None (deprecated)",
         "scvmm": "Partial",
         "wac-admin": "None",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Full"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "vSphere HA across clusters",
       "vmwareVcf9": "VCF Fleet",
@@ -660,8 +633,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "DRS affinity rules",
       "vmwareVcf9": "DRS affinity rules",
@@ -674,8 +646,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Partial",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "None"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "DRS",
       "vmwareVcf9": "DRS (now in base VCF subscription)",
@@ -688,8 +659,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "None"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "DPM",
       "vmwareVcf9": "DPM",
@@ -702,8 +672,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Partial",
         "scvmm": "Full",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "EVC",
       "vmwareVcf9": "EVC + Dynamic DirectPath",
@@ -716,8 +685,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "None"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "vSphere rolling upgrade",
       "vmwareVcf9": "vLCM + Live Patch (often no reboot)",
@@ -730,8 +698,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "64 nodes / 8,000 VMs per cluster",
         "scvmm": "1,000 hosts / 25,000 VMs",
         "wac-admin": "~1-50 hosts (guidance)",
-        "wac-virtual": "1,000 hosts / 25,000 VMs",
-        "arc-scvmm": "15,000 VMs per SCVMM server"
+        "wac-virtual": "1,000 hosts / 25,000 VMs"
       },
       "vmwareVsphere8": "2,000 hosts / 25,000 VMs (vCenter)",
       "vmwareVcf9": "128 hosts/cluster (verify on configmax)",
@@ -744,8 +711,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Not in preview",
-        "arc-scvmm": "None"
+        "wac-virtual": "Not in preview"
       },
       "vmwareVsphere8": "vSAN cluster enable",
       "vmwareVcf9": "vSAN ESA (OSA legacy)",
@@ -758,8 +724,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Not in preview",
-        "arc-scvmm": "None"
+        "wac-virtual": "Not in preview"
       },
       "vmwareVsphere8": "vSAN disk mgmt",
       "vmwareVcf9": "vSAN ESA + vSAN Storage Clusters",
@@ -772,8 +737,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "None"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "VMFS datastore on FC/iSCSI",
       "vmwareVcf9": "FC VMFS/NFSv3 greenfield; iSCSI brownfield only",
@@ -786,8 +750,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "None"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "VASA / SPBM",
       "vmwareVcf9": "SPBM; classic vVols DEPRECATED",
@@ -800,8 +763,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "None"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "Array-based clone / VAAI",
       "vmwareVcf9": "Array-based clone / VAAI",
@@ -814,8 +776,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full (no GUI)",
         "scvmm": "Full",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "None"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "SIOC / SPBM IOPS limits",
       "vmwareVcf9": "SPBM (SIOC + Storage DRS I/O REMOVED)",
@@ -828,8 +789,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "None"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "VMFS / Datastore",
       "vmwareVcf9": "VMFS / Datastore",
@@ -842,8 +802,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Partial",
         "scvmm": "None",
         "wac-admin": "Full",
-        "wac-virtual": "None",
-        "arc-scvmm": "None"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "(no analogue)",
       "vmwareVcf9": "(no analogue)",
@@ -856,8 +815,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only (REST SDK)",
         "scvmm": "Full (SMI-S/SMP provider)",
         "wac-admin": "Full (WAC extension)",
-        "wac-virtual": "None yet",
-        "arc-scvmm": "None"
+        "wac-virtual": "None yet"
       },
       "vmwareVsphere8": "Pure vSphere Plugin / VASA",
       "vmwareVcf9": "FC VMFS safe; next-gen vVols still maturing",
@@ -870,8 +828,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Partial (Network ATC)",
-        "arc-scvmm": "None"
+        "wac-virtual": "Partial (Network ATC)"
       },
       "vmwareVsphere8": "vSphere Standard Switch",
       "vmwareVcf9": "vSphere Standard Switch",
@@ -884,8 +841,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Full (Logical Switch)",
         "wac-admin": "Partial",
-        "wac-virtual": "Full (Network ATC intent)",
-        "arc-scvmm": "None"
+        "wac-virtual": "Full (Network ATC intent)"
       },
       "vmwareVsphere8": "vSphere Distributed Switch",
       "vmwareVcf9": "VDS 7.0+ only (N-VDS REMOVED)",
@@ -898,8 +854,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "Port Groups / Network folders",
       "vmwareVcf9": "NSX VPC / Transit Gateway",
@@ -912,8 +867,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Full",
         "wac-admin": "Partial (SDN extension)",
-        "wac-virtual": "Not in preview",
-        "arc-scvmm": "None"
+        "wac-virtual": "Not in preview"
       },
       "vmwareVsphere8": "NSX",
       "vmwareVcf9": "NSX 9 + VPC constructs",
@@ -926,8 +880,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "None"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "NSX ALB / F5 integration",
       "vmwareVcf9": "NSX ALB",
@@ -940,8 +893,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "None"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "(vCenter IP pools)",
       "vmwareVcf9": "(vCenter IP pools)",
@@ -954,8 +906,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Full",
         "wac-admin": "Partial",
-        "wac-virtual": "None",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "NSX DFW",
       "vmwareVcf9": "NSX DFW + per-tenant NSX Projects",
@@ -968,8 +919,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "Full (new in preview)",
-        "arc-scvmm": "Full"
+        "wac-virtual": "Full (new in preview)"
       },
       "vmwareVsphere8": "VM Template",
       "vmwareVcf9": "VM Template",
@@ -982,8 +932,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "Customization Specifications",
       "vmwareVcf9": "Config Profiles (Host Profiles DEPRECATED)",
@@ -996,8 +945,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "None"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "vApp",
       "vmwareVcf9": "vApp",
@@ -1010,8 +958,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "Content Library",
       "vmwareVcf9": "Content Library",
@@ -1024,12 +971,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "Full"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "vRA / Aria Automation",
       "vmwareVcf9": "VCF Automation (supersedes vRA + Cloud Director)",
-      "note": "SCVMM self-service roles OR Azure RBAC via Arc. Nothing in between."
+      "note": "SCVMM self-service roles. Azure RBAC through Arc-enabled SCVMM closed to new deployments in October 2026."
     },
     {
       "category": "Templates & Provisioning",
@@ -1038,12 +984,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "Full"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "Resource Pool limits / vRA quotas",
       "vmwareVcf9": "VCF Automation Orgs/Projects",
-      "note": "SCVMM role+member quotas, or Azure Policy/quota via Arc."
+      "note": "SCVMM role+member quotas. Azure Policy on Arc-enabled servers governs guest configuration, not VM quotas."
     },
     {
       "category": "Templates & Provisioning",
@@ -1052,8 +997,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Full",
         "wac-admin": "Preview (VM Conversion ext.)",
-        "wac-virtual": "None",
-        "arc-scvmm": "Partial (Azure Migrate)"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "(n/a)",
       "vmwareVcf9": "(n/a)",
@@ -1066,8 +1010,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None (local Admins)",
         "scvmm": "Full",
         "wac-admin": "Partial (JEA roles)",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Full (Azure RBAC)"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "vCenter roles & permissions",
       "vmwareVcf9": "VCF Automation Orgs/Projects (IWA REMOVED)",
@@ -1080,8 +1023,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Full (Clouds)",
         "wac-admin": "None",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Full (subscriptions/RGs)"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "Tenant vDC / vCD org",
       "vmwareVcf9": "VCF Automation Org + NSX Project",
@@ -1094,8 +1036,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "None"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "vTPM + Key Provider",
       "vmwareVcf9": "vTPM + Key Provider",
@@ -1108,8 +1049,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "Secure Boot / VBS",
       "vmwareVcf9": "Secure Boot / VBS",
@@ -1122,12 +1062,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Partial",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Full (Defender for Cloud)"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "Aria Ops / Carbon Black",
       "vmwareVcf9": "VCF Operations Security dashboard",
-      "note": "Only the Arc path gives real security posture management."
+      "note": "Azure Arc-enabled servers add Defender for Cloud security posture management to any plane."
     },
     {
       "category": "Security & Multi-tenancy",
@@ -1136,8 +1075,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Kerberos / CredSSP",
         "scvmm": "Run As accounts",
         "wac-admin": "CredSSP (security tradeoff)",
-        "wac-virtual": "Auto-configured constrained Kerberos",
-        "arc-scvmm": "Entra ID / managed identity"
+        "wac-virtual": "Auto-configured constrained Kerberos"
       },
       "vmwareVsphere8": "SSO / SAML",
       "vmwareVcf9": "Federation / LDAPS (IWA REMOVED)",
@@ -1150,8 +1088,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Partial (Event Log)",
         "scvmm": "Full",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Full (Activity Log)"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "vCenter Events/Tasks",
       "vmwareVcf9": "VCF Operations (native log ingest)",
@@ -1164,8 +1101,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Partial",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Full"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "vSphere Client charts",
       "vmwareVcf9": "VCF Operations (bundled)",
@@ -1178,8 +1114,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full (S2D only, 1 yr, PS only)",
         "scvmm": "Full (with SCOM)",
         "wac-admin": "Full (S2D dashboard)",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Full (Azure Monitor)"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "vCenter / Aria Operations",
       "vmwareVcf9": "VCF Operations (bundled, was Aria)",
@@ -1192,8 +1127,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Full (with SCOM)",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Full (Azure Monitor alerts)"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "vCenter alarms",
       "vmwareVcf9": "VCF Operations (bundled)",
@@ -1206,8 +1140,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Scripted only",
         "scvmm": "Full",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Full"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "Aria Operations",
       "vmwareVcf9": "VCF Operations (bundled)",
@@ -1220,8 +1153,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Partial",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Full (Update Manager)"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "vRealize / third party",
       "vmwareVcf9": "vRealize / third party",
@@ -1234,8 +1166,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full (CAU)",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "vLCM",
       "vmwareVcf9": "vLCM images + Live Patch (no maint. mode)",
@@ -1248,8 +1179,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full (API layer)",
         "scvmm": "Full (+ DPM)",
         "wac-admin": "Full",
-        "wac-virtual": "Full",
-        "arc-scvmm": "Full (+ Azure Backup)"
+        "wac-virtual": "Full"
       },
       "vmwareVsphere8": "VADP",
       "vmwareVcf9": "VADP",
@@ -1262,8 +1192,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full (Hyper-V Replica)",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Full (Replica tool)",
-        "arc-scvmm": "Full (ASR)"
+        "wac-virtual": "Full (Replica tool)"
       },
       "vmwareVsphere8": "SRM / VCDR",
       "vmwareVcf9": "VCF Protection & Recovery (SRM absorbed)",
@@ -1276,12 +1205,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Partial",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "Full (Cost Mgmt)"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "Aria Operations / vCloud Usage",
       "vmwareVcf9": "VCF Operations Cost (bundled)",
-      "note": "Real gap for a hoster unless you go Arc or build your own."
+      "note": "Real gap for a hoster unless you build your own."
     },
     {
       "category": "Automation & Integration",
@@ -1290,8 +1218,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Full (deepest)",
         "scvmm": "Full",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial",
-        "arc-scvmm": "Full (Az module)"
+        "wac-virtual": "Partial"
       },
       "vmwareVsphere8": "PowerCLI",
       "vmwareVcf9": "PowerCLI",
@@ -1304,12 +1231,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "Partial (SPF discontinued)",
         "wac-admin": "Partial",
-        "wac-virtual": "Partial (gateway API)",
-        "arc-scvmm": "Full (ARM)"
+        "wac-virtual": "Partial (gateway API)"
       },
       "vmwareVsphere8": "vSphere REST API",
       "vmwareVcf9": "vSphere Automation API (legacy SDKs removed)",
-      "note": "SPF is DISCONTINUED in System Center 2025 - Arc is the replacement."
+      "note": "SPF is DISCONTINUED in System Center 2025. Arc-enabled SCVMM, its named successor, closed to new deployments in October 2026, so ask Microsoft for the current transition path."
     },
     {
       "category": "Automation & Integration",
@@ -1318,12 +1244,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Community only",
         "scvmm": "Community only",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "Full (Microsoft AzAPI/AzureRM)"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "Official VMware provider",
       "vmwareVcf9": "terraform-provider-vcf + vsphere (first-party)",
-      "note": "Only the Arc path has a first-party, Microsoft-supported Terraform provider."
+      "note": "The first-party Terraform path was Arc-enabled SCVMM, which closed to new deployments in October 2026."
     },
     {
       "category": "Automation & Integration",
@@ -1332,8 +1257,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Community (WinRM)",
         "scvmm": "Community",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "Partial"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "Official VMware collections",
       "vmwareVcf9": "Official VMware collections",
@@ -1346,12 +1270,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "None",
         "wac-admin": "None",
-        "wac-virtual": "None",
-        "arc-scvmm": "Full"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "(n/a)",
       "vmwareVcf9": "(n/a)",
-      "note": "Arc-enabled SCVMM exposes VMs as ARM resources - real IaC."
+      "note": "Arc-enabled SCVMM exposed VMs as ARM resources, but it closed to new deployments in October 2026. Arc-enabled servers represent the guest OS, not the VM lifecycle."
     },
     {
       "category": "Automation & Integration",
@@ -1360,8 +1283,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Partial",
         "scvmm": "Full",
         "wac-admin": "Full",
-        "wac-virtual": "Thin (preview)",
-        "arc-scvmm": "Growing"
+        "wac-virtual": "Thin (preview)"
       },
       "vmwareVsphere8": "Very deep",
       "vmwareVcf9": "Very deep, but HCL narrowed in 9.x",
@@ -1374,8 +1296,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "N/A - none required",
         "scvmm": "Requires HA VMM + SQL AG",
         "wac-admin": "Active/passive cluster role",
-        "wac-virtual": "NOT DOCUMENTED (preview gap)",
-        "arc-scvmm": "Azure-hosted (Microsoft HA)"
+        "wac-virtual": "NOT DOCUMENTED (preview gap)"
       },
       "vmwareVsphere8": "vCenter HA / VCHA",
       "vmwareVcf9": "vCenter HA / VCHA",
@@ -1388,8 +1309,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None (AD recommended)",
         "scvmm": "SQL Server + VMM server(s) + Library",
         "wac-admin": "Gateway server + cert",
-        "wac-virtual": "Gateway + PostgreSQL + per-host agents",
-        "arc-scvmm": "Resource bridge VM (4 vCPU/32GB/100GB) + SCVMM"
+        "wac-virtual": "Gateway + PostgreSQL + per-host agents"
       },
       "vmwareVsphere8": "vCenter appliance",
       "vmwareVcf9": "vCenter + NSX + SDDC Mgr + Ops + Automation",
@@ -1402,8 +1322,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Optional",
         "scvmm": "Required (Run As, HTTPS)",
         "wac-admin": "CA cert or 60-day self-signed",
-        "wac-virtual": "Self-signed ONLY in preview",
-        "arc-scvmm": "Azure-managed"
+        "wac-virtual": "Self-signed ONLY in preview"
       },
       "vmwareVsphere8": "vCenter certs",
       "vmwareVcf9": "vCenter certs",
@@ -1416,12 +1335,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Fully air-gap capable",
         "scvmm": "Fully air-gap capable",
         "wac-admin": "Air-gap capable",
-        "wac-virtual": "Air-gap capable",
-        "arc-scvmm": "NOT air-gap capable"
+        "wac-virtual": "Air-gap capable"
       },
       "vmwareVsphere8": "Air-gap capable",
       "vmwareVcf9": "Air-gap capable (Fleet Depot side-load)",
-      "note": "Arc requires persistent outbound 443. Hard stop for air-gapped tenants."
+      "note": "Azure Arc-enabled servers require outbound 443. Hard stop for air-gapped tenants."
     },
     {
       "category": "Platform / Operational",
@@ -1430,8 +1348,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None",
         "scvmm": "None",
         "wac-admin": "Optional",
-        "wac-virtual": "None",
-        "arc-scvmm": "Mandatory"
+        "wac-virtual": "None"
       },
       "vmwareVsphere8": "None",
       "vmwareVcf9": "None",
@@ -1444,8 +1361,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "GA - decades",
         "scvmm": "GA - System Center 2025",
         "wac-admin": "GA - WAC 2606 (Jul 2026)",
-        "wac-virtual": "PUBLIC PREVIEW 2 (Apr 2026)",
-        "arc-scvmm": "GA - Nov 2023"
+        "wac-virtual": "PUBLIC PREVIEW 2 (Apr 2026)"
       },
       "vmwareVsphere8": "GA",
       "vmwareVcf9": "GA - VCF 9.1 (May 2026)",
@@ -1458,8 +1374,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Tied to Windows Server 2025 (2034/2035)",
         "scvmm": "Mainstream 2030-01-09, Extended 2035-01-10",
         "wac-admin": "Modern Lifecycle - upgrade within 30 days",
-        "wac-virtual": "Modern Lifecycle (preview, unsupported)",
-        "arc-scvmm": "Modern Lifecycle (Azure)"
+        "wac-virtual": "Modern Lifecycle (preview, unsupported)"
       },
       "vmwareVsphere8": "VCF lifecycle",
       "vmwareVcf9": "VCF 9.x EOS ~Jun 2031 (6+1 model)",
@@ -1472,8 +1387,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "None (in-OS)",
         "scvmm": "High (VMM + SQL + UR cadence)",
         "wac-admin": "Medium (30-day upgrade window)",
-        "wac-virtual": "Medium-High",
-        "arc-scvmm": "Low (Microsoft-managed)"
+        "wac-virtual": "Medium-High"
       },
       "vmwareVsphere8": "Medium (VCSA upgrades)",
       "vmwareVcf9": "Lower - Live Patch + vCenter RDU",
@@ -1486,12 +1400,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Stable / maintained",
         "scvmm": "Maintained, Azure surface narrowing",
         "wac-admin": "Actively invested",
-        "wac-virtual": "New investment area",
-        "arc-scvmm": "Strategic but Azure Local favored"
+        "wac-virtual": "New investment area"
       },
       "vmwareVsphere8": "(n/a)",
       "vmwareVcf9": "Broadcom: VCF-only, subscription-only",
-      "note": "Pattern: on-prem fabric -> WAC vMode + VMM; cloud governance -> Arc."
+      "note": "Pattern: on-prem fabric -> WAC vMode + VMM; cloud governance -> Azure Arc-enabled servers."
     },
     {
       "category": "Skills & GTM",
@@ -1500,8 +1413,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Steep (no vCenter analogue)",
         "scvmm": "Moderate (closest to vCenter)",
         "wac-admin": "Low (modern web UI)",
-        "wac-virtual": "Low-Moderate",
-        "arc-scvmm": "Low if Azure-fluent, else steep"
+        "wac-virtual": "Low-Moderate"
       },
       "vmwareVsphere8": "-",
       "vmwareVcf9": "Re-learn: Automation, VPCs, Supervisor",
@@ -1514,8 +1426,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Moderate",
         "scvmm": "Low",
         "wac-admin": "Low",
-        "wac-virtual": "Moderate",
-        "arc-scvmm": "Moderate"
+        "wac-virtual": "Moderate"
       },
       "vmwareVsphere8": "-",
       "vmwareVcf9": "Re-learn: new tenancy + networking model",
@@ -1528,12 +1439,11 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Poor",
         "scvmm": "Strong",
         "wac-admin": "Weak",
-        "wac-virtual": "Promising, not yet",
-        "arc-scvmm": "Strong (if tenants accept Azure)"
+        "wac-virtual": "Promising, not yet"
       },
       "vmwareVsphere8": "-",
       "vmwareVcf9": "VCSP program now invite-only",
-      "note": "RECOMMENDATION: SCVMM as the fabric of record; prefer WAC vMode where current gaps are acceptable, with aMode as the production fallback; Arc optional per tenant."
+      "note": "RECOMMENDATION: SCVMM as the fabric of record; prefer WAC vMode where current gaps are acceptable, with aMode as the production fallback; Azure Arc-enabled servers optional per tenant."
     },
     {
       "category": "Skills & GTM",
@@ -1542,8 +1452,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Fair",
         "scvmm": "Strong",
         "wac-admin": "Strong",
-        "wac-virtual": "Promising",
-        "arc-scvmm": "Strong"
+        "wac-virtual": "Promising"
       },
       "vmwareVsphere8": "-",
       "vmwareVcf9": "Strong, if you accept subscription",
@@ -1556,8 +1465,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Strong",
         "scvmm": "Poor (overhead)",
         "wac-admin": "Strong",
-        "wac-virtual": "Moderate",
-        "arc-scvmm": "Moderate"
+        "wac-virtual": "Moderate"
       },
       "vmwareVsphere8": "-",
       "vmwareVcf9": "VCF Edge 9.1",
@@ -1570,8 +1478,7 @@ export const MANAGEMENT_WORKBOOK = {
         "classic": "Baseline ($0)",
         "scvmm": "+System Center per host + SQL",
         "wac-admin": "$0",
-        "wac-virtual": "$0",
-        "arc-scvmm": "+Azure consumption per VM/host"
+        "wac-virtual": "$0"
       },
       "vmwareVsphere8": "-",
       "vmwareVcf9": "Per-core subscription, 16-core/CPU minimum",
@@ -1833,7 +1740,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "ref": "ARC-CP",
-      "product": "Azure Arc control plane (inventory, RBAC, tags, VM CRUD)",
+      "product": "Azure Arc control plane (inventory, RBAC, tags)",
       "edition": "-",
       "channel": "Azure",
       "unit": "per resource",
@@ -1841,19 +1748,7 @@ export const MANAGEMENT_WORKBOOK = {
       "confidence": "HIGH - Microsoft docs",
       "priceDate": "Aug 2026",
       "source": "https://learn.microsoft.com/azure/azure-arc/overview#pricing",
-      "note": "Free. Includes the Arc-enabled SCVMM connector itself and the resource bridge."
-    },
-    {
-      "ref": "ARC-BRIDGE",
-      "product": "Azure Arc resource bridge",
-      "edition": "-",
-      "channel": "Azure",
-      "unit": "per appliance",
-      "price": "$0.00",
-      "confidence": "HIGH - Microsoft docs",
-      "priceDate": "Aug 2026",
-      "source": "https://learn.microsoft.com/azure/azure-arc/overview#pricing",
-      "note": "Free as a meter. Consumes 4 vCPU / 32GB RAM / 100GB on YOUR infrastructure."
+      "note": "Free. Azure services enabled on Arc-enabled servers are billed separately."
     },
     {
       "ref": "AUM",
@@ -2183,7 +2078,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "vmware": "vRealize / Aria Automation",
-      "hyperv": "SCVMM self-service, or Azure RBAC via Arc",
+      "hyperv": "SCVMM self-service",
       "fidelity": "Partial",
       "note": "Neither is as rich as vRA."
     },
@@ -2231,7 +2126,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "vmware": "Tenant vDC / vCloud Director Org",
-      "hyperv": "SCVMM Cloud, or Azure subscription via Arc",
+      "hyperv": "SCVMM Cloud",
       "fidelity": "Partial",
       "note": "SCVMM 'Cloud' is the on-prem tenant abstraction."
     },
@@ -2297,7 +2192,7 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "topic": "SCVMM 2025 changes",
-      "finding": "SPF (Service Provider Foundation) is DISCONTINUED. Azure VM management from VMM and Azure Update Management v1 are no longer supported — Microsoft directs you to Arc-enabled SCVMM. ESXi→Hyper-V conversion is ~4x faster.",
+      "finding": "SPF (Service Provider Foundation) is DISCONTINUED. Azure VM management from VMM and Azure Update Management v1 are no longer supported — Microsoft directed customers to Arc-enabled SCVMM, which closed to new deployments in October 2026. ESXi→Hyper-V conversion is ~4x faster.",
       "source": "https://learn.microsoft.com/system-center/vmm/whats-new-in-vmm?view=sc-vmm-2025"
     },
     {
@@ -2351,13 +2246,13 @@ export const MANAGEMENT_WORKBOOK = {
       "source": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/use/manage-hyper-converged"
     },
     {
-      "topic": "Arc-enabled SCVMM",
-      "finding": "GA Nov 2023. Requires an Arc resource bridge appliance (4 vCPU / 32 GB RAM / 100 GB free) on an SCVMM cloud or host group, static IPs only (3 contiguous), outbound TCP 443, minimum 100 Mbps. Max 15,000 VMs per SCVMM server. NOT supported for VMware-vCenter VMs managed by SCVMM.",
-      "source": "https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager"
+      "topic": "Arc-enabled SCVMM retirement",
+      "finding": "Microsoft stopped new onboarding in October 2026 and retires the service in September 2029. Existing deployments keep working until then. Azure Arc-enabled servers are the recommended path for Azure management services and do not provide VM lifecycle operations.",
+      "source": "https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/transition-guidance"
     },
     {
-      "topic": "Arc connector is free",
-      "finding": "Arc control plane, the Arc-enabled SCVMM connector, the resource bridge, inventory, RBAC, tags and VM CRUD/power operations are all free. You pay only for the Azure services layered on top.",
+      "topic": "Arc control plane is free",
+      "finding": "The Azure Arc control plane, inventory, RBAC, and tags are free. You pay only for the Azure services layered on top.",
       "source": "https://learn.microsoft.com/azure/azure-arc/overview#pricing"
     },
     {
@@ -2367,12 +2262,12 @@ export const MANAGEMENT_WORKBOOK = {
     },
     {
       "topic": "Arc is not air-gap capable",
-      "finding": "Arc-enabled SCVMM requires an ongoing resource-bridge connection to Azure; enabled guest services have their own connectivity and billing-state requirements. True disconnected operation exists only in Azure Local's separate disconnected-operations feature.",
+      "finding": "Azure Arc-enabled servers require an outbound connection to Azure; enabled services have their own connectivity and billing-state requirements. True disconnected operation exists only in Azure Local's separate disconnected-operations feature.",
       "source": "https://learn.microsoft.com/azure/azure-arc/resource-bridge/network-requirements"
     },
     {
       "topic": "Azure Lighthouse",
-      "finding": "Free. Supports cross-tenant delegated management of Arc-enabled servers and SCVMM machines. Documented pattern is customer-owned tenants delegated to the provider's managing tenant. Caveat: Azure Backup cross-tenant support is incomplete for vault-based workloads.",
+      "finding": "Free. Supports cross-tenant delegated management of Arc-enabled servers. Documented pattern is customer-owned tenants delegated to the provider's managing tenant. Caveat: Azure Backup cross-tenant support is incomplete for vault-based workloads.",
       "source": "https://learn.microsoft.com/azure/lighthouse/concepts/cross-tenant-management-experience"
     },
     {
@@ -2722,39 +2617,6 @@ export const MANAGEMENT_WORKBOOK = {
       "verified": "2026-08-20",
       "source": "https://learn.microsoft.com/windows-server/manage/windows-admin-center/deploy/high-availability",
       "note": "Active/passive. This is not evidence of a supported Virtualization Mode HA design."
-    },
-    {
-      "category": "Arc-enabled SCVMM",
-      "scope": "SCVMM connection",
-      "capability": "Managed virtual machines",
-      "value": "15,000 per SCVMM server",
-      "appliesTo": "Arc-enabled SCVMM",
-      "basis": "MS",
-      "verified": "2026-08-20",
-      "source": "https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager",
-      "note": ""
-    },
-    {
-      "category": "Arc-enabled SCVMM",
-      "scope": "Arc resource bridge",
-      "capability": "Required free capacity",
-      "value": "4 vCPU; 32 GB RAM; 100 GB disk",
-      "appliesTo": "Arc-enabled SCVMM",
-      "basis": "MS",
-      "verified": "2026-08-20",
-      "source": "https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager",
-      "note": "Also requires static addressing, DNS resolution, and outbound connectivity."
-    },
-    {
-      "category": "Arc-enabled SCVMM",
-      "scope": "Arc resource bridge",
-      "capability": "Static IP addresses",
-      "value": "3",
-      "appliesTo": "Arc-enabled SCVMM",
-      "basis": "MS",
-      "verified": "2026-08-20",
-      "source": "https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/support-matrix-for-system-center-virtual-machine-manager",
-      "note": "Two appliance VM addresses plus one control-plane address; contiguous addresses are supported by the documented custom range flow."
     }
   ],
   "caveats": [
@@ -2989,7 +2851,7 @@ export const MANAGEMENT_WORKBOOK = {
       "objection": "\"Microsoft is killing System Center.\"",
       "verdict": "FALSE",
       "answer": "System Center 2025 GA'd November 2024 with an active Update Rollup cadence. Mainstream support runs to 9 Jan 2030, extended support to 10 Jan 2035.",
-      "concede": "Concede the real trend: Microsoft IS narrowing System Center's Azure-facing surface. SPF is discontinued and native Azure VM management was removed in 2025, redirected to Arc. The product is supported; its cloud ambitions moved to Arc."
+      "concede": "Concede the real trend: Microsoft IS narrowing System Center's Azure-facing surface. SPF is discontinued and native Azure VM management was removed in 2025, redirected to Arc. The product is supported; its Azure path now runs through Arc-enabled servers and Azure Local."
     },
     {
       "objection": "\"Linux doesn't run well on Hyper-V.\"",

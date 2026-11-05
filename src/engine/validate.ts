@@ -1,7 +1,7 @@
 /** Validation. Errors block a design; warnings annotate it. */
 import { LIMITS, RESILIENCY, SRC } from './rules'
 import { cacheRatio, rawPerServerTB, usesCacheTier } from './capacity'
-import { s2dMetadataRamGiB, totalCores } from './compute'
+import { s2dMetadataRamGiB, totalCores, usableCoresPerHost, usableRamPerHost } from './compute'
 import { assessPerformanceData } from './performance'
 import type { ClusterConfig, CsvPlan, Finding, TierId, TierPolicy, Vm } from './types'
 
@@ -14,6 +14,21 @@ const warn = (code: string, message: string, basis: Finding['basis'], source?: s
 const info = (code: string, message: string, basis: Finding['basis'], source?: string): Finding => ({
   severity: 'info', code, message, basis, source,
 })
+
+/** Hardware values that make every result meaningless. Names match the labels on the input forms. */
+export function hardwareInputProblems(cfg: ClusterConfig): string[] {
+  const problems: string[] = []
+  const usesS2d = cfg.architecture === 's2d' || cfg.architecture === 'hybrid'
+  const { sockets, coresPerSocket, ramGiB, capacityDrivesPerNode, capacityDriveTB } = cfg.node
+  if (!(sockets >= 1)) problems.push('Sockets must be at least 1.')
+  if (!(coresPerSocket >= 1)) problems.push('Cores / socket must be at least 1.')
+  if (!(ramGiB > 0)) problems.push('RAM per server must be above 0 GiB.')
+  if (sockets >= 1 && coresPerSocket >= 1 && usableCoresPerHost(cfg.node, cfg) <= 0) problems.push('The CPU reserve leaves no usable cores on each server.')
+  if (ramGiB > 0 && usableRamPerHost(cfg.node, cfg) <= 0) problems.push('The RAM reserve leaves no usable memory on each server.')
+  if (usesS2d && (!(capacityDrivesPerNode > 0) || !(capacityDriveTB > 0))) problems.push('S2D needs a capacity drive count and drive size above 0.')
+  if ((cfg.architecture === 'san' || cfg.architecture === 'hybrid') && cfg.sanSizingMode !== 'calculated' && !(cfg.san.usableTiB > 0)) problems.push('Array usable capacity must be above 0 TiB.')
+  return problems
+}
 
 export function validateDesign(
   cfg: ClusterConfig,
@@ -192,7 +207,7 @@ export function validateDesign(
   }
   if (sanPlans.length > 0 && !(sanPlans[0].recoveryGroupingApplied) && granularSanAlternative > sanCsvs) {
     f.push(info('SAN_GRANULAR_ALTERNATIVE',
-      `The selected SAN layout uses ${sanCsvs} CSV/LUNs. Enforcing the editable tier recovery targets would use ${granularSanAlternative}; that alternative remains available in Node Specifications.`,
+      `The selected SAN layout uses ${sanCsvs} CSV/LUNs. Enforcing the editable tier recovery targets would use ${granularSanAlternative}; that alternative remains available in Hardware and assumptions.`,
       'TOOL'))
   }
 

@@ -10,6 +10,15 @@ import type { EngagementMode } from '../state/journey'
 const r1 = (n: number) => Math.round(n * 10) / 10
 const r0 = (n: number) => Math.round(n)
 
+/** A design that does not fit reports the node count it needs, never the cluster limit. */
+function nodesForExport(result: SizingResult): number | string {
+  if (result.feasible) return result.nodes
+  if (result.nodesNeeded === null) return 'Review required'
+  return result.nodesNeeded > result.clusterNodeLimit
+    ? `${result.nodesNeeded} needed (limit ${result.clusterNodeLimit})`
+    : `${result.nodesNeeded} (blocked)`
+}
+
 export function exportDesign(
   options: ArchitectureOption[],
   chosen: ArchitectureOption,
@@ -33,14 +42,15 @@ export function exportDesign(
   for (const o of options) {
     const s = o.result
     summary.push([
-      o.label, s.nodes, s.workloadNodes, s.feasible ? 'YES' : 'NO', s.binding,
-      s.capacity ? r1(s.capacity.usableTiB) : s.sanCapacityTiB ? r1(s.sanCapacityTiB) : '—',
-      r1(s.requiredStorageTiB), s.totalCsvs, s.totalLicensableCores, r1(s.resiliencyOverheadPct),
+      o.label, nodesForExport(s), s.feasible ? s.workloadNodes : '—', s.feasible ? 'YES' : 'NO', s.binding,
+      !s.feasible ? '—' : s.capacity ? r1(s.capacity.usableTiB) : s.sanCapacityTiB ? r1(s.sanCapacityTiB) : '—',
+      r1(s.requiredStorageTiB), s.feasible ? s.totalCsvs : '—', s.feasible ? s.totalLicensableCores : '—', s.feasible ? r1(s.resiliencyOverheadPct) : '—',
     ])
   }
   summary.push([], ['SELECTED DESIGN'], ['Architecture', chosen.label],
     ['Resiliency', RESILIENCY[chosen.result.resiliency].label],
-    ['Nodes', chosen.result.nodes], ['Workload nodes (after N+n)', chosen.result.workloadNodes],
+    ['Nodes', nodesForExport(chosen.result)], ['Workload nodes (after N+n)', chosen.result.feasible ? chosen.result.workloadNodes : '—'],
+    ...(chosen.result.sanSizing ? [['SAN usable capacity to buy (TiB)', r1(chosen.result.sanSizing.usableToBuyTiB)]] : []),
     ['Binding constraint', chosen.result.binding], ['Explanation', chosen.result.bindingExplanation],
     ['Nodes if CPU alone', chosen.result.nodesIfCpuOnly],
     ['Nodes if memory alone', chosen.result.nodesIfMemoryOnly],
@@ -48,7 +58,7 @@ export function exportDesign(
     [], ['NODE SPEC'],
     ['Sockets', cfg.node.sockets], ['Cores per socket', cfg.node.coresPerSocket],
     ['Total physical cores', cfg.node.sockets * cfg.node.coresPerSocket],
-    ['Licensable cores (16/server, 8/socket minimum)', chosen.result.licensableCoresPerNode],
+    ['Licensable cores per node (16/server, 8/socket minimum)', chosen.result.licensableCoresPerNode],
     ['RAM (GiB)', cfg.node.ramGiB],
     ['Capacity drives per node', cfg.node.capacityDrivesPerNode],
     ['Capacity drive size (TB)', cfg.node.capacityDriveTB],
@@ -91,7 +101,7 @@ export function exportDesign(
   ]
   growth.points.forEach((point, index) => {
     const action = !point.result.feasible
-      ? 'Review node density or split into multiple clusters'
+      ? 'Review server size, storage type, or cluster layout'
       : growth.plan.strategy === 'build-now'
         ? index === 0
           ? `Build ${growth.plannedNodesToday ?? 'N/A'} nodes now`

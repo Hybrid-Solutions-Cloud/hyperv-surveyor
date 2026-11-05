@@ -5,7 +5,7 @@ const completeAnswers = (overrides: AdvisorAnswers = {}): AdvisorAnswers => ({
   airGap: false,
   bareMetal: false,
   tenantSelfService: false,
-  delegatedPortal: false,
+  azureServices: false,
   clusterCreation: false,
   pureIntegration: false,
   drs: false,
@@ -29,21 +29,19 @@ describe('management-plane recommendations', () => {
 
     expect(result.status).toBe('incomplete')
     expect(result.stack).toEqual([])
-    expect(result.eligible).toHaveLength(5)
-    expect(result.unansweredDecisionIds).toContain('delegatedPortal')
+    expect(result.eligible).toHaveLength(4)
+    expect(result.unansweredDecisionIds).toContain('azureServices')
   })
 
-  it('treats Question 1 Yes as an Arc-only exclusion', () => {
+  it('treats Question 1 Yes as excluding only Azure Arc-enabled servers', () => {
     const result = recommendManagementPlane({ airGap: true })
 
     expect(result.status).toBe('incomplete')
     expect(result.stack).toEqual([])
-    expect(result.eligible).toEqual(expect.arrayContaining(['classic', 'scvmm', 'wac-admin', 'wac-virtual']))
-    expect(result.eligible).not.toContain('arc-scvmm')
-    expect(result.excluded).toEqual([
-      expect.objectContaining({ id: 'arc-scvmm' }),
-    ])
-    expect(result.headline).toContain('Classic, SCVMM without Arc, WAC aMode, and WAC vMode remain available')
+    expect(result.eligible).toEqual(['classic', 'scvmm', 'wac-virtual', 'wac-admin'])
+    expect(result.excluded).toEqual([])
+    expect(result.arcServers).toBe(false)
+    expect(result.headline).toContain('Classic, SCVMM, WAC aMode, and WAC vMode remain available')
   })
 
   it('keeps every plane available when Question 1 is No', () => {
@@ -51,7 +49,7 @@ describe('management-plane recommendations', () => {
 
     expect(result.status).toBe('incomplete')
     expect(result.stack).toEqual([])
-    expect(result.eligible).toHaveLength(5)
+    expect(result.eligible).toHaveLength(4)
     expect(result.excluded).toEqual([])
   })
 
@@ -64,7 +62,7 @@ describe('management-plane recommendations', () => {
 
   it('can confirm the foundation without pretending an unanswered WAC mode is decided', () => {
     const result = recommendManagementPlane({
-      delegatedPortal: false,
+      azureServices: false,
       bareMetal: false,
       tenantSelfService: false,
       pureIntegration: false,
@@ -101,32 +99,41 @@ describe('management-plane recommendations', () => {
     expect(result.cautions.some((caution) => caution.includes('Pure Storage'))).toBe(true)
   })
 
-  it('uses only SCVMM and Arc when Azure portal or ARM management is required', () => {
-    const result = recommendManagementPlane(completeAnswers({ delegatedPortal: true }))
+  it('adds Azure Arc-enabled servers without changing the management stack', () => {
+    const without = recommendManagementPlane(completeAnswers())
+    const result = recommendManagementPlane(completeAnswers({ azureServices: true }))
 
     expect(result.status).toBe('ready')
-    expect(result.stack).toEqual(['scvmm', 'arc-scvmm'])
-    expect(result.eligible).toEqual(['scvmm', 'arc-scvmm'])
+    expect(result.stack).toEqual(without.stack)
+    expect(result.arcServers).toBe(true)
+    expect(result.headline).toContain('Azure Arc-enabled servers')
+    expect(result.cautions.some((caution) => caution.includes('do not provide VM lifecycle'))).toBe(true)
   })
 
-  it('shows the Arc direction immediately but waits for both readiness answers', () => {
-    const result = recommendManagementPlane({ delegatedPortal: true })
+  it('never recommends the retired Arc-enabled SCVMM plane', () => {
+    const result = recommendManagementPlane(completeAnswers({ azureServices: true, largeFabric: true }))
+
+    expect(result.stack as string[]).not.toContain('arc-scvmm')
+    expect(result.eligible as string[]).not.toContain('arc-scvmm')
+  })
+
+  it('waits for both readiness answers before approving Azure Arc-enabled servers', () => {
+    const result = recommendManagementPlane({ azureServices: true })
 
     expect(result.status).toBe('incomplete')
-    expect(result.stack).toEqual(['scvmm', 'arc-scvmm'])
-    expect(result.unansweredDecisionIds).toEqual(['airGap', 'azureReady'])
+    expect(result.stack).toEqual([])
+    expect(result.unansweredDecisionIds.slice(0, 2)).toEqual(['airGap', 'azureReady'])
     expect(result.cautions.some((caution) => caution.includes('Confirm Azure subscription ownership'))).toBe(true)
   })
 
-  it('reports a conflict when Arc is required and a readiness answer blocks it', () => {
-    const airGapped = recommendManagementPlane({ delegatedPortal: true, airGap: true })
-    const notReady = recommendManagementPlane({ delegatedPortal: true, azureReady: false })
+  it('reports a conflict when Arc is requested and a readiness answer blocks it', () => {
+    const airGapped = recommendManagementPlane({ azureServices: true, airGap: true })
+    const notReady = recommendManagementPlane({ azureServices: true, azureReady: false })
 
     for (const result of [airGapped, notReady]) {
       expect(result.status).toBe('conflict')
-      expect(result.stack).toEqual(['scvmm'])
-      expect(result.eligible).not.toContain('arc-scvmm')
-      expect(result.headline).toContain('No valid stack satisfies')
+      expect(result.arcServers).toBe(false)
+      expect(result.headline).toContain('rule them out')
     }
   })
 

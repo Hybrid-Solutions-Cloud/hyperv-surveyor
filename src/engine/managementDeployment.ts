@@ -104,8 +104,7 @@ const SRC = {
   wac: 'https://learn.microsoft.com/windows-server/manage/windows-admin-center/plan/installation-options',
   wacHa: 'https://learn.microsoft.com/windows-server/manage/windows-admin-center/deploy/high-availability',
   wacVirtual: 'https://learn.microsoft.com/windows-server/manage/windows-admin-center/install-virtualization-mode',
-  arcQuickstart: 'https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/quickstart-connect-system-center-virtual-machine-manager-to-arc',
-  arcGuestManagement: 'https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/enable-guest-management-at-scale',
+  arcServers: 'https://learn.microsoft.com/azure/azure-arc/servers/overview',
   arcPricing: 'https://azure.microsoft.com/pricing/details/azure-arc/core-control-plane/',
   updateManager: 'https://learn.microsoft.com/azure/update-manager/workflow-update-manager',
   azureMonitor: 'https://learn.microsoft.com/azure/azure-arc/servers/azure-monitor-agent-deployment',
@@ -164,11 +163,11 @@ export const ARC_SERVICE_CATALOG: readonly ArcServicePlan[] = [
 
 const ARC_CORE_SERVICE: ArcServicePlan = {
   id: 'core-management',
-  name: 'Azure Arc core management',
+  name: 'Azure Arc-enabled servers',
   category: 'Core management',
   billing: 'No additional charge for the Azure Arc core control plane; enabled add-on services are billed separately.',
-  requirement: 'Arc resource bridge for SCVMM inventory and VM lifecycle management. A guest agent is not required for core SCVMM projection.',
-  source: SRC.arcPricing,
+  requirement: 'Azure Connected Machine agent on each connected server. This manages the guest operating system and does not provide VM lifecycle operations from Azure.',
+  source: SRC.arcServers,
 }
 
 export function normalizeManagementDeploymentInputs(inputs: ManagementDeploymentInputs): ResolvedManagementDeploymentInputs {
@@ -221,13 +220,13 @@ export function deploymentInputsFromStack(
   stack: PlaneId[],
   managedHosts: number,
   managedVms: number,
-  recommendations: Partial<Pick<ManagementDeploymentInputs, 'monitoring' | 'highAvailability'>> = {},
+  recommendations: Partial<Pick<ManagementDeploymentInputs, 'monitoring' | 'highAvailability' | 'includeArc'>> = {},
 ): ManagementDeploymentInputs {
   const highAvailability = recommendations.highAvailability ?? true
   return {
-    foundation: stack.includes('scvmm') || stack.includes('arc-scvmm') ? 'scvmm' : 'classic',
+    foundation: stack.includes('scvmm') ? 'scvmm' : 'classic',
     wac: stack.includes('wac-virtual') ? 'wac-virtual' : stack.includes('wac-admin') ? 'wac-admin' : 'none',
-    includeArc: stack.includes('arc-scvmm'),
+    includeArc: recommendations.includeArc ?? false,
     monitoring: recommendations.monitoring ?? 'none',
     highAvailability,
     fabricHighAvailability: highAvailability,
@@ -442,49 +441,25 @@ export function planManagementDeployment(inputs: ManagementDeploymentInputs): Ma
   }
 
   if (inputs.includeArc) {
-    if (inputs.foundation !== 'scvmm') {
-      cautions.push('Arc-enabled SCVMM requires SCVMM underneath it. Select SCVMM as the fabric foundation to include the resource bridge.')
+    // Arc-enabled servers need an agent on each server and no management VM, so nothing joins the BOM.
+    dependencies.add('Azure subscription, resource group, and appropriate Azure RBAC')
+    dependencies.add(`Azure region: ${resolved.arcRegion}; confirm service availability, data residency, and paired recovery requirements`)
+    if (resolved.arcConnectivity === 'private-link') {
+      dependencies.add('Azure Arc Private Link Scope, private endpoints, private DNS zones, and routing from the connected servers')
+    } else if (resolved.arcConnectivity === 'proxy') {
+      dependencies.add('Highly available outbound proxy, certificate trust, bypass rules, and the required Azure endpoint allow-list')
     } else {
-      components.push(component({
-        id: 'arc-bridge',
-        name: 'Azure Arc resource bridge appliance',
-        role: 'Persistent connection between the SCVMM fabric and Azure Resource Manager.',
-        count: 1,
-        vCpu: 4,
-        ramGiB: 32,
-        diskGiB: 100,
-        availability: 'Managed appliance lifecycle',
-        basis: 'MS',
-        basisDetail: 'Published minimum free capacity for Arc-enabled SCVMM.',
-        operatingSystem: 'Microsoft-managed appliance',
-        licensing: 'Connector is free; attached Azure services are metered',
-        source: SRC.arcQuickstart,
-        notes: [
-          'This is a separate on-premises appliance VM deployed into the SCVMM-managed fabric; it is not installed on the VMM server.',
-          'VMM server and resource bridge have a 1:1 mapping.',
-          'Reserve three static IP addresses, including a second appliance VM IP used when an upgrade creates a replacement VM.',
-          'Requires outbound connectivity and internal/external DNS resolution.',
-        ],
-      }))
-      dependencies.add('Azure subscription, resource group, and appropriate Azure RBAC')
-      dependencies.add(`Azure region: ${resolved.arcRegion}; confirm service availability, data residency, and paired recovery requirements`)
-      if (resolved.arcConnectivity === 'private-link') {
-        dependencies.add('Azure Arc Private Link Scope, private endpoints, private DNS zones, and routing from the management network')
-      } else if (resolved.arcConnectivity === 'proxy') {
-        dependencies.add('Highly available outbound proxy, certificate trust, bypass rules, and the required Azure endpoint allow-list')
-      } else {
-        dependencies.add('Direct outbound HTTPS allow-list for Azure Arc endpoints')
-      }
-      dependencies.add('Three static IP addresses for the Arc resource bridge lifecycle')
-      arcServices.push(ARC_CORE_SERVICE)
-      const selectedAddOns = ARC_SERVICE_CATALOG.filter((service) => resolved.arcServices.includes(service.id as ArcServiceId))
-      arcServices.push(...selectedAddOns)
-      if (selectedAddOns.length > 0) {
-        dependencies.add(`Azure Connected Machine agent on the selected ${resolved.arcGuestScopePct.toFixed(0)}% guest-service scope (approximately ${Math.ceil(vms * resolved.arcGuestScopePct / 100).toLocaleString()} VMs)`)
-        dependencies.add('Guest-agent outbound connectivity, Azure Policy/RBAC assignments, and service-specific Azure extensions')
-        if (selectedAddOns.some((service) => service.id === 'azure-monitor' || service.id === 'change-tracking')) dependencies.add(`Log Analytics workspace retention: ${resolved.logAnalyticsRetentionDays} days; validate ingestion, archive, and regional placement`)
-      }
+      dependencies.add('Direct outbound HTTPS allow-list for Azure Arc endpoints')
     }
+    dependencies.add(`Azure Connected Machine agent on the selected ${resolved.arcGuestScopePct.toFixed(0)}% server scope (approximately ${Math.ceil(vms * resolved.arcGuestScopePct / 100).toLocaleString()} VMs)`)
+    arcServices.push(ARC_CORE_SERVICE)
+    const selectedAddOns = ARC_SERVICE_CATALOG.filter((service) => resolved.arcServices.includes(service.id as ArcServiceId))
+    arcServices.push(...selectedAddOns)
+    if (selectedAddOns.length > 0) {
+      dependencies.add('Azure Policy/RBAC assignments and service-specific Azure extensions on the connected servers')
+      if (selectedAddOns.some((service) => service.id === 'azure-monitor' || service.id === 'change-tracking')) dependencies.add(`Log Analytics workspace retention: ${resolved.logAnalyticsRetentionDays} days; validate ingestion, archive, and regional placement`)
+    }
+    cautions.push('Azure Arc-enabled servers do not provide VM lifecycle operations from Azure. Arc-enabled SCVMM stopped new onboarding in October 2026 and retires in September 2029.')
   }
 
   if (inputs.monitoring === 'scom') {

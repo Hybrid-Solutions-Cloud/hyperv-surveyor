@@ -14,7 +14,9 @@ export interface ManagementCostInputs {
   sqlCores: number
   /** SCOM independently requires System Center licensing even when SCVMM is not selected. */
   includeScom?: boolean
-  /** Guest-service billing scope. Core Arc projection remains separate and free. */
+  /** Azure Arc-enabled servers are an add-on to any plane. Their Azure services bill only when true. */
+  includeArcServers?: boolean
+  /** Servers connected to Azure Arc. The core Arc control plane is free. */
   arcEnabledVms?: number
   waiveUpdateAndGuest: boolean
   includeUpdateManager: boolean
@@ -122,7 +124,7 @@ export function calculatePlaneCost(
   const coresPerHost = Math.max(inputs.sockets * inputs.coresPerSocket, inputs.sockets * 8, 16)
   const packsPerHost = Math.ceil(coresPerHost / 2)
   const months = Math.max(1, inputs.termYears * 12)
-  const needsSystemCenter = plane === 'scvmm' || plane === 'arc-scvmm' || inputs.includeScom === true
+  const needsSystemCenter = plane === 'scvmm' || inputs.includeScom === true
 
   const windowsBase = inputs.model === 'perpetual'
     ? inputs.hosts * packsPerHost * rateCard.windowsPerTwoCorePack
@@ -151,7 +153,7 @@ export function calculatePlaneCost(
     + (inputs.includeLogAnalytics ? inputs.logAnalyticsGbPerVm * rateCard.logAnalyticsPerGb : 0)
   )
   const arcEnabledVms = Math.min(inputs.vms, Math.max(0, inputs.arcEnabledVms ?? inputs.vms))
-  const azure = plane === 'arc-scvmm' ? arcEnabledVms * azurePerVmMonth * months : 0
+  const azure = inputs.includeArcServers ? arcEnabledVms * azurePerVmMonth * months : 0
   const managementOnly = systemCenter + sql + azure
   const total = windows + managementOnly
   const effectiveHosts = Math.max(1, inputs.hosts - Math.min(inputs.spareHosts, Math.max(0, inputs.hosts - 1)))
@@ -310,7 +312,7 @@ function buildCommercialRecommendations(
     })
   }
 
-  if (plane === 'scvmm' || plane === 'arc-scvmm') {
+  if (plane === 'scvmm') {
     recommendations.push({
       tone: 'action',
       title: 'Confirm System Center SQL runtime rights',
@@ -356,7 +358,7 @@ function buildCommercialRecommendations(
     detail: `The cost base licenses all ${management.hosts} hosts, while per-VM economics use workload-bearing capacity after N+${management.spareHosts}. Decide whether spare capacity is recovered through platform fees, per-VM rates, or a reserved-capacity charge.`,
   })
 
-  if (commercial.motion === 'csp' && (plane === 'scvmm' || plane === 'arc-scvmm')) {
+  if (commercial.motion === 'csp' && plane === 'scvmm') {
     recommendations.push({
       tone: 'warn',
       title: 'Do not substitute System Center Standard CSP reference pricing',

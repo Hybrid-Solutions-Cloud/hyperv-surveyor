@@ -24,6 +24,7 @@ const payload: ProjectPayload = {
   drDesignInputs: structuredClone(DEFAULT_DR_INPUTS),
   reportMetadata: structuredClone(DEFAULT_REPORT_METADATA),
   dataSources: [],
+  storageDecisionAnswers: { existingArray: true },
 }
 
 describe('project files', () => {

@@ -9,7 +9,8 @@ import {
 import { compareArchitectures, forecastGrowth, solveForward } from '../engine/solve'
 import { RESILIENCY } from '../engine/rules'
 import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
-import { DEFAULT_PLACEMENT_INPUTS, planMultipleClusters, type PlacementInputs } from '../engine/deploymentPlanning'
+import { DEFAULT_PLACEMENT_INPUTS, plannedPlatformNodes, planMultipleClusters, type PlacementInputs } from '../engine/deploymentPlanning'
+import { assessStorageDecision, STORAGE_DECISION_QUESTIONS, STORAGE_FAMILY_LABELS, type StorageDecisionAnswers } from '../engine/storageDecision'
 import { assessMigrationReadiness } from '../engine/readiness'
 import { DEFAULT_NETWORK_INPUTS, designNetwork, type NetworkDesignInputs } from '../engine/networkDesign'
 import { DEFAULT_DR_INPUTS, designDisasterRecovery, type DrDesignInputs } from '../engine/drDesign'
@@ -99,6 +100,7 @@ export interface SolutionReportInputs {
   includeManagementInSizing: boolean
   generatedAt?: string
   placementInputs?: PlacementInputs
+  storageDecisionAnswers?: StorageDecisionAnswers
   networkDesignInputs?: NetworkDesignInputs
   drDesignInputs?: DrDesignInputs
   reportMetadata?: ReportMetadata
@@ -149,7 +151,7 @@ function managementLabel(inputs: ManagementDeploymentInputs) {
       : 'SCOM 2025 single-server management group'
     : 'Existing / no monitoring platform'
   const arc = inputs.includeArc
-    ? `; Azure Arc core management${resolved.arcServices.length ? ` + ${resolved.arcServices.length} add-on${resolved.arcServices.length === 1 ? '' : 's'}` : ' only'}`
+    ? `; Azure Arc-enabled servers${resolved.arcServices.length ? ` + ${resolved.arcServices.length} add-on${resolved.arcServices.length === 1 ? '' : 's'}` : ' only'}`
     : ''
   return `${foundation}; ${wac}; ${monitoring}${arc}`
 }
@@ -181,6 +183,10 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   const includedVms = input.vms.filter((vm) => vm.include)
   const options = compareArchitectures(input.cfg, input.vms, input.tiers)
   const chosen = options.find((option) => option.key === input.chosenKey) ?? options[0]
+  // The selected design is always reported, because the rest of the report describes it.
+  const architectureKeys = input.reportMetadata?.architectureKeys
+  const reportedOptions = options.filter((option) => !architectureKeys || option.key === chosen.key || architectureKeys.includes(option.key))
+  const placementInputs = input.placementInputs ?? DEFAULT_PLACEMENT_INPUTS
   const engagementMode = input.engagementMode ?? 'new-platform'
   const managementDecision = input.managementDecision ?? (input.managementDeploymentInputs ? 'design' : 'unassessed')
   const usesExistingHardware = engagementMode === 'existing-capacity' || engagementMode === 'fit-gap'
@@ -197,7 +203,13 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       : chosen.label
   const managementContextNodes = engagementMode === 'management-only'
     ? input.managementDeploymentInputs?.managedHosts ?? 0
-    : usesExistingHardware ? existingNodes : chosen.result.feasible ? chosen.result.nodes : 0
+    : usesExistingHardware
+      ? existingNodes
+      : plannedPlatformNodes(
+        chosen.result,
+        placementInputs.clusterLayout === 'split' ? planMultipleClusters(chosen.cfg, input.vms, input.tiers, placementInputs) : { feasible: false, clusters: [], totalNodes: 0, totalWorkloadNodes: 0, warnings: [] },
+        placementInputs,
+      )
   const defaultStack: PlaneId[] = managementContextNodes <= 4
     ? ['classic', 'wac-admin']
     : ['scvmm', 'wac-admin']
@@ -214,7 +226,14 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
     && input.includeManagementInSizing
     && managementInputs.managementPlacement === 'workload-cluster'
     && engagementMode !== 'management-only'
-  const placementPlan = planMultipleClusters(platformCfg, platformVms, platformTiers, input.placementInputs ?? DEFAULT_PLACEMENT_INPUTS, managementConsumesPlatform ? managementVms : [])
+  const placementPlan = planMultipleClusters(platformCfg, platformVms, platformTiers, placementInputs, managementConsumesPlatform ? managementVms : [])
+  const splitSelected = engagementMode === 'new-platform' && placementInputs.clusterLayout === 'split' && placementPlan.feasible
+  const splitLicensableCores = placementPlan.clusters.reduce((sum, cluster) => sum + cluster.result.totalLicensableCores, 0)
+  const overLimitText = (result: { nodesNeeded: number | null; clusterNodeLimit: number }) => result.nodesNeeded === null
+    ? 'Review required'
+    : result.nodesNeeded > result.clusterNodeLimit
+      ? `${number(result.nodesNeeded)} needed (limit ${result.clusterNodeLimit})`
+      : `${number(result.nodesNeeded)} (blocked, see findings)`
   const dedicatedManagementSizing = engagementMode !== 'management-only' && managementDecision === 'design' && managementInputs.managementPlacement === 'dedicated-management-cluster' && managementVms.length > 0
     ? solveForward(platformCfg, managementVms, platformTiers)
     : null
@@ -243,6 +262,8 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       : baselineGrowthPoint.result.feasible ? finalSizing.nodes - baselineGrowthPoint.result.nodes : null
   const fitGap = assessFitGap(existingCfg, existingNodes, input.vms, existingTiers)
   const recovery = designDisasterRecovery(platformVms, finalSizing, input.drDesignInputs ?? DEFAULT_DR_INPUTS)
+
+  const storageGuide = assessStorageDecision(input.storageDecisionAnswers ?? {}, options)
 
   const workloadTotals = includedVms.reduce((totals, vm) => ({
     vCpu: totals.vCpu + vm.vCpu,
@@ -280,7 +301,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
   }
 
   const engagementOutcome = engagementMode === 'new-platform'
-    ? `${input.customerName || 'This solution'} is sized on ${chosen.label}. ${finalSizing.feasible ? `The calculated design requires ${finalSizing.nodes} nodes, including ${platformCfg.spareNodes} spare nodes.` : 'The selected design is not currently feasible within the platform limits.'}`
+    ? `${input.customerName || 'This solution'} is sized on ${chosen.label}. ${splitSelected ? `The selected layout splits the design into ${placementPlan.clusters.length} clusters using ${placementPlan.totalNodes} total nodes, with ${platformCfg.spareNodes} spare nodes in each cluster.` : finalSizing.feasible ? `The calculated design requires ${finalSizing.nodes} nodes, including ${platformCfg.spareNodes} spare nodes.` : 'The selected design does not fit one cluster within the platform limits, and no split has been selected.'}`
     : engagementMode === 'existing-capacity'
       ? `${input.customerName || 'This solution'} assesses an existing ${existingNodes}-node ${existingCfg.architecture.toUpperCase()} estate. ${includedVms.length > 0 ? `${includedVms.length.toLocaleString()} included workloads are applied to the capacity envelope.` : 'No workload inventory was supplied, so estate-specific utilization is not asserted.'}`
       : engagementMode === 'fit-gap'
@@ -293,10 +314,9 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       : managementDecision === 'deferred'
         ? 'Decision deferred'
         : 'Not assessed'
-  const placementInputs = input.placementInputs ?? DEFAULT_PLACEMENT_INPUTS
   const networkInputs = input.networkDesignInputs ?? DEFAULT_NETWORK_INPUTS
   const recoveryInputs = input.drDesignInputs ?? DEFAULT_DR_INPUTS
-  const architectureAlternatives = options
+  const architectureAlternatives = reportedOptions
     .filter((option) => option.key !== chosen.key)
     .map((option) => `${option.label}: ${option.result.feasible ? `${option.result.nodes} nodes` : 'not feasible'}`)
     .join('; ')
@@ -312,7 +332,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       metrics: [
         { label: 'Engagement', value: ENGAGEMENT_LABELS[engagementMode] },
         { label: 'Platform context', value: selectedPlatformLabel },
-        { label: usesExistingHardware ? 'Existing nodes' : engagementMode === 'management-only' ? 'Platform sizing' : 'Required nodes', value: engagementMode === 'management-only' ? 'Not requested' : usesExistingHardware ? number(existingNodes) : finalSizing.feasible ? number(finalSizing.nodes) : 'Review required', detail: engagementMode === 'management-only' ? undefined : finalSizing.bindingExplanation },
+        { label: usesExistingHardware ? 'Existing nodes' : engagementMode === 'management-only' ? 'Platform sizing' : 'Required nodes', value: engagementMode === 'management-only' ? 'Not requested' : usesExistingHardware ? number(existingNodes) : splitSelected ? `${number(placementPlan.totalNodes)} across ${placementPlan.clusters.length} cluster${placementPlan.clusters.length === 1 ? "" : "s"}` : finalSizing.feasible ? number(finalSizing.nodes) : overLimitText(finalSizing), detail: engagementMode === 'management-only' ? undefined : finalSizing.bindingExplanation },
         { label: 'Workload VMs', value: number(includedVms.length) },
         { label: 'Management decision', value: managementDecisionLabel },
         { label: 'Management VMs', value: managementDecision === 'design' ? number(managementPlan.totalInstances) : 'Not calculated', detail: managementConsumesPlatform ? 'Included in workload-cluster sizing' : 'Separate from workload-cluster sizing' },
@@ -344,14 +364,19 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       ],
       bullets: [
         ...(metadata.decisionNotes ? [`Decision / sign-off: ${metadata.decisionNotes}`] : []),
-        ...(finalSizing.feasible ? [] : finalSizing.findings.filter((finding) => finding.severity === 'error').map((finding) => finding.message)),
+        ...(finalSizing.feasible || splitSelected ? [] : finalSizing.findings.filter((finding) => finding.severity === 'error').map((finding) => finding.message)),
       ],
       tables: [],
     },
     {
       id: 'architecture',
       title: 'Solution architecture',
-      paragraphs: [engagementMode === 'management-only' ? 'No platform architecture was assessed in this management-only engagement.' : finalSizing.bindingExplanation],
+      paragraphs: [
+        engagementMode === 'management-only' ? 'No platform architecture was assessed in this management-only engagement.' : finalSizing.bindingExplanation,
+        ...(engagementMode === 'new-platform' && storageGuide.answered > 0
+          ? [`Storage decision guidance: ${storageGuide.headline}${storageGuide.excluded.length ? ` Ruled out by the answers: ${storageGuide.excluded.map((family) => STORAGE_FAMILY_LABELS[family]).join(', ')}.` : ''} This guidance is a tool judgment; the selected design is ${chosen.label}.`]
+          : []),
+      ],
       metrics: [
         { label: 'Architecture', value: selectedPlatformLabel },
         ...(engagementMode === 'management-only' ? [] : [storageProtectionMetric(platformCfg)]),
@@ -362,7 +387,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         {
           decision: `Use ${selectedPlatformLabel}`,
           basis: 'User-selected',
-          explanation: `This is the architecture selected in Sizing Results. Surveyor validates its feasibility and calculates its node count, but it does not silently choose the architecture on the user's behalf. The selected result is ${finalSizing.feasible ? `feasible at ${finalSizing.nodes} nodes` : 'not currently feasible'} and is ${finalSizing.binding}-bound.`,
+          explanation: `This is the architecture selected in Sizing Results. Surveyor validates its feasibility and calculates its node count, but it does not silently choose the architecture on the user's behalf. The selected result is ${splitSelected ? `split by user choice into ${placementPlan.clusters.length} clusters using ${placementPlan.totalNodes} nodes` : finalSizing.feasible ? `feasible at ${finalSizing.nodes} nodes` : 'not currently feasible in one cluster'} and is ${finalSizing.binding}-bound.`,
           tradeoff: architectureAlternatives ? `Other modeled outcomes were ${architectureAlternatives}. Node count is only one decision factor; storage ownership, operations, supportability, recovery, and cost still require review.` : undefined,
         },
         {
@@ -390,15 +415,26 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       ],
       bullets: [],
       tables: engagementMode === 'new-platform' ? [{
-        title: 'Architecture comparison',
-        headers: ['Option', 'Feasible', 'Nodes', 'Binding constraint'],
-        rows: options.map((option) => [
+        title: 'Storage design comparison',
+        headers: ['Option', 'Selected', 'Fits one cluster', 'Nodes', 'Binding constraint', 'Required storage', 'S2D usable', 'SAN usable to buy', 'Licensable cores'],
+        rows: reportedOptions.map((option) => [
           option.label,
+          yesNo(option.key === chosen.key),
           yesNo(option.result.feasible),
-          option.result.feasible ? number(option.result.nodes) : 'N/A',
+          option.result.feasible ? number(option.result.nodes) : overLimitText(option.result),
           option.result.binding,
+          tib(option.result.requiredStorageTiB),
+          option.result.feasible && option.result.capacity ? tib(option.result.capacity.usableTiB) : 'N/A',
+          option.result.sanSizing ? tib(option.result.sanSizing.usableToBuyTiB) : 'N/A',
+          option.result.nodesNeeded === null ? 'N/A' : number(option.result.licensableCoresPerNode * option.result.nodesNeeded),
         ]),
-      }] : [],
+      }, ...(storageGuide.answered > 0 ? [{
+        title: 'Storage decision answers',
+        headers: ['Question', 'Answer', 'Why it matters'],
+        rows: STORAGE_DECISION_QUESTIONS
+          .filter((question) => input.storageDecisionAnswers?.[question.id] !== undefined)
+          .map((question) => [question.question, yesNo(input.storageDecisionAnswers![question.id]!), question.why]),
+      }] : [])] : [],
     },
     {
       id: 'nodes',
@@ -414,18 +450,18 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
       metrics: engagementMode === 'management-only' ? [
         { label: 'Platform node sizing', value: 'Not assessed' },
       ] : [
-        { label: 'Total nodes', value: finalSizing.feasible ? number(finalSizing.nodes) : 'Review required' },
-        { label: 'Workload-bearing nodes', value: finalSizing.feasible ? number(finalSizing.workloadNodes) : 'N/A' },
+        { label: 'Total nodes', value: splitSelected ? number(placementPlan.totalNodes) : finalSizing.feasible ? number(finalSizing.nodes) : overLimitText(finalSizing) },
+        { label: 'Workload-bearing nodes', value: splitSelected ? number(placementPlan.totalWorkloadNodes) : finalSizing.feasible ? number(finalSizing.workloadNodes) : 'N/A' },
         { label: 'CPU-only requirement', value: Number.isFinite(finalSizing.nodesIfCpuOnly) ? number(finalSizing.nodesIfCpuOnly) : 'N/A' },
         { label: 'Memory-only requirement', value: Number.isFinite(finalSizing.nodesIfMemoryOnly) ? number(finalSizing.nodesIfMemoryOnly) : 'N/A' },
         { label: 'Storage-only requirement', value: Number.isFinite(finalSizing.nodesIfStorageOnly) ? number(finalSizing.nodesIfStorageOnly) : 'N/A' },
-        { label: 'Licensable cores', value: number(finalSizing.totalLicensableCores) },
+        { label: 'Licensable cores', value: splitSelected ? number(splitLicensableCores) : finalSizing.nodesNeeded === null ? 'N/A' : number(finalSizing.licensableCoresPerNode * finalSizing.nodesNeeded) },
         { label: 'Growth strategy', value: growthForecast.plan.strategy === 'build-now' ? 'Build forecast capacity now' : 'Phase nodes with growth' },
         { label: 'Annual growth', value: `${number(growthForecast.plan.annualGrowthPct * 100, 1)}% for ${growthForecast.plan.horizonYears} years` },
       ],
       reasoning: engagementMode === 'management-only' ? [] : [
         {
-          decision: finalSizing.feasible ? `Build ${finalSizing.nodes} total nodes` : 'Revise the node design before approval',
+          decision: splitSelected ? `Build ${placementPlan.totalNodes} total nodes across ${placementPlan.clusters.length} clusters` : finalSizing.feasible ? `Build ${finalSizing.nodes} total nodes` : 'Revise the node design before approval',
           basis: 'Calculated',
           explanation: `CPU alone requires ${Number.isFinite(finalSizing.nodesIfCpuOnly) ? number(finalSizing.nodesIfCpuOnly) : 'more than the supported ceiling'} nodes, memory alone requires ${Number.isFinite(finalSizing.nodesIfMemoryOnly) ? number(finalSizing.nodesIfMemoryOnly) : 'more than the supported ceiling'}, and storage alone requires ${Number.isFinite(finalSizing.nodesIfStorageOnly) ? number(finalSizing.nodesIfStorageOnly) : 'more than the supported ceiling'}. The controlling result is ${finalSizing.binding}; the total includes ${platformCfg.spareNodes} reserve node${platformCfg.spareNodes === 1 ? '' : 's'}.`,
           tradeoff: `Changing a nonbinding resource may not reduce node count. To reduce a ${finalSizing.binding}-bound result, change the demand or usable capacity that actually controls that constraint and rerun the model.`,
@@ -537,7 +573,9 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         ? ['The management bill of materials is included below. Platform placement and cluster node counts require a new-platform or existing-hardware profile.']
         : [placementPlan.feasible
         ? `The selected placement policy distributes the estate across ${placementPlan.clusters.length} target cluster(s) using ${placementPlan.totalNodes} total nodes.`
-        : 'The selected placement constraints cannot place the full estate. Revise the cluster ceiling, hardware density, or grouping rules before implementation.'],
+        : placementInputs.clusterLayout === 'single'
+          ? 'The estate does not fit one cluster and no split has been selected. Change the server size, storage type, or cluster layout before implementation.'
+          : 'The selected placement constraints cannot place the full estate. Revise the cluster ceiling, hardware density, or grouping rules before implementation.'],
       metrics: engagementMode === 'management-only' ? [
         { label: 'Platform placement', value: 'Not assessed' },
         { label: 'Management instances', value: managementDecision === 'design' ? number(managementPlan.totalInstances) : 'Not calculated' },
@@ -557,11 +595,15 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         },
       ] : [
         {
-          decision: placementPlan.feasible
-            ? `Distribute workloads across ${placementPlan.clusters.length} target cluster${placementPlan.clusters.length === 1 ? '' : 's'}`
-            : 'Revise the multi-cluster placement policy',
-          basis: 'Calculated',
-          explanation: `The planner adds clusters until every cluster fits within ${placementInputs.maxNodesPerCluster} nodes and ${placementInputs.targetVmsPerCluster} VMs, up to ${placementInputs.maxClusters} clusters. Database-tier separation is ${placementInputs.separateDatabaseTier ? 'enabled' : 'disabled'} and source-cluster preservation is ${placementInputs.preserveSourceClusters ? 'enabled' : 'disabled'}.`,
+          decision: placementInputs.clusterLayout === 'single'
+            ? placementPlan.feasible ? 'Keep all workloads in one cluster' : 'Resolve the design, which does not fit one cluster'
+            : placementPlan.feasible
+              ? `Split workloads across ${placementPlan.clusters.length} target cluster${placementPlan.clusters.length === 1 ? '' : 's'}`
+              : 'Revise the multi-cluster placement policy',
+          basis: 'User-selected',
+          explanation: placementInputs.clusterLayout === 'single'
+            ? 'The selected layout is one cluster. Surveyor does not split a design unless the user selects that layout.'
+            : `The user selected a split. The planner adds clusters until every cluster fits within ${placementInputs.maxNodesPerCluster} nodes and ${placementInputs.targetVmsPerCluster} VMs, up to ${placementInputs.maxClusters} clusters. Database-tier separation is ${placementInputs.separateDatabaseTier ? 'enabled' : 'disabled'} and source-cluster preservation is ${placementInputs.preserveSourceClusters ? 'enabled' : 'disabled'}.`,
           tradeoff: 'This is deterministic capacity placement, not application-affinity discovery. Validate application dependencies, maintenance domains, licensing, network locality, and operational ownership before assigning individual VMs.',
         },
         ...(managementDecision === 'design' ? [{
@@ -698,6 +740,7 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
         { label: 'Required on SAN', value: tib(finalSizing.requiredSanTiB) },
         { label: 'S2D usable capacity', value: finalSizing.capacity ? tib(finalSizing.capacity.usableTiB) : 'Not applicable' },
         { label: 'SAN available capacity', value: tib(finalSizing.sanCapacityTiB) },
+        ...(finalSizing.sanSizing ? [{ label: 'SAN usable capacity to buy', value: tib(finalSizing.sanSizing.usableToBuyTiB), detail: `At ${finalSizing.sanSizing.drr}:1 data reduction, keeping ${(finalSizing.sanSizing.freeSpaceTargetPct * 100).toFixed(0)}% free.` }] : []),
         { label: 'Planned logical storage objects', value: number(finalSizing.totalCsvs) },
         { label: 'Performance validation', value: finalSizing.storagePerformance.validated ? 'Validated' : 'Incomplete' },
       ],
@@ -853,10 +896,10 @@ export function buildSolutionReport(input: SolutionReportInputs): SolutionReport
             : 'aMode is connection-oriented rather than a tenant fabric manager and is typically positioned for smaller-scale direct administration.',
         }] : []),
         ...(managementInputs.includeArc ? [{
-          decision: 'Add Azure Arc-enabled SCVMM',
+          decision: 'Add Azure Arc-enabled servers',
           basis: 'User-selected' as const,
-          explanation: `Arc projects the SCVMM-managed fabric into Azure and adds the resource bridge plus the selected guest-service scope. The selected connection method is ${managementInputs.arcConnectivity} in ${managementInputs.arcRegion}.`,
-          tradeoff: 'Arc does not replace SCVMM. It requires the underlying VMM fabric, an on-premises resource bridge appliance, Azure identity and subscription ownership, DNS, and ongoing outbound connectivity.',
+          explanation: `Arc-enabled servers connect the guest operating systems in the selected scope to the chosen Azure management services. The selected connection method is ${managementInputs.arcConnectivity} in ${managementInputs.arcRegion}.`,
+          tradeoff: 'Arc-enabled servers do not provide VM lifecycle operations from Azure and do not replace the management plane. They require the Connected Machine agent on each server, Azure identity and subscription ownership, and outbound connectivity. Arc-enabled SCVMM stopped new onboarding in October 2026 and retires in September 2029.',
         }] : []),
         ...(managementInputs.monitoring === 'scom' ? [{
           decision: `Add SCOM 2025 with ${managementInputs.scomHighAvailability ? 'high availability' : 'a standalone management server'}`,

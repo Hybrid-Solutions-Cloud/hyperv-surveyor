@@ -52,6 +52,16 @@ export const DEFAULT_CONFIG: ClusterConfig = {
   hostRamReservePct: 0.12,
 }
 
+/**
+ * Starting point for a new design. The SAN is an output here, so the array size above is not a
+ * limit. Existing-hardware profiles stay on DEFAULT_CONFIG, where the array size is a real input.
+ */
+export const DEFAULT_PROPOSED_CONFIG: ClusterConfig = {
+  ...DEFAULT_CONFIG,
+  sanSizingMode: 'calculated',
+  sanFreeSpaceTargetPct: 0.2,
+}
+
 export function defaultTiers(): Record<TierId, TierPolicy> {
   return JSON.parse(JSON.stringify(DEFAULT_TIERS))
 }

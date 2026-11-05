@@ -34,16 +34,22 @@ describe('management-plane cost parity', () => {
   it('matches the reference perpetual scenario', () => {
     expect(calculatePlaneCost('classic', base).total).toBeCloseTo(325_009.92, 2)
     expect(calculatePlaneCost('scvmm', base).total).toBeCloseTo(526_627.92, 2)
-    expect(calculatePlaneCost('arc-scvmm', base).total).toBeCloseTo(747_811.92, 2)
+    expect(calculatePlaneCost('scvmm', { ...base, includeArcServers: true }).total).toBeCloseTo(747_811.92, 2)
     expect(calculatePlaneCost('classic', base).perVmMonth).toBeCloseTo(32.24, 2)
-    expect(calculatePlaneCost('arc-scvmm', base).azurePerVmMonth).toBeCloseTo(19.2, 2)
+    expect(calculatePlaneCost('scvmm', { ...base, includeArcServers: true }).azurePerVmMonth).toBeCloseTo(19.2, 2)
   })
 
   it('matches the reference SPLA scenario', () => {
     const spla = { ...base, model: 'spla' as const }
     expect(calculatePlaneCost('classic', spla).total).toBeCloseTo(230_400, 2)
     expect(calculatePlaneCost('scvmm', spla).total).toBeCloseTo(431_372, 2)
-    expect(calculatePlaneCost('arc-scvmm', spla).total).toBeCloseTo(652_556, 2)
+    expect(calculatePlaneCost('scvmm', { ...spla, includeArcServers: true }).total).toBeCloseTo(652_556, 2)
+  })
+
+  it('prices Azure Arc-enabled servers on any plane, and only when selected', () => {
+    expect(calculatePlaneCost('classic', base).azure).toBe(0)
+    expect(calculatePlaneCost('classic', { ...base, includeArcServers: true }).azure).toBeGreaterThan(0)
+    expect(calculatePlaneCost('classic', { ...base, includeArcServers: true }).systemCenter).toBe(calculatePlaneCost('classic', base).systemCenter)
   })
 
   it('applies Microsoft core licensing floors', () => {

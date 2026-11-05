@@ -60,6 +60,35 @@ const publicCopyReplacements = [
   [`FOR ${sourceOrganization} IT IS THE WHOLE POINT`, 'FOR SERVICE PROVIDERS IT IS THE WHOLE POINT'],
   [`${sourceOrganization} IS the service provider`, 'THE OPERATOR IS the service provider'],
   [`${sourceOrganization}'s`, "the operator's"],
+  // Azure Arc-enabled SCVMM stopped new onboarding in October 2026 and retires in September 2029.
+  // https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/transition-guidance
+  // These run after the replacements above, so they match that text.
+  ['Add Arc-enabled SCVMM only when Azure portal, ARM, or Azure RBAC management is a stated requirement.', 'Add Azure Arc-enabled servers when Update Manager, Defender for Cloud, Azure Monitor, or Azure Policy is a stated requirement.'],
+  ['Arc projects the SCVMM fabric into Azure. Price each', 'Arc-enabled servers connect the guest OS to Azure services and do not add VM lifecycle control. Price each'],
+  ['Arc is not an alternative to SCVMM — it sits ON TOP of it.', 'Arc-enabled SCVMM is closed to new deployments.'],
+  ['You still buy and run SCVMM underneath. Arc adds an Azure control plane; it does not replace the fabric manager.', 'Microsoft stopped new onboarding in October 2026 and retires the service in September 2029. Azure Arc-enabled servers cover guest management, and SCVMM itself stays supported under its own lifecycle.'],
+  ['Arc optional per tenant.', 'Azure Arc-enabled servers optional per tenant.'],
+  ['Classic uses vmconnect.exe. Arc gives portal-based serial/RDP paths, not a true VM console.', 'Classic uses vmconnect.exe. Azure Arc-enabled servers manage the guest OS and do not provide a VM console.'],
+  ['Arc/Azure portal is the only plane with a real delegated web console for end tenants.', 'Arc-enabled SCVMM filled this role, but it closed to new deployments in October 2026.'],
+  ['SCVMM self-service roles OR Azure RBAC via Arc. Nothing in between.', 'SCVMM self-service roles. Azure RBAC through Arc-enabled SCVMM closed to new deployments in October 2026.'],
+  ['SCVMM role+member quotas, or Azure Policy/quota via Arc.', 'SCVMM role+member quotas. Azure Policy on Arc-enabled servers governs guest configuration, not VM quotas.'],
+  ['Only the Arc path gives real security posture management.', 'Azure Arc-enabled servers add Defender for Cloud security posture management to any plane.'],
+  ['Real gap for a hoster unless you go Arc or build your own.', 'Real gap for a hoster unless you build your own.'],
+  ['SPF is DISCONTINUED in System Center 2025 - Arc is the replacement.', 'SPF is DISCONTINUED in System Center 2025. Arc-enabled SCVMM, its named successor, closed to new deployments in October 2026, so ask Microsoft for the current transition path.'],
+  ['Only the Arc path has a first-party, Microsoft-supported Terraform provider.', 'The first-party Terraform path was Arc-enabled SCVMM, which closed to new deployments in October 2026.'],
+  ['Arc-enabled SCVMM exposes VMs as ARM resources - real IaC.', 'Arc-enabled SCVMM exposed VMs as ARM resources, but it closed to new deployments in October 2026. Arc-enabled servers represent the guest OS, not the VM lifecycle.'],
+  ['Arc requires persistent outbound 443. Hard stop for air-gapped tenants.', 'Azure Arc-enabled servers require outbound 443. Hard stop for air-gapped tenants.'],
+  ['cloud governance -> Arc.', 'cloud governance -> Azure Arc-enabled servers.'],
+  ['Azure Arc control plane (inventory, RBAC, tags, VM CRUD)', 'Azure Arc control plane (inventory, RBAC, tags)'],
+  ['Free. Includes the Arc-enabled SCVMM connector itself and the resource bridge.', 'Free. Azure services enabled on Arc-enabled servers are billed separately.'],
+  ['Microsoft directs you to Arc-enabled SCVMM.', 'Microsoft directed customers to Arc-enabled SCVMM, which closed to new deployments in October 2026.'],
+  ['Arc control plane, the Arc-enabled SCVMM connector, the resource bridge, inventory, RBAC, tags and VM CRUD/power operations are all free.', 'The Azure Arc control plane, inventory, RBAC, and tags are free.'],
+  ['Arc connector is free', 'Arc control plane is free'],
+  ['Arc-enabled SCVMM requires an ongoing resource-bridge connection to Azure; enabled guest services', 'Azure Arc-enabled servers require an outbound connection to Azure; enabled services'],
+  ['Arc-enabled servers and SCVMM machines', 'Arc-enabled servers'],
+  ['its cloud ambitions moved to Arc.', 'its Azure path now runs through Arc-enabled servers and Azure Local.'],
+  ['SCVMM self-service, or Azure RBAC via Arc', 'SCVMM self-service'],
+  ['SCVMM Cloud, or Azure subscription via Arc', 'SCVMM Cloud'],
 ]
 
 const neutralizePublicCopy = (value) => {
@@ -87,13 +116,22 @@ const data = {
     answer: String(row[1]),
     because: String(row[2]),
   })),
-  planeGuides: decisionRows.slice(27, 32).map((row) => ({
-    plane: String(row[0]),
-    pros: String(row[1]),
-    cons: String(row[2]),
-    pickWhen: String(row[3]),
-    walkAwayWhen: String(row[4]),
-  })),
+  planeGuides: [
+    ...decisionRows.slice(27, 32).filter((row) => !String(row[0]).includes('Arc-enabled SCVMM')).map((row) => ({
+      plane: String(row[0]),
+      pros: String(row[1]),
+      cons: String(row[2]),
+      pickWhen: String(row[3]),
+      walkAwayWhen: String(row[4]),
+    })),
+    {
+      plane: 'Optional add-on: Azure Arc-enabled servers',
+      pros: '+  Connects the guest OS to Update Manager, Defender for Cloud, Azure Monitor, and Azure Policy\n+  Works with any management plane in this list\n+  No resource bridge appliance to host\n+  Microsoft\'s recommended path for Azure management services after Arc-enabled SCVMM',
+      cons: '–  Does not provide VM lifecycle operations from Azure\n–  Needs the Connected Machine agent on every connected server\n–  Needs outbound 443, directly or through a proxy or private link scope\n–  Enabled Azure services can add per-resource, consumption, and log-ingestion charges',
+      pickWhen: 'Azure management services are a stated requirement and the organization accepts the Azure dependency.',
+      walkAwayWhen: 'Air-gapped or sovereign tenants, or when Azure-based VM lifecycle is the actual requirement.',
+    },
+  ],
   decisionCautions: decisionRows.slice(34, 40).map((row) => ({
     statement: String(row[0]),
     explanation: String(row[1]),
@@ -106,13 +144,12 @@ const data = {
       scvmm: String(row[3]),
       'wac-admin': String(row[4]),
       'wac-virtual': String(row[5]),
-      'arc-scvmm': String(row[6]),
     },
     vmwareVsphere8: String(row[7]),
     vmwareVcf9: String(row[8]),
     note: String(row[9]),
   })),
-  skuReference: sheetRows('SKU Reference').slice(4).filter((row) => row[0] && row[1]).map((row) => ({
+  skuReference: sheetRows('SKU Reference').slice(4).filter((row) => row[0] && row[1] && row[0] !== 'ARC-BRIDGE').map((row) => ({
     ref: String(row[0]),
     product: String(row[1]),
     edition: String(row[2]),
@@ -130,12 +167,16 @@ const data = {
     fidelity: String(row[2]),
     note: String(row[3]),
   })),
-  sources: sheetRows('Sources & Caveats').slice(4, 40).filter((row) => row[0] && row[1]).map((row) => ({
-    topic: String(row[0]),
-    finding: String(row[1]),
-    source: String(row[2]),
-  })),
-  platformLimits: sheetRows('Platform Limits').slice(4).filter((row) => row[0] && row[2]).map((row) => ({
+  sources: sheetRows('Sources & Caveats').slice(4, 40).filter((row) => row[0] && row[1]).map((row) => (
+    String(row[0]) === 'Arc-enabled SCVMM'
+      ? {
+        topic: 'Arc-enabled SCVMM retirement',
+        finding: 'Microsoft stopped new onboarding in October 2026 and retires the service in September 2029. Existing deployments keep working until then. Azure Arc-enabled servers are the recommended path for Azure management services and do not provide VM lifecycle operations.',
+        source: 'https://learn.microsoft.com/azure/azure-arc/system-center-virtual-machine-manager/transition-guidance',
+      }
+      : { topic: String(row[0]), finding: String(row[1]), source: String(row[2]) }
+  )),
+  platformLimits: sheetRows('Platform Limits').slice(4).filter((row) => row[0] && row[2] && row[0] !== 'Arc-enabled SCVMM').map((row) => ({
     category: String(row[0]),
     scope: String(row[1]),
     capability: String(row[2]),

@@ -83,6 +83,8 @@ export interface Vm {
   performance?: VmPerformanceMetrics
   /** True when the tier was assigned by auto-classification and not reviewed. */
   autoClassified?: boolean
+  /** True when a large VM stayed in General and a person should confirm its tier. */
+  sizeReview?: boolean
   notes?: string
 }
 
@@ -133,8 +135,18 @@ export interface SanSpec {
   maxThroughputMBps?: number
 }
 
+/**
+ * fixed       the array size is an input and a hard limit (existing hardware, known array).
+ * calculated  the array is an output: Surveyor reports the capacity to buy (new designs).
+ * Absent means fixed, so every existing-hardware profile keeps its entered array size.
+ */
+export type SanSizingMode = 'fixed' | 'calculated'
+
 export interface ClusterConfig {
   architecture: StorageArchitecture
+  sanSizingMode?: SanSizingMode
+  /** Free space kept on a calculated SAN. 0.2 plans the array to be no more than 80% full. [TOOL] */
+  sanFreeSpaceTargetPct?: number
   spareNodes: number
   resiliency: Resiliency
   /** Fraction of a nested-MAP volume that is mirror. Only used for nested-map. */
@@ -231,12 +243,30 @@ export interface Finding {
 
 export type BindingConstraint = 'cpu' | 'memory' | 'storage' | 'node-floor' | 'none'
 
+/** The array a new design needs. Present only when the SAN is calculated. */
+export interface SanSizing {
+  /** Data the SAN domain must hold, after growth. */
+  requiredTiB: number
+  freeSpaceTargetPct: number
+  drr: number
+  /** Effective capacity including the free-space target. */
+  effectiveTiB: number
+  /** Usable capacity to buy: effective capacity divided by the data reduction ratio. */
+  usableToBuyTiB: number
+}
+
 export interface SizingResult {
   architecture: StorageArchitecture
   resiliency: Resiliency
   feasible: boolean
+  /** The design's node count when feasible. When infeasible this is the ceiling, not a design. */
   nodes: number
   workloadNodes: number
+  /** Nodes the workload needs in one cluster, even above the limit. Null when no count can work. */
+  nodesNeeded: number | null
+  /** Most nodes one cluster of this storage type and resiliency may have. */
+  clusterNodeLimit: number
+  sanSizing: SanSizing | null
   binding: BindingConstraint
   bindingExplanation: string
   nodesIfCpuOnly: number

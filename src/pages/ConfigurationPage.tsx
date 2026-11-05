@@ -14,7 +14,7 @@ export default function ConfigurationPage() {
       <PageHeader
         eyebrow="New platform · Step 2"
         title="Hardware and assumptions"
-        description="Set the proposed node, resilience policy, storage configuration, host reserves, and workload treatment used by every comparison."
+        description="Starting assumptions for the comparison. You do not need final hardware: Surveyor uses these to work out the node count and the storage you need."
         actions={<Link className="btn link-btn" to="/results">Calculate designs <ArrowRight size={15} /></Link>}
       />
       <JourneyBar detail="These are proposed-design assumptions and remain separate from the existing-hardware profile." />

@@ -1,11 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react'
-import { parseRvTools, type ImportReport } from '../io/rvtools'
+import { parseRvTools, summarizeImport, type ImportSummary } from '../io/rvtools'
 import { downloadPerformanceTemplate, mergePerformanceData, parsePerformanceData, type PerformanceMergeReport } from '../io/performance'
 import { assessPerformanceData } from '../engine/performance'
 import { bulkVms, demoFleet, newVm } from '../state/defaults'
 import { TIER_IDS } from '../engine/rules'
 import { giBToTiB } from '../engine/compute'
-import type { TierId, TierPolicy, Vm } from '../engine/types'
+import type { PowerState, TierId, TierPolicy, Vm } from '../engine/types'
 import { Field, NumberInput, fmt0, fmt1 } from './Shared'
 
 interface Props {
@@ -13,17 +13,20 @@ interface Props {
   setVms: (v: Vm[]) => void
   tiers: Record<TierId, TierPolicy>
   onDataSource?: (source: { kind: 'rvtools' | 'performance'; fileName: string; rows: number }) => void
+  report: ImportSummary | null
+  setReport: (report: ImportSummary | null) => void
 }
 
-export function WorkloadPanel({ vms, setVms, tiers, onDataSource }: Props) {
+export function WorkloadPanel({ vms, setVms, tiers, onDataSource, report, setReport }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const performanceFileRef = useRef<HTMLInputElement>(null)
-  const [report, setReport] = useState<ImportReport | null>(null)
   const [performanceReport, setPerformanceReport] = useState<PerformanceMergeReport | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [over, setOver] = useState(false)
   const [filter, setFilter] = useState('')
   const [tierFilter, setTierFilter] = useState<'all' | TierId>('all')
+  const [powerFilter, setPowerFilter] = useState<'all' | PowerState>('all')
+  const [reviewOnly, setReviewOnly] = useState(false)
   const [page, setPage] = useState(0)
   const [bulkTier, setBulkTier] = useState<TierId>('general')
   const [bulk, setBulk] = useState({ count: 100, tier: 'general' as TierId, vCpu: 4, ramGiB: 16, storageGiB: 200, prefix: 'VM' })
@@ -33,7 +36,7 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource }: Props) {
     try {
       const buf = await file.arrayBuffer()
       const rep = parseRvTools(buf)
-      setReport(rep)
+      setReport(summarizeImport(rep, file.name))
       setVms(rep.vms)
       onDataSource?.({ kind: 'rvtools', fileName: file.name, rows: rep.totalRows })
     } catch (e: any) {
@@ -60,9 +63,11 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource }: Props) {
     const q = filter.trim().toLowerCase()
     return vms.filter(v =>
       (tierFilter === 'all' || v.tier === tierFilter) &&
+      (powerFilter === 'all' || v.powerState === powerFilter) &&
+      (!reviewOnly || v.autoClassified || v.sizeReview) &&
       (q === '' || v.name.toLowerCase().includes(q) || (v.guestOs ?? '').toLowerCase().includes(q)),
     )
-  }, [vms, filter, tierFilter])
+  }, [vms, filter, tierFilter, powerFilter, reviewOnly])
 
   const totals = useMemo(() => {
     const inc = vms.filter(v => v.include)
@@ -76,6 +81,19 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource }: Props) {
     }
   }, [vms])
   const performance = useMemo(() => assessPerformanceData(vms), [vms])
+  const stopped = useMemo(() => {
+    const list = vms.filter(v => v.powerState !== 'poweredOn')
+    return {
+      list,
+      off: list.filter(v => v.powerState === 'poweredOff').length,
+      suspended: list.filter(v => v.powerState === 'suspended').length,
+      included: list.filter(v => v.include).length,
+      vCpu: list.reduce((s, v) => s + v.vCpu, 0),
+      ram: list.reduce((s, v) => s + v.ramGiB, 0),
+      sto: list.reduce((s, v) => s + v.storageGiB, 0),
+    }
+  }, [vms])
+  const setStoppedIncluded = (include: boolean) => setVms(vms.map(v => v.powerState === 'poweredOn' ? v : { ...v, include }))
   const pageSize = 200
   const pageCount = Math.max(1, Math.ceil(shown.length / pageSize))
   const currentPage = Math.min(page, pageCount - 1)
@@ -122,10 +140,10 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource }: Props) {
           <button className="btn ghost" onClick={() => downloadPerformanceTemplate(vms)} disabled={vms.length === 0}>
             Download performance template
           </button>
-          <button className="btn ghost" onClick={() => setVms(demoFleet())}>
+          <button className="btn ghost" onClick={() => { setReport(null); setVms(demoFleet()) }}>
             Generate randomized demo fleet (400 VMs)
           </button>
-          <button className="btn ghost" onClick={() => { if (window.confirm(`Remove all ${vms.length.toLocaleString()} workloads from this project?`)) setVms([]) }} disabled={vms.length === 0}>
+          <button className="btn ghost" onClick={() => { if (window.confirm(`Remove all ${vms.length.toLocaleString()} workloads from this project?`)) { setReport(null); setVms([]) } }} disabled={vms.length === 0}>
             Clear all
           </button>
         </div>
@@ -140,8 +158,9 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource }: Props) {
         {report && (
           <div style={{ marginTop: 12 }}>
             <div className="note ok">
-              <strong>Imported {report.vms.length} VMs from {report.totalRows} rows</strong>
-              Excluded: {report.excludedTemplates} templates · {report.excludedSrmPlaceholders} SRM placeholders · {report.excludedVcls} vCLS.
+              <strong>Imported {report.importedVms} VMs from {report.totalRows} rows in {report.fileName}</strong>
+              {report.importedVms - report.poweredOff - report.suspended} powered on · {report.poweredOff} powered off · {report.suspended} suspended.{' '}
+              Not imported: {report.excludedTemplates} templates · {report.excludedSrmPlaceholders} SRM placeholders · {report.excludedVcls} vCLS.
               {report.usedPartitionData
                 ? ' Consumed storage taken from vPartition (in-guest actual).'
                 : ' No vPartition tab — consumed storage taken from vInfo In Use.'}
@@ -159,6 +178,18 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource }: Props) {
                 )}
               </div>
             )}
+          </div>
+        )}
+        {stopped.list.length > 0 && (
+          <div className="note warn" style={{ marginTop: 12 }}>
+            <strong>{stopped.off} powered-off and {stopped.suspended} suspended VMs: should they count in sizing?</strong>
+            They are listed in the inventory below and are {stopped.included === 0 ? 'currently excluded' : stopped.included === stopped.list.length ? 'currently included' : `partly included (${stopped.included} of ${stopped.list.length})`}.
+            Together they would add {fmt0(stopped.vCpu)} vCPU, {fmt0(stopped.ram)} GiB of RAM, and {fmt1(giBToTiB(stopped.sto))} TiB of storage. Include them if they are DR, seasonal, or otherwise still needed.
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className={`btn ${stopped.included === stopped.list.length ? '' : 'ghost'}`} type="button" onClick={() => setStoppedIncluded(true)}>Include them in sizing</button>
+              <button className={`btn ${stopped.included === 0 ? '' : 'ghost'}`} type="button" onClick={() => setStoppedIncluded(false)}>Keep them excluded</button>
+              <button className="btn ghost" type="button" onClick={() => { setPowerFilter('poweredOff'); setPage(0) }}>Show powered-off VMs</button>
+            </div>
           </div>
         )}
         {performanceReport && (
@@ -199,6 +230,7 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource }: Props) {
 
       <div className="panel">
         <h2>Inventory — {fmt0(totals.count)} of {fmt0(totals.all)} included</h2>
+        {stopped.list.length > 0 && <p className="small muted" style={{ marginTop: -6 }}>{fmt0(totals.all - stopped.list.length)} powered on · {fmt0(stopped.off)} powered off · {fmt0(stopped.suspended)} suspended. The totals below count included VMs only.</p>}
         <div className={`note ${performance.confidence === 'high' ? 'ok' : performance.measuredVms > 0 ? 'warn' : ''}`}>
           <strong>Performance data: {performance.confidence.replace('-', ' ')} · confidence score {performance.score}/100</strong>
           CPU P95 coverage {performance.cpuCoveragePct.toFixed(0)}% · memory P95 {performance.memoryCoveragePct.toFixed(0)}% · storage performance {performance.storagePerformanceCoveragePct.toFixed(0)}% · 7+ day history {performance.observationCoveragePct.toFixed(0)}%.
@@ -222,17 +254,30 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource }: Props) {
               {TIER_IDS.map(t => <option key={t} value={t}>{tiers[t].label}</option>)}
             </select>
           </Field>
-          <div style={{ flex: 2 }} />
+          <Field label="Power state">
+            <select value={powerFilter} onChange={e => { setPowerFilter(e.target.value as 'all' | PowerState); setPage(0) }}>
+              <option value="all">All power states</option>
+              <option value="poweredOn">Powered on</option>
+              <option value="poweredOff">Powered off</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          </Field>
+          <Field label="Tier review">
+            <select value={reviewOnly ? 'review' : 'all'} onChange={e => { setReviewOnly(e.target.value === 'review'); setPage(0) }}>
+              <option value="all">All VMs</option>
+              <option value="review">Needs review</option>
+            </select>
+          </Field>
         </div>
         {shown.length > 0 && (
           <div className="row" style={{ marginBottom: 10 }}>
             <button className="btn ghost" onClick={() => patchShown({ include: true })}>Include filtered</button>
             <button className="btn ghost" onClick={() => patchShown({ include: false })}>Exclude filtered</button>
-            <button className="btn ghost" onClick={() => patchShown({ autoClassified: false })}>Mark filtered reviewed</button>
+            <button className="btn ghost" onClick={() => patchShown({ autoClassified: false, sizeReview: false })}>Mark filtered reviewed</button>
             <Field label="Set filtered tier">
               <select value={bulkTier} onChange={(event) => setBulkTier(event.target.value as TierId)}>{TIER_IDS.map((id) => <option value={id} key={id}>{tiers[id].label}</option>)}</select>
             </Field>
-            <button className="btn ghost" onClick={() => patchShown({ tier: bulkTier, autoClassified: false })}>Apply tier</button>
+            <button className="btn ghost" onClick={() => patchShown({ tier: bulkTier, autoClassified: false, sizeReview: false })}>Apply tier</button>
           </div>
         )}
 
@@ -261,9 +306,10 @@ export function WorkloadPanel({ vms, setVms, tiers, onDataSource }: Props) {
                     <td>
                       <input value={v.name} onChange={e => patch(v.id, { name: e.target.value })} />
                       {v.autoClassified && <span className="pill tool" style={{ marginTop: 3, display: 'inline-block' }}>auto-classified — review</span>}
+                      {v.sizeReview && <span className="pill tool" style={{ marginTop: 3, display: 'inline-block' }}>large VM — confirm tier</span>}
                     </td>
                     <td>
-                      <select value={v.tier} onChange={e => patch(v.id, { tier: e.target.value as TierId, autoClassified: false })}>
+                      <select value={v.tier} onChange={e => patch(v.id, { tier: e.target.value as TierId, autoClassified: false, sizeReview: false })}>
                         {TIER_IDS.map(t => <option key={t} value={t}>{tiers[t].label}</option>)}
                       </select>
                     </td>

@@ -51,13 +51,13 @@ describe('solution report', () => {
     expect(report.customerName).toBe('Contoso')
     expect(report.sections).toHaveLength(16)
     expect(componentRows.some((row) => row[0] === 'SCOM management server')).toBe(true)
-    expect(componentRows.some((row) => row[0] === 'Azure Arc resource bridge appliance')).toBe(true)
+    expect(componentRows.some((row) => row[0] === 'Azure Arc resource bridge appliance')).toBe(false)
     expect(componentRows.some((row) => row[0] === 'Shared SQL Server for VMM and SCOM databases')).toBe(true)
     expect(componentRows.some((row) => row[0] === 'SQL Server for SCOM databases')).toBe(false)
     expect(managementSection.paragraphs[0]).toContain('SCOM 2025 HA on shared VMM SQL infrastructure')
     expect(managementSection.tables[1].title).toBe('Selected Azure Arc services')
     expect(managementSection.tables[1].rows.map((row) => row[0])).toEqual([
-      'Azure Arc core management',
+      'Azure Arc-enabled servers',
       'Azure Update Manager',
       'Azure Monitor and Log Analytics',
     ])
@@ -88,7 +88,7 @@ describe('solution report', () => {
     expect(report.sections.find((section) => section.id === 'architecture')?.reasoning.length).toBeGreaterThan(0)
     expect(report.sections.find((section) => section.id === 'management')?.reasoning.map((item) => item.decision)).toEqual(expect.arrayContaining([
       'Use SCVMM 2025 as the fabric foundation',
-      'Add Azure Arc-enabled SCVMM',
+      'Add Azure Arc-enabled servers',
       'Add SCOM 2025 with high availability',
     ]))
     expect(conciseMarkdown).not.toContain('Decision reasoning and explanations')

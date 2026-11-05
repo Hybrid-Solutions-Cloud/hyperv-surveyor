@@ -26,9 +26,18 @@ export interface ImportReport {
   excludedSrmPlaceholders: number
   excludedVcls: number
   poweredOff: number
+  suspended: number
   usedPartitionData: boolean
   warnings: string[]
   hostSummary: HostSummary | null
+}
+
+/** Everything about an import except the VMs, which live in the workload inventory. */
+export type ImportSummary = Omit<ImportReport, 'vms'> & { fileName: string; importedVms: number }
+
+export function summarizeImport(report: ImportReport, fileName: string): ImportSummary {
+  const { vms, ...summary } = report
+  return { ...summary, fileName, importedVms: vms.length }
 }
 
 export interface HostSummary {
@@ -73,18 +82,24 @@ function sheet(wb: XLSX.WorkBook, ...candidates: string[]): Record<string, any>[
   return null
 }
 
-/** Auto-classification. Anything promoted out of "general" is flagged for SE review. */
-export function classify(name: string, guestOs: string, vCpu: number, ramGiB: number, storageGiB: number): TierId {
-  const hay = `${name} ${guestOs}`
+/**
+ * Auto-classification. Anything promoted out of "general" is flagged for SE review.
+ * Only the VM name and guest OS can assign a tier. Size says a VM is big, not what it runs, and
+ * treating big VMs as databases at 1:1 CPU inflated designs, so size only raises needsSizeReview.
+ * The Oracle Linux OS is removed before matching because it does not imply an Oracle database.
+ */
+export function classify(name: string, guestOs: string): TierId {
+  const hay = `${name} ${guestOs.replace(/oracle\s+linux/gi, '')}`
   if (DB_NAME_PATTERN.test(hay)) return 'database'
   if (VDI_NAME_PATTERN.test(hay)) return 'vdi'
   if (INFRA_NAME_PATTERN.test(name)) return 'infrastructure'
-  if (
-    vCpu >= AUTO_CLASSIFY.heavyVCpu ||
-    ramGiB >= AUTO_CLASSIFY.heavyRamGiB ||
-    storageGiB >= AUTO_CLASSIFY.heavyStorageGiB
-  ) return 'database'
   return 'general'
+}
+
+export function needsSizeReview(vCpu: number, ramGiB: number, storageGiB: number): boolean {
+  return vCpu >= AUTO_CLASSIFY.heavyVCpu
+    || ramGiB >= AUTO_CLASSIFY.heavyRamGiB
+    || storageGiB >= AUTO_CLASSIFY.heavyStorageGiB
 }
 
 export function parseRvTools(data: ArrayBuffer): ImportReport {
@@ -138,6 +153,7 @@ export function parseRvTools(data: ArrayBuffer): ImportReport {
   let excludedSrmPlaceholders = 0
   let excludedVcls = 0
   let poweredOff = 0
+  let suspended = 0
   const vms: Vm[] = []
   let seq = 0
 
@@ -153,7 +169,8 @@ export function parseRvTools(data: ArrayBuffer): ImportReport {
     const powerRaw = String(pick(row, 'Powerstate', 'Power state') ?? 'poweredOn')
     const powerState: PowerState =
       /off/i.test(powerRaw) ? 'poweredOff' : /susp/i.test(powerRaw) ? 'suspended' : 'poweredOn'
-    if (powerState !== 'poweredOn') poweredOff++
+    if (powerState === 'poweredOff') poweredOff++
+    if (powerState === 'suspended') suspended++
 
     const vCpu = num(pick(row, 'CPUs'))
     const ramGiB = mibToGiB(num(pick(row, 'Memory')))
@@ -166,7 +183,7 @@ export function parseRvTools(data: ArrayBuffer): ImportReport {
       pick(row, 'OS according to the VMware Tools', 'OS according to the configuration file', 'Guest OS') ?? '',
     )
 
-    const tier = classify(name, guestOs, vCpu, ramGiB, storageGiB)
+    const tier = classify(name, guestOs)
     seq += 1
     const sourceHost = String(pick(row, 'Host') ?? '')
     const firmwareRaw = String(pick(row, 'Firmware') ?? '').toLowerCase()
@@ -193,18 +210,23 @@ export function parseRvTools(data: ArrayBuffer): ImportReport {
       encrypted: bool(pick(row, 'Encrypted')),
       hasVtpm: bool(pick(row, 'TPM', 'vTPM')),
       autoClassified: tier !== 'general',
+      sizeReview: tier === 'general' && needsSizeReview(vCpu, ramGiB, storageGiB),
     })
   }
 
   if (vInfo.length > 20000) {
     warnings.push(`${vInfo.length} rows. Some import tools cap RVTools files at 20,000 VM rows.`)
   }
-  if (poweredOff > 0) {
-    warnings.push(`${poweredOff} powered-off VM(s) imported but EXCLUDED from sizing by default. Toggle them individually if they should count.`)
+  if (poweredOff + suspended > 0) {
+    warnings.push(`${poweredOff} powered-off and ${suspended} suspended VM(s) are in the inventory but EXCLUDED from sizing by default. Choose below whether they should count.`)
   }
   const autoCount = vms.filter(v => v.autoClassified).length
   if (autoCount > 0) {
-    warnings.push(`${autoCount} VM(s) were auto-classified out of General Server. Review the tier column — auto-classification is a starting point, not an answer.`)
+    warnings.push(`${autoCount} VM(s) were auto-classified out of General Server from their name or guest OS. Review the tier column — auto-classification is a starting point, not an answer.`)
+  }
+  const sizeReviewCount = vms.filter(v => v.sizeReview).length
+  if (sizeReviewCount > 0) {
+    warnings.push(`${sizeReviewCount} large VM(s) stayed in General Server and are flagged for review. Move any real database servers to the Database tier, because that changes the CPU ratio from 4:1 to 1:1.`)
   }
   warnings.push('RVTools carries NO utilisation history. This import sizes on ALLOCATION, which typically oversizes. Adjust the per-tier Right-Sizing Factor, or bring a Live Optics / Aria Operations export for measured data.')
 
@@ -243,6 +265,7 @@ export function parseRvTools(data: ArrayBuffer): ImportReport {
     excludedSrmPlaceholders,
     excludedVcls,
     poweredOff,
+    suspended,
     usedPartitionData: consumedByVm.size > 0,
     warnings,
     hostSummary,

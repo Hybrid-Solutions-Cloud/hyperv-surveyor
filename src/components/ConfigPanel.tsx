@@ -1,7 +1,8 @@
 import React from 'react'
 import { RESILIENCY, TIER_IDS } from '../engine/rules'
 import { cacheRatio } from '../engine/capacity'
-import { licensableCores, totalCores } from '../engine/compute'
+import { licensableCores, totalCores, usableCoresPerHost, usableRamPerHost } from '../engine/compute'
+import { hardwareInputProblems } from '../engine/validate'
 import { resolveGrowthPlan } from '../engine/growth'
 import type { ClusterConfig, Resiliency, TierId, TierPolicy } from '../engine/types'
 import { Field, NumberInput } from './Shared'
@@ -23,12 +24,20 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
   const cores = totalCores(cfg.node)
   const lic = licensableCores(cfg.node)
   const ratio = cacheRatio(cfg.node)
-  const usesS2d = cfg.architecture === 's2d' || cfg.architecture === 'hybrid'
-  const usesSan = cfg.architecture === 'san' || cfg.architecture === 'hybrid'
   const growth = resolveGrowthPlan(cfg)
+  const problems = hardwareInputProblems(cfg)
+  const usableCores = usableCoresPerHost(cfg.node, cfg)
+  const usableRam = usableRamPerHost(cfg.node, cfg)
+  const sanCalculated = cfg.sanSizingMode === 'calculated'
 
   return (
     <div className="stack">
+      {problems.length > 0 && (
+        <div className="note err">
+          <strong>Fix these values before using the results</strong>
+          {problems.map((problem) => <div key={problem}>{problem}</div>)}
+        </div>
+      )}
       <div className="panel">
         <h2>Resiliency and growth</h2>
         <Field label="Spare nodes (N+n)" hint="The service-provider default is N+2 — you must survive losing a node while another is draining for patches.">
@@ -99,12 +108,17 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
       </div>
 
       <div className="panel">
-        <h2>Node specification</h2>
+        <h2>Reference server</h2>
+        <div className="note">
+          <strong>This is a starting assumption, not a purchase decision</strong>
+          Surveyor needs a server size to work out how many nodes your workload takes. You do not need to know your final
+          hardware: keep this example, enter your own, or compare other sizes on the results page.
+        </div>
         <div className="row">
           <Field label="Sockets"><NumberInput value={cfg.node.sockets} min={1} max={8} onChange={n => setNode({ sockets: n })} /></Field>
           <Field label="Cores / socket"><NumberInput value={cfg.node.coresPerSocket} min={1} onChange={n => setNode({ coresPerSocket: n })} /></Field>
         </div>
-        <Field label="RAM per node (GiB)"><NumberInput value={cfg.node.ramGiB} min={16} step={64} onChange={n => setNode({ ramGiB: n })} /></Field>
+        <Field label="RAM per server (GiB)"><NumberInput value={cfg.node.ramGiB} min={16} step={64} onChange={n => setNode({ ramGiB: n })} /></Field>
         <Field label="Target processor vendor" hint="Live migration cannot cross Intel and AMD processor vendors. This also drives migration-readiness checks.">
           <select value={cfg.node.cpuVendor ?? 'unknown'} onChange={e => setNode({ cpuVendor: e.target.value as ClusterConfig['node']['cpuVendor'] })}>
             <option value="amd">AMD</option>
@@ -118,143 +132,150 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
             ? `Windows Server bills a 16-core-per-server / 8-core-per-socket minimum, so you pay for ${lic - cores} unused cores per node.`
             : 'No licensing waste at this core count.'}
         </div>
+      </div>
 
-        {usesS2d && (
-          <>
-            <h3>Storage Spaces Direct drives</h3>
-            <Field label="Media">
-              <select value={cfg.node.media} onChange={e => setNode({ media: e.target.value as any })}>
-                <option value="all-flash">All-flash (SSD/NVMe capacity)</option>
-                <option value="hybrid">Hybrid (HDD capacity — cache mandatory)</option>
-              </select>
-            </Field>
-            <div className="row">
-              <Field label="Capacity drives / node" hint="Minimum 4 [MS]">
-                <NumberInput value={cfg.node.capacityDrivesPerNode} min={0} onChange={n => setNode({ capacityDrivesPerNode: n })} />
-              </Field>
-              <Field label="Capacity drive TB">
-                <NumberInput value={cfg.node.capacityDriveTB} min={0} step={0.01} onChange={n => setNode({ capacityDriveTB: n })} />
-              </Field>
-            </div>
-            <div className="row">
-              <Field label="Cache drives / node" hint="Minimum 2 when used [MS]">
-                <NumberInput value={cfg.node.cacheDrivesPerNode} min={0} onChange={n => setNode({ cacheDrivesPerNode: n })} />
-              </Field>
-              <Field label="Cache drive TB">
-                <NumberInput value={cfg.node.cacheDriveTB} min={0} step={0.01} onChange={n => setNode({ cacheDriveTB: n })} />
-              </Field>
-            </div>
-            <div className="small muted">
-              Cache is {(ratio * 100).toFixed(1)}% of capacity. Starting recommendation is{' '}
-              {cfg.node.media === 'hybrid' ? '10%' : '5%'} for Windows Server; Azure Local imposes a hard 15% floor for hybrid.
-              Cache contributes <strong>zero</strong> usable capacity.
-            </div>
-            <h3>Validated S2D performance</h3>
-            <p className="small muted">Optional sustainable figures from a vendor design, proof of concept, or DiskSpd test. Leave at 0 when unknown; Surveyor will report storage performance as unvalidated.</p>
-            <div className="row">
-              <Field label="IOPS / node"><NumberInput value={cfg.node.s2dIopsPerNode ?? 0} min={0} step={1000} onChange={n => setNode({ s2dIopsPerNode: n })} /></Field>
-              <Field label="Throughput MB/s / node"><NumberInput value={cfg.node.s2dThroughputMBpsPerNode ?? 0} min={0} step={100} onChange={n => setNode({ s2dThroughputMBpsPerNode: n })} /></Field>
-            </div>
-
-            <h3>Resiliency</h3>
-            <Field label="Volume resiliency">
-              <select value={cfg.resiliency} onChange={e => set({ resiliency: e.target.value as Resiliency })}>
-                {Object.values(RESILIENCY).map(r => (
-                  <option key={r.id} value={r.id}>
-                    {r.label} — min {r.minNodes} node{r.minNodes > 1 ? 's' : ''}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <div className="small muted">{RESILIENCY[cfg.resiliency].note}</div>
-            {(cfg.resiliency === 'nested-map' || cfg.resiliency === 'mirror-accelerated-parity') && (
-              <Field label="Mirror share of the volume">
-                <select value={cfg.nestedMapMirrorPct} onChange={e => set({ nestedMapMirrorPct: parseFloat(e.target.value) as any })}>
-                  <option value={0.1}>10% mirror — best capacity</option>
-                  <option value={0.2}>20% mirror</option>
-                  <option value={0.3}>30% mirror — best write performance</option>
-                </select>
-              </Field>
-            )}
-          </>
-        )}
-
-        {usesSan && (
-          <>
-            <h3>SAN — Pure / Everpure FlashArray</h3>
-            <Field label="SAN CSV / LUN layout" hint="One presented SAN LUN maps 1:1 to one CSV. Microsoft recommends at least one CSV per node and imposes no VM-per-CSV maximum.">
-              <select value={cfg.sanCsvLayoutMode ?? 'balanced'} onChange={e => set({ sanCsvLayoutMode: e.target.value as ClusterConfig['sanCsvLayoutMode'] })}>
-                <option value="balanced">Balanced operations — recommended</option>
-                <option value="granular">Granular recovery — enforce tier targets</option>
-                <option value="custom">Custom SAN CSV / LUN total</option>
-              </select>
-            </Field>
-            {(cfg.sanCsvLayoutMode ?? 'balanced') === 'custom' && (
-              <Field label="Requested SAN CSV / LUN total" hint="The engine honors this cluster-wide target unless the 64 TiB platform recommendation or 10 TiB VSS/volsnap limit requires more.">
-                <NumberInput value={cfg.sanCustomCsvCount ?? 1} min={1} max={128} step={1} onChange={n => set({ sanCustomCsvCount: Math.max(1, Math.round(n)) })} />
-              </Field>
-            )}
-            <div className="note">
-              <strong>{(cfg.sanCsvLayoutMode ?? 'balanced') === 'balanced' ? 'Balanced operations is the default' : (cfg.sanCsvLayoutMode ?? 'balanced') === 'granular' ? 'Tier recovery targets are enforced' : 'Your requested total controls the layout'}</strong>
-              {(cfg.sanCsvLayoutMode ?? 'balanced') === 'balanced'
-                ? 'The design starts at one SAN CSV/LUN per node, distributes capacity across workload tiers, and adds LUNs only when a size or backup limit requires them. Tier recovery targets remain visible as an optional granular alternative.'
-                : (cfg.sanCsvLayoutMode ?? 'balanced') === 'granular'
-                  ? 'Every tier’s editable recovery-unit size and target VM count can add SAN CSV/LUNs. This intentionally creates more, smaller recovery units.'
-                  : 'The requested total is distributed by tier capacity. A hard size or backup limit can raise the final count, and a below-node target generates a design warning.'}
-            </div>
-            <Field label="Array USABLE capacity (TiB)" hint="Usable, never 'effective'. Effective already has DRR baked in — multiplying it again double-counts.">
-              <NumberInput value={cfg.san.usableTiB} min={1} onChange={n => setSan({ usableTiB: n })} />
-            </Field>
-            <Field label="Data reduction ratio" hint="Dedupe + compression + pattern removal ONLY. Pure's blended marketing average is 5:1; 2.5:1 is a conservative planning floor.">
+      <div className="panel">
+        <h2>SAN</h2>
+        <p className="small muted" style={{ marginTop: -6 }}>Used by the SAN and hybrid results.</p>
+        <Field label="Array size">
+          <select value={sanCalculated ? 'calculated' : 'fixed'} onChange={e => set({ sanSizingMode: e.target.value as ClusterConfig['sanSizingMode'], sanFreeSpaceTargetPct: cfg.sanFreeSpaceTargetPct ?? 0.2 })}>
+            <option value="calculated">Calculate the array I need from the workload</option>
+            <option value="fixed">I already know the array size</option>
+          </select>
+        </Field>
+        {sanCalculated ? (
+          <div className="row">
+            <Field label="Data reduction ratio" hint="Dedupe and compression only, not thin provisioning. Use a vendor guarantee or measured figure if you have one. 2.5:1 is a conservative planning default.">
               <NumberInput value={cfg.san.drr} min={1} max={10} step={0.1} onChange={n => setSan({ drr: n })} />
             </Field>
-            <div className="row">
-              <Field label="Validated array IOPS" hint="Optional sustainable workload figure; 0 means not validated."><NumberInput value={cfg.san.maxIops ?? 0} min={0} step={1000} onChange={n => setSan({ maxIops: n })} /></Field>
-              <Field label="Validated array throughput MB/s"><NumberInput value={cfg.san.maxThroughputMBps ?? 0} min={0} step={100} onChange={n => setSan({ maxThroughputMBps: n })} /></Field>
-            </div>
-            {cfg.san.drr > 5 && (
-              <div className="note warn">
-                <strong>DRR above 5:1</strong>
-                Pure's headline claim is "5-to-1 average data reduction". The "up to 10:1" figure includes
-                thin provisioning, which is not data reduction — it counts allocated-but-unwritten space
-                that vanishes as guests fill their volumes. Everpure's own blog criticises this conflation.
-              </div>
-            )}
-          </>
-        )}
-
-        {cfg.architecture === 'hybrid' && (
-          <>
-            <h3>Hybrid tier placement</h3>
-            <Field label={`Split tiers use ${(cfg.hybridS2dShare * 100).toFixed(0)}% S2D and ${((1 - cfg.hybridS2dShare) * 100).toFixed(0)}% SAN`} hint="This percentage applies only to tiers explicitly set to Split below.">
-              <input type="range" min={0.1} max={0.9} step={0.05} value={cfg.hybridS2dShare}
-                onChange={e => set({ hybridS2dShare: parseFloat(e.target.value) })} />
+            <Field label="Free space to keep %" hint="Tool assumption. 20% plans the array to be no more than 80% full.">
+              <NumberInput value={(cfg.sanFreeSpaceTargetPct ?? 0.2) * 100} min={0} max={90} step={5} onChange={n => set({ sanFreeSpaceTargetPct: n / 100 })} />
             </Field>
-            <div className="note">
-              <strong>Supported since Windows Server 2022</strong>
-              "Hyperconverged with SAN storage" — S2D CSVs on ReFS and SAN CSVs on NTFS coexist in one
-              cluster but remain separate. SAN LUNs must never enter the S2D pool. The node ceiling stays
-              at 16 because S2D is present.
-            </div>
-          </>
+          </div>
+        ) : (
+          <div className="row">
+            <Field label="Array usable capacity (TiB)" hint="Usable, not effective. Effective already includes data reduction, so multiplying it again double-counts. Designs above this size show as blocked.">
+              <NumberInput value={cfg.san.usableTiB} min={1} onChange={n => setSan({ usableTiB: n })} />
+            </Field>
+            <Field label="Data reduction ratio" hint="Dedupe and compression only, not thin provisioning.">
+              <NumberInput value={cfg.san.drr} min={1} max={10} step={0.1} onChange={n => setSan({ drr: n })} />
+            </Field>
+          </div>
         )}
+        {cfg.san.drr > 5 && (
+          <div className="note warn">
+            <strong>Data reduction above 5:1</strong>
+            Check that this figure excludes thin provisioning. Thin provisioning counts allocated but unwritten space, which
+            disappears as guests fill their volumes, so it is not data reduction.
+          </div>
+        )}
+        <Field label="SAN CSV / LUN layout" hint="One presented SAN LUN maps 1:1 to one CSV. Microsoft recommends at least one CSV per node and imposes no VM-per-CSV maximum.">
+          <select value={cfg.sanCsvLayoutMode ?? 'balanced'} onChange={e => set({ sanCsvLayoutMode: e.target.value as ClusterConfig['sanCsvLayoutMode'] })}>
+            <option value="balanced">Balanced operations — recommended</option>
+            <option value="granular">Granular recovery — enforce tier targets</option>
+            <option value="custom">Custom SAN CSV / LUN total</option>
+          </select>
+        </Field>
+        {(cfg.sanCsvLayoutMode ?? 'balanced') === 'custom' && (
+          <Field label="Requested SAN CSV / LUN total" hint="The engine honors this cluster-wide target unless the 64 TiB platform recommendation or 10 TiB VSS/volsnap limit requires more.">
+            <NumberInput value={cfg.sanCustomCsvCount ?? 1} min={1} max={128} step={1} onChange={n => set({ sanCustomCsvCount: Math.max(1, Math.round(n)) })} />
+          </Field>
+        )}
+        <div className="note">
+          <strong>{(cfg.sanCsvLayoutMode ?? 'balanced') === 'balanced' ? 'Balanced operations is the default' : (cfg.sanCsvLayoutMode ?? 'balanced') === 'granular' ? 'Tier recovery targets are enforced' : 'Your requested total controls the layout'}</strong>
+          {(cfg.sanCsvLayoutMode ?? 'balanced') === 'balanced'
+            ? 'The design starts at one SAN CSV/LUN per node, distributes capacity across workload tiers, and adds LUNs only when a size or backup limit requires them. Tier recovery targets remain visible as an optional granular alternative.'
+            : (cfg.sanCsvLayoutMode ?? 'balanced') === 'granular'
+              ? 'Every tier’s editable recovery-unit size and target VM count can add SAN CSV/LUNs. This intentionally creates more, smaller recovery units.'
+              : 'The requested total is distributed by tier capacity. A hard size or backup limit can raise the final count, and a below-node target generates a design warning.'}
+        </div>
+        <div className="row">
+          <Field label="Validated array IOPS" hint="Optional sustainable workload figure; 0 means not validated."><NumberInput value={cfg.san.maxIops ?? 0} min={0} step={1000} onChange={n => setSan({ maxIops: n })} /></Field>
+          <Field label="Validated array throughput MB/s"><NumberInput value={cfg.san.maxThroughputMBps ?? 0} min={0} step={100} onChange={n => setSan({ maxThroughputMBps: n })} /></Field>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>Storage Spaces Direct</h2>
+        <p className="small muted" style={{ marginTop: -6 }}>
+          Used by the S2D and hybrid results. Each result uses its own resiliency: three-way mirror, mirror-accelerated parity, or dual parity. Hybrid uses three-way mirror.
+        </p>
+        <Field label="Media">
+          <select value={cfg.node.media} onChange={e => setNode({ media: e.target.value as any })}>
+            <option value="all-flash">All-flash (SSD/NVMe capacity)</option>
+            <option value="hybrid">Hybrid (HDD capacity — cache mandatory)</option>
+          </select>
+        </Field>
+        <div className="row">
+          <Field label="Capacity drives / node" hint="Minimum 4 [MS]">
+            <NumberInput value={cfg.node.capacityDrivesPerNode} min={0} onChange={n => setNode({ capacityDrivesPerNode: n })} />
+          </Field>
+          <Field label="Capacity drive TB">
+            <NumberInput value={cfg.node.capacityDriveTB} min={0} step={0.01} onChange={n => setNode({ capacityDriveTB: n })} />
+          </Field>
+        </div>
+        <div className="row">
+          <Field label="Cache drives / node" hint="Minimum 2 when used [MS]">
+            <NumberInput value={cfg.node.cacheDrivesPerNode} min={0} onChange={n => setNode({ cacheDrivesPerNode: n })} />
+          </Field>
+          <Field label="Cache drive TB">
+            <NumberInput value={cfg.node.cacheDriveTB} min={0} step={0.01} onChange={n => setNode({ cacheDriveTB: n })} />
+          </Field>
+        </div>
+        <div className="small muted">
+          Cache is {(ratio * 100).toFixed(1)}% of capacity. Starting recommendation is{' '}
+          {cfg.node.media === 'hybrid' ? '10%' : '5%'} for Windows Server; Azure Local imposes a hard 15% floor for hybrid.
+          Cache contributes <strong>zero</strong> usable capacity.
+        </div>
+        <Field label="Mirror share for mirror-accelerated parity">
+          <select value={cfg.nestedMapMirrorPct} onChange={e => set({ nestedMapMirrorPct: parseFloat(e.target.value) as any })}>
+            <option value={0.1}>10% mirror — best capacity</option>
+            <option value={0.2}>20% mirror</option>
+            <option value={0.3}>30% mirror — best write performance</option>
+          </select>
+        </Field>
+        <h3>Validated S2D performance</h3>
+        <p className="small muted">Optional sustainable figures from a vendor design, proof of concept, or DiskSpd test. Leave at 0 when unknown; Surveyor will report storage performance as unvalidated.</p>
+        <div className="row">
+          <Field label="IOPS / node"><NumberInput value={cfg.node.s2dIopsPerNode ?? 0} min={0} step={1000} onChange={n => setNode({ s2dIopsPerNode: n })} /></Field>
+          <Field label="Throughput MB/s / node"><NumberInput value={cfg.node.s2dThroughputMBpsPerNode ?? 0} min={0} step={100} onChange={n => setNode({ s2dThroughputMBpsPerNode: n })} /></Field>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>Hybrid S2D + SAN</h2>
+        <p className="small muted" style={{ marginTop: -6 }}>Used by the hybrid result. Choose each tier's placement in the Workload tiers table below.</p>
+        <Field label={`Split tiers use ${(cfg.hybridS2dShare * 100).toFixed(0)}% S2D and ${((1 - cfg.hybridS2dShare) * 100).toFixed(0)}% SAN`} hint="This percentage applies only to tiers explicitly set to Split.">
+          <input type="range" min={0.1} max={0.9} step={0.05} value={cfg.hybridS2dShare}
+            onChange={e => set({ hybridS2dShare: parseFloat(e.target.value) })} />
+        </Field>
+        <div className="note">
+          <strong>Supported since Windows Server 2022</strong>
+          "Hyperconverged with SAN storage" — S2D CSVs on ReFS and SAN CSVs on NTFS coexist in one
+          cluster but remain separate. SAN LUNs must never enter the S2D pool. The node ceiling stays
+          at 16 because S2D is present.
+        </div>
       </div>
 
       <div className="panel">
         <h2>Host reserves</h2>
         <p className="small muted" style={{ marginTop: -6 }}>
-          Microsoft publishes no CPU or memory reserve figure for the root partition — Hyper-V calculates
-          it dynamically. These are tool assumptions.
+          The CPU and memory held back for each Hyper-V host itself, so VMs cannot be sized onto it.
+          Microsoft publishes no reserve figure because Hyper-V calculates it dynamically, so these are tool assumptions.
         </p>
+        <div className="note">
+          <strong>{usableCores.toFixed(0)} of {cores} cores and {usableRam.toFixed(0)} of {cfg.node.ramGiB} GiB of RAM are available to VMs on each server</strong>
+          CPU keeps the larger of 1 core or the CPU reserve %. RAM keeps the larger of the GiB or % reserve. S2D designs also hold back RAM for storage metadata.
+        </div>
         <div className="row">
-          <Field label="CPU reserve %"><NumberInput value={cfg.hostCoreReservePct * 100} step={1} min={0} onChange={n => set({ hostCoreReservePct: n / 100 })} /></Field>
+          <Field label="CPU reserve %"><NumberInput value={cfg.hostCoreReservePct * 100} step={1} min={0} max={90} onChange={n => set({ hostCoreReservePct: n / 100 })} /></Field>
           <Field label="SMT factor" hint="1.0 = no hyperthreading credit">
             <NumberInput value={cfg.smtFactor} step={0.1} min={1} max={2} onChange={n => set({ smtFactor: n })} />
           </Field>
         </div>
         <div className="row">
           <Field label="RAM reserve (GiB)"><NumberInput value={cfg.hostRamReserveGiB} min={0} step={4} onChange={n => set({ hostRamReserveGiB: n })} /></Field>
-          <Field label="RAM reserve %"><NumberInput value={cfg.hostRamReservePct * 100} step={1} min={0} onChange={n => set({ hostRamReservePct: n / 100 })} /></Field>
+          <Field label="RAM reserve %"><NumberInput value={cfg.hostRamReservePct * 100} step={1} min={0} max={90} onChange={n => set({ hostRamReservePct: n / 100 })} /></Field>
         </div>
         {cfg.smtFactor > 1 && (
           <div className="note warn">
@@ -286,7 +307,7 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
                 <th className="num">Target max VMs / recovery unit</th>
                 <th className="num">Max recovery-unit size (TiB)</th>
                 <th>Storage</th>
-                {cfg.architecture === 'hybrid' && <th>Hybrid placement</th>}
+                <th>Hybrid placement</th>
               </tr>
             </thead>
             <tbody>
@@ -303,15 +324,13 @@ export function ConfigPanel({ cfg, setCfg, tiers, setTiers }: Props) {
                       <option value="capacity">capacity</option>
                     </select>
                   </td>
-                  {cfg.architecture === 'hybrid' && (
-                    <td>
-                      <select value={tiers[id].hybridPlacement ?? (tiers[id].storageTier === 'performance' ? 's2d' : 'san')} onChange={e => setTier(id, { hybridPlacement: e.target.value as TierPolicy['hybridPlacement'] })}>
-                        <option value="s2d">S2D</option>
-                        <option value="san">SAN</option>
-                        <option value="split">Split</option>
-                      </select>
-                    </td>
-                  )}
+                  <td>
+                    <select value={tiers[id].hybridPlacement ?? (tiers[id].storageTier === 'performance' ? 's2d' : 'san')} onChange={e => setTier(id, { hybridPlacement: e.target.value as TierPolicy['hybridPlacement'] })}>
+                      <option value="s2d">S2D</option>
+                      <option value="san">SAN</option>
+                      <option value="split">Split</option>
+                    </select>
+                  </td>
                 </tr>
               ))}
             </tbody>

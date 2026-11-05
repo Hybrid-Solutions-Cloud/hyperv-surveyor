@@ -49,26 +49,27 @@ describe('management deployment planner', () => {
     expect(plan.cautions.some((item) => item.includes('not published an HA'))).toBe(true)
   })
 
-  it('requires SCVMM before adding Arc', () => {
-    const plan = planManagementDeployment({ ...base, foundation: 'classic', includeArc: true })
-    expect(plan.components.some((item) => item.id === 'arc-bridge')).toBe(false)
-    expect(plan.cautions.some((item) => item.includes('requires SCVMM'))).toBe(true)
+  it('offers Azure Arc-enabled servers on any foundation', () => {
+    for (const foundation of ['classic', 'scvmm'] as const) {
+      const plan = planManagementDeployment({ ...base, foundation, includeArc: true })
+      expect(plan.arcServices.map((service) => service.id)).toEqual(['core-management'])
+      expect(plan.arcServices[0].name).toBe('Azure Arc-enabled servers')
+    }
   })
 
-  it('models Arc resource bridge as one separate steady-state appliance VM', () => {
-    const plan = planManagementDeployment({ ...base, includeArc: true })
-    const bridge = plan.components.find((item) => item.id === 'arc-bridge')
-    expect(bridge).toMatchObject({ count: 1, vCpu: 4, ramGiB: 32, diskGiB: 100 })
-    expect(bridge?.notes.some((item) => item.includes('separate on-premises appliance VM'))).toBe(true)
-    expect(bridge?.notes.some((item) => item.includes('second appliance VM IP'))).toBe(true)
-    expect(plan.arcServices.map((service) => service.id)).toEqual(['core-management'])
-  })
-
-  it('adds selected Arc guest services without inventing more appliance VMs', () => {
+  it('adds no management VM for Azure Arc-enabled servers', () => {
+    const without = planManagementDeployment({ ...base })
     const plan = planManagementDeployment({ ...base, includeArc: true, arcServices: ['update-manager', 'azure-monitor'] })
+    expect(plan.totalInstances).toBe(without.totalInstances)
+    expect(plan.components.some((item) => item.id === 'arc-bridge')).toBe(false)
     expect(plan.arcServices.map((service) => service.id)).toEqual(['core-management', 'update-manager', 'azure-monitor'])
-    expect(plan.components.filter((item) => item.id === 'arc-bridge')).toHaveLength(1)
     expect(plan.dependencies.some((item) => item.includes('Connected Machine agent'))).toBe(true)
+    expect(plan.dependencies.some((item) => item.includes('resource bridge'))).toBe(false)
+  })
+
+  it('states that Azure Arc-enabled servers do not provide VM lifecycle', () => {
+    const plan = planManagementDeployment({ ...base, includeArc: true })
+    expect(plan.cautions.some((item) => item.includes('do not provide VM lifecycle'))).toBe(true)
   })
 
   it('maps the deployment to infrastructure VMs for capacity impact', () => {
@@ -164,10 +165,10 @@ describe('management deployment planner', () => {
 
   it('uses an advisor stack as the initial deployment choice', () => {
     const inputs = deploymentInputsFromStack(
-      ['scvmm', 'wac-virtual', 'arc-scvmm'],
+      ['scvmm', 'wac-virtual'],
       12,
       600,
-      { monitoring: 'scom', highAvailability: false },
+      { monitoring: 'scom', highAvailability: false, includeArc: true },
     )
     expect(inputs.foundation).toBe('scvmm')
     expect(inputs.wac).toBe('wac-virtual')

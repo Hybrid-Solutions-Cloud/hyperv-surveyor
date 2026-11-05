@@ -1,5 +1,6 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import type { Finding } from '../engine/types'
+import { formatNumberDraft, numberDraftProblem, parseNumberDraft } from './numberDraft'
 
 export function PageHeader(props: {
   eyebrow?: string
@@ -40,15 +41,33 @@ export function NumberInput(props: {
   min?: number
   max?: number
 }) {
+  const [draft, setDraft] = useState(() => formatNumberDraft(props.value))
+  const [focused, setFocused] = useState(false)
+  // While typing, the field belongs to the user. On leaving it, an invalid entry reverts to the
+  // last valid value, because that is the value the design is still using.
+  useEffect(() => {
+    if (!focused) setDraft(formatNumberDraft(props.value))
+  }, [props.value, focused])
+  const problem = numberDraftProblem(draft, props.min, props.max)
   return (
-    <input
-      type="number"
-      value={Number.isFinite(props.value) ? props.value : 0}
-      step={props.step ?? 1}
-      min={props.min}
-      max={props.max}
-      onChange={e => props.onChange(parseFloat(e.target.value) || 0)}
-    />
+    <>
+      <input
+        type="number"
+        value={draft}
+        step={props.step ?? 1}
+        min={props.min}
+        max={props.max}
+        aria-invalid={problem !== null}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={e => {
+          setDraft(e.target.value)
+          const value = parseNumberDraft(e.target.value, props.min, props.max)
+          if (value !== null) props.onChange(value)
+        }}
+      />
+      {problem && <span className="input-problem">{problem}</span>}
+    </>
   )
 }
 

@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { Activity, Boxes, Network, ShieldCheck } from 'lucide-react'
 import { Field, NumberInput, PageHeader } from '../components/Shared'
 import { compareArchitectures } from '../engine/solve'
-import { planMultipleClusters } from '../engine/deploymentPlanning'
+import { clusterNodeLimitFor, planMultipleClusters } from '../engine/deploymentPlanning'
 import { assessMigrationReadiness } from '../engine/readiness'
 import { designNetwork } from '../engine/networkDesign'
 import { designDisasterRecovery } from '../engine/drDesign'
@@ -20,7 +20,12 @@ export default function DeploymentPage() {
   const managementOnly = store.engagementMode === 'management-only'
   const platformCfg = usesExistingHardware ? store.existingCapacityCfg : chosen.cfg
   const platformTiers = usesExistingHardware ? store.existingCapacityTiers : store.tiers
-  const platformNodes = usesExistingHardware ? store.existingCapacityNodes : chosen.result.nodes
+  const workloadPlan = useMemo(() => planMultipleClusters(platformCfg, store.vms, platformTiers, store.placementInputs), [platformCfg, store.vms, platformTiers, store.placementInputs])
+  const platformNodes = usesExistingHardware
+    ? store.existingCapacityNodes
+    : store.placementInputs.clusterLayout === 'split' && workloadPlan.feasible ? workloadPlan.totalNodes : chosen.result.nodes
+  const splitLayout = store.placementInputs.clusterLayout === 'split'
+  const nodeLimit = clusterNodeLimitFor(platformCfg)
   const defaultManagementInputs = deploymentInputsFromStack(platformNodes <= 4 ? ['classic', 'wac-admin'] : ['scvmm', 'wac-admin'], platformNodes, store.vms.filter((vm) => vm.include).length)
   const managementInputs = normalizeManagementDeploymentInputs(store.managementDeploymentInputs ?? defaultManagementInputs)
   const managementPlan = useMemo(() => planManagementDeployment(managementInputs), [managementInputs])
@@ -55,19 +60,20 @@ export default function DeploymentPage() {
         </section>
       </div> : store.vms.filter((vm) => vm.include).length === 0 ? <div className="panel"><h2>Add workloads first</h2><p className="muted">Import or enter workloads before building the implementation plan.</p></div> : <div className="stack">
         <section className="panel">
-          <h2><Boxes size={18} /> Multi-cluster placement</h2>
+          <h2><Boxes size={18} /> Cluster placement</h2>
           <div className="form-grid two-column">
-            <Field label="Maximum nodes / target cluster"><NumberInput value={store.placementInputs.maxNodesPerCluster} min={2} max={64} onChange={(value) => setPlacement({ maxNodesPerCluster: Math.round(value) })} /></Field>
-            <Field label="Target VMs / cluster"><NumberInput value={store.placementInputs.targetVmsPerCluster} min={1} max={8000} step={50} onChange={(value) => setPlacement({ targetVmsPerCluster: Math.round(value) })} /></Field>
-            <Field label="Maximum target clusters"><NumberInput value={store.placementInputs.maxClusters} min={1} max={64} onChange={(value) => setPlacement({ maxClusters: Math.round(value) })} /></Field>
-            {(chosen.cfg.architecture === 'san' || chosen.cfg.architecture === 'hybrid') && <Field label="SAN capacity scope"><select value={store.placementInputs.sanCapacityScope} onChange={(event) => setPlacement({ sanCapacityScope: event.target.value as typeof store.placementInputs.sanCapacityScope })}><option value="shared">One shared array capacity pool</option><option value="per-cluster">Dedicated array capacity per cluster</option></select></Field>}
+            <Field label="Cluster layout" hint="Surveyor keeps one cluster unless you choose to split."><select value={store.placementInputs.clusterLayout} onChange={(event) => setPlacement({ clusterLayout: event.target.value as typeof store.placementInputs.clusterLayout })}><option value="single">One cluster</option><option value="split">Split into multiple clusters</option></select></Field>
+            {splitLayout && <Field label="Maximum nodes / target cluster" hint={`Up to ${nodeLimit} for this storage type.`}><NumberInput value={Math.min(store.placementInputs.maxNodesPerCluster, nodeLimit)} min={2} max={nodeLimit} onChange={(value) => setPlacement({ maxNodesPerCluster: Math.round(value) })} /></Field>}
+            {splitLayout && <Field label="Target VMs / cluster" hint="8,000 is the Hyper-V maximum, so it adds no extra limit."><NumberInput value={store.placementInputs.targetVmsPerCluster} min={1} max={8000} step={50} onChange={(value) => setPlacement({ targetVmsPerCluster: Math.round(value) })} /></Field>}
+            {splitLayout && <Field label="Maximum target clusters"><NumberInput value={store.placementInputs.maxClusters} min={1} max={64} onChange={(value) => setPlacement({ maxClusters: Math.round(value) })} /></Field>}
+            {splitLayout && platformCfg.sanSizingMode !== 'calculated' && (platformCfg.architecture === 'san' || platformCfg.architecture === 'hybrid') && <Field label="SAN capacity scope"><select value={store.placementInputs.sanCapacityScope} onChange={(event) => setPlacement({ sanCapacityScope: event.target.value as typeof store.placementInputs.sanCapacityScope })}><option value="shared">One shared array capacity pool</option><option value="per-cluster">Dedicated array capacity per cluster</option></select></Field>}
           </div>
-          <div className="meter-toggles">
+          {splitLayout && <div className="meter-toggles">
             <label><input type="checkbox" checked={store.placementInputs.preserveSourceClusters} onChange={(event) => setPlacement({ preserveSourceClusters: event.target.checked })} /> Keep each source cluster together</label>
             <label><input type="checkbox" checked={store.placementInputs.separateDatabaseTier} onChange={(event) => setPlacement({ separateDatabaseTier: event.target.checked })} /> Place database tier on dedicated clusters</label>
-          </div>
+          </div>}
           <div className={`note ${clusters.feasible ? 'ok' : 'err'}`}>
-            <strong>{clusters.feasible ? `${clusters.clusters.length} target cluster(s) · ${clusters.totalNodes} total nodes` : 'Placement needs revision'}</strong>
+            <strong>{clusters.feasible ? `${clusters.clusters.length} target cluster${clusters.clusters.length === 1 ? '' : 's'} · ${clusters.totalNodes} total nodes` : splitLayout ? 'Placement needs revision' : 'This workload does not fit one cluster'}</strong>
             {clusters.feasible ? `${clusters.totalWorkloadNodes} nodes carry workload after each cluster's failure reserve.` : clusters.warnings.join(' ')}
           </div>
           <div className="scroll" style={{ maxHeight: 'none' }}>

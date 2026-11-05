@@ -15,6 +15,7 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import { compareArchitectures, forecastGrowth, type ArchitectureOption } from '../engine/solve'
+import { plannedPlatformNodes, planMultipleClusters } from '../engine/deploymentPlanning'
 import {
   ARC_SERVICE_CATALOG,
   deploymentComponentsToVms,
@@ -52,16 +53,17 @@ type AdvisorTab = 'recommend' | 'deploy' | 'compare' | 'cost' | 'vmware' | 'fiel
 export default function ManagementPlanePage() {
   const [tab, setTab] = useState<AdvisorTab>('recommend')
   const [answers, setAnswers] = useState<AdvisorAnswers>({})
-  const { cfg, vms, tiers, chosenKey, managementDeploymentInputs, engagementMode, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, setManagementDecision } = useSurveyorStore()
+  const { cfg, vms, tiers, chosenKey, managementDeploymentInputs, engagementMode, existingCapacityCfg, existingCapacityTiers, existingCapacityNodes, setManagementDecision, placementInputs } = useSurveyorStore()
   const options = useMemo(() => compareArchitectures(cfg, vms, tiers), [cfg, vms, tiers])
   const chosen = options.find((option) => option.key === chosenKey) ?? options[0]
   const includedVms = vms.filter((vm) => vm.include).length
+  const workloadPlan = useMemo(() => planMultipleClusters(chosen.cfg, vms, tiers, placementInputs), [chosen.cfg, vms, tiers, placementInputs])
   const recommendation = recommendManagementPlane(answers)
   const usesExistingHardware = engagementMode === 'existing-capacity' || engagementMode === 'fit-gap'
   const managementOnly = engagementMode === 'management-only'
   const platformCfg = usesExistingHardware ? existingCapacityCfg : cfg
   const platformTiers = usesExistingHardware ? existingCapacityTiers : tiers
-  const platformNodes = managementOnly ? (managementDeploymentInputs?.managedHosts ?? 0) : usesExistingHardware ? existingCapacityNodes : chosen.result.feasible ? chosen.result.nodes : 0
+  const platformNodes = managementOnly ? (managementDeploymentInputs?.managedHosts ?? 0) : usesExistingHardware ? existingCapacityNodes : plannedPlatformNodes(chosen.result, workloadPlan, placementInputs)
   const platformLabel = managementOnly
     ? 'Management-only scope'
     : usesExistingHardware
@@ -100,6 +102,7 @@ export default function ManagementPlanePage() {
           recommendationStack={recommendation.stack}
           recommendationMonitoring={recommendation.monitoring}
           recommendationHighAvailability={recommendation.highAvailability}
+          recommendationArcServers={recommendation.arcServers}
           platformKind={managementOnly ? 'management-only' : usesExistingHardware ? 'existing' : 'new'}
           platformCfg={platformCfg}
           platformNodes={platformNodes}
@@ -254,15 +257,19 @@ function RecommendationPanel({
                   <div className="stack-node" key={id}>
                     <span>{id === 'scvmm'
                       ? answers.bareMetal ? 'Bare-metal + fabric' : 'Fabric'
-                      : id === 'arc-scvmm'
-                        ? 'Azure VM control surface'
-                        : answers.clusterCreation
-                          ? 'Prepared-host cluster + day two'
-                          : index === 0 ? 'Foundation' : 'Day two'}</span>
+                      : answers.clusterCreation
+                        ? 'Prepared-host cluster + day two'
+                        : index === 0 ? 'Foundation' : 'Day two'}</span>
                     <strong>{plane.shortName}</strong>
                   </div>
                 )
               })}
+              {recommendation.arcServers && (
+                <div className="stack-node">
+                  <span>Optional Azure services</span>
+                  <strong>Arc-enabled servers</strong>
+                </div>
+              )}
               {recommendation.monitoring === 'scom' && (
                 <div className="stack-node">
                   <span>Monitoring</span>
@@ -322,8 +329,9 @@ function RecommendationPanel({
           <p className="small">
             Prefer WAC vMode when Preview is explicitly accepted and no selected requirement hits a
             documented capability gap; use aMode as the production fallback. WAC creates clusters from
-            prepared hosts but does not install the host OS. Arc-enabled SCVMM is a focused two-layer stack:
-            SCVMM remains the fabric and Arc supplies the Azure control surface.
+            prepared hosts but does not install the host OS. Azure Arc-enabled servers are an optional add-on
+            for Azure management services and do not change the fabric choice. Arc-enabled SCVMM stopped
+            new onboarding in October 2026, so it is not offered here.
           </p>
         </section>
       </aside>
@@ -335,6 +343,7 @@ function DeploymentDesignerPanel({
   recommendationStack,
   recommendationMonitoring,
   recommendationHighAvailability,
+  recommendationArcServers,
   platformKind,
   platformCfg,
   platformNodes,
@@ -344,6 +353,7 @@ function DeploymentDesignerPanel({
   recommendationStack: PlaneId[]
   recommendationMonitoring: ManagementDeploymentInputs['monitoring']
   recommendationHighAvailability: boolean
+  recommendationArcServers: boolean
   platformKind: 'new' | 'existing' | 'management-only'
   platformCfg: ArchitectureOption['cfg']
   platformNodes: number
@@ -363,6 +373,7 @@ function DeploymentDesignerPanel({
     {
       monitoring: recommendationMonitoring,
       highAvailability: recommendationHighAvailability,
+      includeArc: recommendationArcServers,
     },
   )
   const storedInputs = useSurveyorStore((state) => state.managementDeploymentInputs)
@@ -403,7 +414,7 @@ function DeploymentDesignerPanel({
   const impactValue = platformKind === 'management-only'
     ? 'BOM only'
     : !adjusted?.feasible
-      ? 'Review design'
+      ? platformKind === 'new' && platformNodes > 0 ? `${platformNodes} nodes across clusters` : 'Review design'
       : platformKind === 'existing'
         ? adjusted.nodes <= platformNodes ? `${platformNodes} existing · fits` : `${platformNodes} → ${adjusted.nodes}`
         : `${baseSizing?.nodes ?? '—'} → ${adjusted.nodes}`
@@ -482,7 +493,7 @@ function DeploymentDesignerPanel({
         <div className="meter-toggles deployment-toggles">
           <CostToggle label={`${inputs.foundation === 'scvmm' ? 'SCVMM / WAC' : 'WAC'} high availability`} checked={inputs.fabricHighAvailability} onChange={(checked) => setInputs({ ...inputs, fabricHighAvailability: checked, highAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />
           {inputs.monitoring === 'scom' && <CostToggle label="SCOM high availability" checked={inputs.scomHighAvailability} onChange={(checked) => setInputs({ ...inputs, scomHighAvailability: checked, scomSqlPlacement: checked ? inputs.scomSqlPlacement : 'dedicated' })} />}
-          <CostToggle label="Add Azure Arc-enabled SCVMM" checked={inputs.includeArc} onChange={(checked) => setInputs({ ...inputs, includeArc: checked, arcServices: checked ? inputs.arcServices : [] })} />
+          <CostToggle label="Add Azure Arc-enabled servers" checked={inputs.includeArc} onChange={(checked) => setInputs({ ...inputs, includeArc: checked, arcServices: checked ? inputs.arcServices : [] })} />
           <CostToggle label="Add dedicated AD DS / DNS VMs" checked={inputs.includeIdentityServices} onChange={(checked) => setInputs({ ...inputs, includeIdentityServices: checked })} />
           {inputs.managementPlacement === 'workload-cluster' && platformKind !== 'management-only' && <CostToggle label="Include management VMs in workload-cluster sizing" checked={includeInSizing} onChange={setIncludeInSizing} />}
         </div>
@@ -521,12 +532,10 @@ function DeploymentDesignerPanel({
             )}
           </>
         )}
-        {inputs.foundation !== 'scvmm' && inputs.includeArc && (
-          <div className="note warn">Arc-enabled SCVMM requires SCVMM as the fabric foundation.</div>
-        )}
         {inputs.includeArc && (
           <div className="arc-service-picker">
-            <h3>Azure Arc services</h3>
+            <h3>Azure Arc-enabled servers</h3>
+            <p className="small muted">Connects the guest operating systems to Azure management services. It needs no management VM and does not provide VM lifecycle operations from Azure.</p>
             <div className="form-grid two-column deployment-scale-inputs">
               <Field label="Azure connectivity">
                 <select value={inputs.arcConnectivity} onChange={(event) => setInputs({ ...inputs, arcConnectivity: event.target.value as ManagementDeploymentInputs['arcConnectivity'] })}>
@@ -536,12 +545,12 @@ function DeploymentDesignerPanel({
                 </select>
               </Field>
               <Field label="Azure region"><input value={inputs.arcRegion} onChange={(event) => setInputs({ ...inputs, arcRegion: event.target.value })} placeholder="Example: East US 2" /></Field>
-              <Field label="Guest add-on scope %"><NumberInput value={inputs.arcGuestScopePct} min={0} max={100} onChange={(value) => setNumber('arcGuestScopePct', value)} /></Field>
+              <Field label="Servers to connect (% of workload VMs)"><NumberInput value={inputs.arcGuestScopePct} min={0} max={100} onChange={(value) => setNumber('arcGuestScopePct', value)} /></Field>
               <Field label="Log Analytics retention days"><NumberInput value={inputs.logAnalyticsRetentionDays} min={30} max={2555} onChange={(value) => setNumber('logAnalyticsRetentionDays', value)} /></Field>
             </div>
             <div className="arc-core-choice">
               <Check size={15} />
-              <span><strong>Core Arc management</strong><small>No additional charge for the core control plane; includes SCVMM inventory and VM lifecycle projection.</small></span>
+              <span><strong>Core Azure Arc management</strong><small>No additional charge for the core control plane. Each connected server runs the Azure Connected Machine agent.</small></span>
             </div>
             <div className="meter-toggles">
               {ARC_SERVICE_CATALOG.map((service) => (
@@ -553,7 +562,7 @@ function DeploymentDesignerPanel({
                 />
               ))}
             </div>
-            {inputs.arcServices.length > 0 && <p className="small muted">Guest-level add-ons require the Azure Connected Machine agent on each selected VM. Charges or qualifying entitlements are evaluated separately.</p>}
+            {inputs.arcServices.length > 0 && <p className="small muted">Charges or qualifying entitlements for these services are evaluated separately.</p>}
           </div>
         )}
 
@@ -606,25 +615,21 @@ function DeploymentDesignerPanel({
           <section className="panel">
             <div className="panel-heading-row">
               <div>
-                <h2>Azure Arc service plan</h2>
+                <h2>Azure Arc-enabled servers plan</h2>
                 <p className="small muted">Core management is separated from optional guest-level Azure services so the free control plane is not confused with metered add-ons.</p>
               </div>
             </div>
-            {plan.arcServices.length === 0 ? (
-              <div className="note warn">Select SCVMM as the fabric foundation to build the Arc service plan.</div>
-            ) : (
-              <div className="arc-service-grid">
-                {plan.arcServices.map((service) => (
-                  <article className={service.category === 'Core management' ? 'core' : ''} key={service.id}>
-                    <span>{service.category}</span>
-                    <strong>{service.name}</strong>
-                    <p>{service.billing}</p>
-                    <small>{service.requirement}</small>
-                    <a href={service.source} target="_blank" rel="noreferrer">Microsoft source</a>
-                  </article>
-                ))}
-              </div>
-            )}
+            <div className="arc-service-grid">
+              {plan.arcServices.map((service) => (
+                <article className={service.category === 'Core management' ? 'core' : ''} key={service.id}>
+                  <span>{service.category}</span>
+                  <strong>{service.name}</strong>
+                  <p>{service.billing}</p>
+                  <small>{service.requirement}</small>
+                  <a href={service.source} target="_blank" rel="noreferrer">Microsoft source</a>
+                </article>
+              ))}
+            </div>
           </section>
         )}
 
@@ -723,7 +728,7 @@ function ComparisonPanel() {
         <div className="matrix-toolbar">
           <div>
             <h2>Full capability matrix</h2>
-            <p className="small muted">Showing {rows.length} of {CAPABILITIES.length} workbook dimensions across all five management planes.</p>
+            <p className="small muted">Showing {rows.length} of {CAPABILITIES.length} workbook dimensions across all four management planes.</p>
           </div>
           <SearchField value={query} onChange={setQuery} placeholder="Search capabilities or notes" />
           <label className="field compact-field">
@@ -1015,7 +1020,7 @@ function CostPanel({
     : null
   const deploymentPlan = deploymentInputs ? planManagementDeployment(deploymentInputs) : null
   const deploymentArcServices = new Set(deploymentInputs?.arcServices ?? [])
-  const arcEnabled = deploymentInputs?.includeArc ?? true
+  const arcEnabled = deploymentInputs?.includeArc ?? false
   const deploymentSqlCores = deploymentPlan?.components
     .filter((component) => component.resourceType === 'vm' && component.id.includes('sql'))
     .reduce((sum, component) => sum + component.vCpu * component.count, 0) ?? 4
@@ -1028,6 +1033,7 @@ function CostPanel({
     termYears: 3,
     sqlCores: Math.max(4, deploymentSqlCores),
     includeScom: deploymentInputs?.monitoring === 'scom',
+    includeArcServers: arcEnabled,
     arcEnabledVms: deploymentInputs ? Math.ceil(initialVms * deploymentInputs.arcGuestScopePct / 100) : initialVms,
     waiveUpdateAndGuest: true,
     includeUpdateManager: arcEnabled && (deploymentInputs ? deploymentArcServices.has('update-manager') : true),
@@ -1037,7 +1043,7 @@ function CostPanel({
     logAnalyticsGbPerVm: 2,
     model: 'spla',
   })
-  const [selectedPlane, setSelectedPlane] = useState<PlaneId>(deploymentInputs?.includeArc ? 'arc-scvmm' : deploymentInputs?.foundation === 'classic' ? 'classic' : 'scvmm')
+  const [selectedPlane, setSelectedPlane] = useState<PlaneId>(deploymentInputs?.foundation === 'classic' ? 'classic' : 'scvmm')
   const [rateCard, setRateCard] = useState<ManagementRateCard>({ ...DEFAULT_MANAGEMENT_RATE_CARD })
   const [commercial, setCommercial] = useState<CommercialInputs>({
     motion: 'msp',
@@ -1060,7 +1066,6 @@ function CostPanel({
   const licensableCoresPerHost = Math.max(inputs.sockets * inputs.coresPerSocket, inputs.sockets * 8, 16)
   const months = Math.max(1, inputs.termYears * 12)
   const effectiveVms = costs[0].effectiveVms
-  const arcCost = costs.find((item) => item.plane.id === 'arc-scvmm')!
   const selectedCost = costs.find((item) => item.plane.id === selectedPlane) ?? costs[1]
   const economics = calculateProviderEconomics(selectedPlane, selectedCost, inputs, commercial, rateCard)
   const windowsPaygReference = inputs.hosts * licensableCoresPerHost * PRICE_BOOK.windowsPaygPerCoreMonth * months
@@ -1109,7 +1114,7 @@ function CostPanel({
           <CostInput label="Sockets / host" value={inputs.sockets} onChange={(value) => setNumber('sockets', value)} />
           <CostInput label="Cores / socket" value={inputs.coresPerSocket} onChange={(value) => setNumber('coresPerSocket', value)} />
           <CostInput label="VMs in fabric" value={inputs.vms} onChange={(value) => setNumber('vms', value)} />
-          <CostInput label="Arc guest-service VMs" value={inputs.arcEnabledVms ?? inputs.vms} onChange={(value) => setNumber('arcEnabledVms', value)} />
+          <CostInput label="Arc-enabled server VMs" value={inputs.arcEnabledVms ?? inputs.vms} onChange={(value) => setNumber('arcEnabledVms', value)} />
           <CostInput label="Term in years" value={inputs.termYears} onChange={(value) => setNumber('termYears', value)} />
           <CostInput label="SQL licensed cores" value={inputs.sqlCores} onChange={(value) => setNumber('sqlCores', value)} />
           <CostInput label="Log Analytics GB / VM / month" value={inputs.logAnalyticsGbPerVm} step={0.1} onChange={(value) => setNumber('logAnalyticsGbPerVm', value)} />
@@ -1144,9 +1149,10 @@ function CostPanel({
           </div>
         )}
 
-        <h3>Arc metered services</h3>
+        <h3>Azure Arc-enabled servers</h3>
         {deploymentInputs && <p className="small muted">Initialized from Deployment design. Pricing selections remain editable here.</p>}
         <div className="meter-toggles">
+          <CostToggle label="Include Azure Arc-enabled servers in pricing" checked={inputs.includeArcServers ?? false} onChange={(checked) => setInputs({ ...inputs, includeArcServers: checked })} />
           <CostToggle label={`Update Manager · ${money(rateCard.updateManagerPerVmMonth)}/VM/mo`} checked={inputs.includeUpdateManager} onChange={(checked) => setInputs({ ...inputs, includeUpdateManager: checked })} />
           <CostToggle label={`Defender for Servers P2 · ${money(rateCard.defenderP2PerVmMonth)}/VM/mo`} checked={inputs.includeDefenderP2} onChange={(checked) => setInputs({ ...inputs, includeDefenderP2: checked })} />
           <CostToggle label={`Guest Config + Change Tracking · ${money(rateCard.guestConfigPerVmMonth)}/VM/mo`} checked={inputs.includeGuestConfig} onChange={(checked) => setInputs({ ...inputs, includeGuestConfig: checked })} />
@@ -1255,7 +1261,7 @@ function CostPanel({
               <span>over {inputs.termYears} year{inputs.termYears === 1 ? '' : 's'}</span>
               <div className="cost-breakdown">
                 <div><span>Management layer</span><strong>{money(managementOnly)}</strong></div>
-                {plane.id === 'arc-scvmm' && <div><span>Azure services</span><strong>{money(azure)}</strong></div>}
+                {inputs.includeArcServers && <div><span>Azure services</span><strong>{money(azure)}</strong></div>}
                 <div><span>Per VM / month</span><strong>{money(perVmMonth)}</strong></div>
               </div>
               <button className="cost-card-select" onClick={() => setSelectedPlane(plane.id)}>{plane.id === selectedPlane ? 'Selected for pricing' : 'Use for pricing'}</button>
@@ -1270,7 +1276,7 @@ function CostPanel({
             <span>System Center DC / 2 cores<strong>{inputs.model === 'perpetual' ? money(rateCard.systemCenterPerTwoCorePack) : `${money(rateCard.systemCenterSplaPerTwoCorePackMonth)}/mo`}</strong></span>
             <span>SQL Standard / core<strong>{money(rateCard.sqlStandardPerCore)}</strong></span>
             <span>Annual SA assumption<strong>{(rateCard.softwareAssuranceAnnualRate * 100).toFixed(0)}%</strong></span>
-            <span>Arc meters / VM / month<strong>{money(arcCost.azurePerVmMonth)}</strong></span>
+            <span>Arc meters / VM / month<strong>{money(selectedCost.azurePerVmMonth)}</strong></span>
             <span>Log Analytics volume<strong>{inputs.logAnalyticsGbPerVm.toFixed(1)} GB / VM / month</strong></span>
           </div>
         </div>

@@ -1,7 +1,12 @@
+import { LIMITS } from './rules'
 import { solveForward } from './solve'
 import type { ClusterConfig, SizingResult, TierId, TierPolicy, Vm } from './types'
 
+/** One cluster is the default. Surveyor splits a design only when the user selects split. */
+export type ClusterLayout = 'single' | 'split'
+
 export interface PlacementInputs {
+  clusterLayout: ClusterLayout
   maxNodesPerCluster: number
   targetVmsPerCluster: number
   preserveSourceClusters: boolean
@@ -11,8 +16,10 @@ export interface PlacementInputs {
 }
 
 export const DEFAULT_PLACEMENT_INPUTS: PlacementInputs = {
+  clusterLayout: 'single',
   maxNodesPerCluster: 16,
-  targetVmsPerCluster: 800,
+  // 8,000 is the Hyper-V per-cluster maximum, so no VM target applies unless the user enters one.
+  targetVmsPerCluster: 8000,
   preserveSourceClusters: false,
   separateDatabaseTier: false,
   maxClusters: 32,
@@ -35,6 +42,34 @@ export interface MultiClusterPlan {
   totalNodes: number
   totalWorkloadNodes: number
   warnings: string[]
+}
+
+/**
+ * Placement saved before the layout choice existed. Anything other than the old defaults means
+ * the user tuned the split, so keep it; untouched defaults open as one cluster.
+ */
+export function normalizePlacementInputs(value: unknown): PlacementInputs {
+  const input = (value && typeof value === 'object' ? value : {}) as Partial<PlacementInputs>
+  if (input.clusterLayout === 'single' || input.clusterLayout === 'split') return { ...DEFAULT_PLACEMENT_INPUTS, ...input }
+  const tuned = (input.maxNodesPerCluster ?? 16) !== 16
+    || (input.targetVmsPerCluster ?? 800) !== 800
+    || (input.maxClusters ?? 32) !== 32
+    || input.preserveSourceClusters === true
+    || input.separateDatabaseTier === true
+  return tuned
+    ? { ...DEFAULT_PLACEMENT_INPUTS, ...input, clusterLayout: 'split' }
+    : { ...DEFAULT_PLACEMENT_INPUTS, sanCapacityScope: input.sanCapacityScope ?? DEFAULT_PLACEMENT_INPUTS.sanCapacityScope }
+}
+
+/** Most nodes one cluster may have for this storage type. */
+export function clusterNodeLimitFor(cfg: ClusterConfig): number {
+  return cfg.architecture === 'san' ? LIMITS.CLUSTER_MAX_NODES : LIMITS.S2D_MAX_NODES
+}
+
+/** The node count the rest of the plan should use for the selected layout. */
+export function plannedPlatformNodes(result: SizingResult, plan: MultiClusterPlan, inputs: Pick<PlacementInputs, 'clusterLayout'>): number {
+  if (inputs.clusterLayout === 'split') return plan.feasible ? plan.totalNodes : 0
+  return result.feasible ? result.nodes : 0
 }
 
 const weight = (vm: Vm) => vm.vCpu + vm.ramGiB / 4 + vm.storageGiB / 100
@@ -91,11 +126,46 @@ function planPool(
     })
     last = candidate
     const fits = candidate.every((cluster) => cluster.result.feasible
-      && cluster.result.nodes <= inputs.maxNodesPerCluster
+      && cluster.result.nodes <= Math.min(inputs.maxNodesPerCluster, clusterNodeLimitFor(cfg))
       && cluster.vms.length <= inputs.targetVmsPerCluster)
     if (fits) return { clusters: candidate, feasible: true }
   }
   return { clusters: last, feasible: false }
+}
+
+function planSingleCluster(
+  cfg: ClusterConfig,
+  included: Vm[],
+  tiers: Record<TierId, TierPolicy>,
+  fixedManagementVms: Vm[],
+): MultiClusterPlan {
+  if (included.length === 0 && fixedManagementVms.length === 0) {
+    return { feasible: true, clusters: [], totalNodes: 0, totalWorkloadNodes: 0, warnings: [] }
+  }
+  const vms = [...included, ...fixedManagementVms]
+  const result = solveForward(cfg, vms, tiers)
+  const warnings: string[] = []
+  if (!result.feasible) {
+    warnings.push(result.nodesNeeded !== null && result.nodesNeeded > result.clusterNodeLimit
+      ? `One cluster needs ${result.nodesNeeded} nodes, above the ${result.clusterNodeLimit}-node limit. Nothing has been split: use a larger server, another storage type, or choose Split into multiple clusters.`
+      : result.bindingExplanation)
+  }
+  if (result.performanceAssessment.confidence !== 'high') warnings.push('At least one target cluster has less than high measured-data confidence; retain allocation fallback until coverage improves.')
+  return {
+    feasible: result.feasible,
+    clusters: [{
+      id: 'workload-cluster-1',
+      name: 'Workload cluster 1',
+      purpose: 'Workload cluster',
+      vms,
+      result,
+      sourceClusters: [...new Set(included.map((vm) => vm.sourceCluster).filter((value): value is string => !!value))],
+      managementVmCount: fixedManagementVms.length,
+    }],
+    totalNodes: result.feasible ? result.nodes : 0,
+    totalWorkloadNodes: result.feasible ? result.workloadNodes : 0,
+    warnings,
+  }
 }
 
 export function planMultipleClusters(
@@ -107,6 +177,7 @@ export function planMultipleClusters(
 ): MultiClusterPlan {
   const inputs = { ...DEFAULT_PLACEMENT_INPUTS, ...requested }
   const included = vms.filter((vm) => vm.include)
+  if (inputs.clusterLayout === 'single') return planSingleCluster(cfg, included, tiers, fixedManagementVms)
   const pools = inputs.separateDatabaseTier
     ? [
         { purpose: 'Database cluster', vms: included.filter((vm) => vm.tier === 'database') },
@@ -121,7 +192,7 @@ export function planMultipleClusters(
   if (!planned.every((pool) => pool.feasible)) warnings.push(`The workload could not be placed within ${inputs.maxClusters} clusters under the selected node and VM ceilings. Increase the ceiling, use denser hardware, or relax source-cluster preservation.`)
   const sharedSanRequired = clusters.reduce((sum, cluster) => sum + cluster.result.requiredSanTiB, 0)
   const sharedSanAvailable = clusters[0]?.result.sanCapacityTiB ?? 0
-  const sharedSanPasses = inputs.sanCapacityScope === 'per-cluster' || cfg.architecture === 's2d' || sharedSanRequired <= sharedSanAvailable
+  const sharedSanPasses = cfg.sanSizingMode === 'calculated' || inputs.sanCapacityScope === 'per-cluster' || cfg.architecture === 's2d' || sharedSanRequired <= sharedSanAvailable
   if (!sharedSanPasses) warnings.push(`All target clusters share one SAN capacity pool, but they require ${sharedSanRequired.toFixed(1)} TiB and the configured array provides ${sharedSanAvailable.toFixed(1)} TiB effective. Expand the shared array or select per-cluster arrays.`)
   if (clusters.some((cluster) => cluster.result.performanceAssessment.confidence !== 'high')) warnings.push('At least one target cluster has less than high measured-data confidence; retain allocation fallback until coverage improves.')
   return {

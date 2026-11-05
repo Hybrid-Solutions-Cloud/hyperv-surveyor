@@ -10,7 +10,7 @@ import { DEFAULT_TIERS } from '../rules'
 describe('implementation planning', () => {
   it('adds target clusters until the VM-per-cluster ceiling is met', () => {
     const vms = Array.from({ length: 12 }, (_, index) => vm({ name: `VM${index}` }))
-    const plan = planMultipleClusters(makeConfig({ architecture: 'san' }), vms, DEFAULT_TIERS, { targetVmsPerCluster: 5, maxNodesPerCluster: 64 })
+    const plan = planMultipleClusters(makeConfig({ architecture: 'san' }), vms, DEFAULT_TIERS, { clusterLayout: 'split', targetVmsPerCluster: 5, maxNodesPerCluster: 64 })
     expect(plan.feasible).toBe(true)
     expect(plan.clusters).toHaveLength(3)
     expect(plan.clusters.every((cluster) => cluster.vms.length <= 5)).toBe(true)

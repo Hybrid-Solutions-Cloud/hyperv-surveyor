@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { Download, FolderOpen, Save, Trash2, Upload } from 'lucide-react'
 import { compareArchitectures, solveForward } from '../engine/solve'
+import { planMultipleClusters } from '../engine/deploymentPlanning'
 import { PageHeader } from '../components/Shared'
 import { createProject, downloadProject, parseProject, type ProjectPayload } from '../state/project'
 import { useSurveyorStore } from '../state/store'
@@ -31,6 +32,7 @@ export default function ProjectPage() {
     drDesignInputs: store.drDesignInputs,
     reportMetadata: store.reportMetadata,
     dataSources: store.dataSources,
+    storageDecisionAnswers: store.storageDecisionAnswers,
   }
 
   const comparison = useMemo(() => [
@@ -49,11 +51,18 @@ export default function ProjectPage() {
     const architecture = managementOnly
       ? 'Management only'
       : usesExisting ? `Existing ${scenario.existingCapacityCfg.architecture.toUpperCase()}` : selected.label
+    const splitPlan = !managementOnly && !usesExisting && scenario.placementInputs.clusterLayout === 'split'
+      ? planMultipleClusters(selected.cfg, scenario.vms, scenario.tiers, scenario.placementInputs)
+      : null
     const nodes = managementOnly
       ? '—'
-      : usesExisting ? `${scenario.existingCapacityNodes} existing` : result?.feasible ? result.nodes.toLocaleString() : 'Review'
+      : usesExisting
+        ? `${scenario.existingCapacityNodes} existing`
+        : splitPlan?.feasible
+          ? `${splitPlan.totalNodes.toLocaleString()} across ${splitPlan.clusters.length} clusters`
+          : result?.feasible ? result.nodes.toLocaleString() : 'Review'
     return { scenario, result, architecture, nodes }
-  }), [store.engagementMode, store.managementDecision, store.cfg, store.vms, store.tiers, store.chosenKey, store.customerName, store.existingCapacityCfg, store.existingCapacityTiers, store.existingCapacityNodes, store.managementDeploymentInputs, store.includeManagementInSizing, store.placementInputs, store.networkDesignInputs, store.drDesignInputs, store.reportMetadata, store.dataSources, store.savedScenarios])
+  }), [store.engagementMode, store.managementDecision, store.cfg, store.vms, store.tiers, store.chosenKey, store.customerName, store.existingCapacityCfg, store.existingCapacityTiers, store.existingCapacityNodes, store.managementDeploymentInputs, store.includeManagementInSizing, store.placementInputs, store.networkDesignInputs, store.drDesignInputs, store.reportMetadata, store.dataSources, store.storageDecisionAnswers, store.savedScenarios])
 
   async function openProject(file: File) {
     setError('')

@@ -25,7 +25,7 @@ import { growthFactorForYear, resolveGrowthPlan, type GrowthPlan } from './growt
 import { hasErrors, validateDesign } from './validate'
 import { assessPerformanceData } from './performance'
 import type {
-  BindingConstraint, ClusterConfig, ComputeDemand, ReverseResult,
+  BindingConstraint, ClusterConfig, ComputeDemand, ReverseResult, SanSizing,
   SizingResult, StorageArchitecture, TierId, TierPolicy, Vm,
 } from './types'
 
@@ -97,6 +97,18 @@ function sanRequiredTiB(cfg: ClusterConfig, demand: ComputeDemand, tiers: Record
   return 0
 }
 
+/** Search limit for "how many nodes would this take", deliberately far above any cluster limit. */
+const UNBOUNDED_NODE_SEARCH = 2048
+
+function calculatedSanSizing(cfg: ClusterConfig, requiredTiB: number): SanSizing | null {
+  if (cfg.sanSizingMode !== 'calculated') return null
+  if (cfg.architecture !== 'san' && cfg.architecture !== 'hybrid') return null
+  const freeSpaceTargetPct = Math.min(0.9, Math.max(0, cfg.sanFreeSpaceTargetPct ?? 0.2))
+  const drr = Math.max(1, cfg.san.drr)
+  const effectiveTiB = requiredTiB / (1 - freeSpaceTargetPct)
+  return { requiredTiB, freeSpaceTargetPct, drr, effectiveTiB, usableToBuyTiB: effectiveTiB / drr }
+}
+
 function solveForwardAtGrowthFactor(
   cfg: ClusterConfig,
   vms: Vm[],
@@ -122,8 +134,9 @@ function solveForwardAtGrowthFactor(
   const needS2dTiB = s2dRequiredTiB(cfg, demand, tiers)
   const needSanTiB = sanRequiredTiB(cfg, demand, tiers)
   const storagePerformanceDemandValue = storagePerformanceDemand(cfg, vms, tiers, growthFactor)
+  const sanSizing = calculatedSanSizing(cfg, needSanTiB)
   const sanAvailable = cfg.architecture === 'san' || cfg.architecture === 'hybrid'
-    ? sanCapacityTiB(cfg.san) : null
+    ? sanSizing?.effectiveTiB ?? sanCapacityTiB(cfg.san) : null
   const sanCapacityOk = sanAvailable === null || sanAvailable >= needSanTiB
   const sanIopsAvailable = (cfg.san.maxIops ?? 0) > 0 ? cfg.san.maxIops! : null
   const sanThroughputAvailable = (cfg.san.maxThroughputMBps ?? 0) > 0 ? cfg.san.maxThroughputMBps! : null
@@ -163,6 +176,18 @@ function solveForwardAtGrowthFactor(
 
   const resourceFeasible = Number.isFinite(nodes)
   const finalNodes = resourceFeasible ? nodes : max
+  let nodesNeeded: number | null = resourceFeasible ? nodes : null
+  if (!resourceFeasible) {
+    let storageNodes = min
+    if (usesS2d) {
+      storageNodes = Infinity
+      for (let n = min; n <= UNBOUNDED_NODE_SEARCH; n++) {
+        if (s2dCapacity(cfg, n).usableTiB >= needS2dTiB && s2dPerformanceOk(n)) { storageNodes = n; break }
+      }
+    }
+    const needed = Math.max(min, spare + 1, nodesIfCpuOnly, nodesIfMemoryOnly, storageNodes)
+    nodesNeeded = Number.isFinite(needed) ? needed : null
+  }
   const workloadNodes = Math.max(0, finalNodes - spare)
 
   // Which constraint bound? The one whose single-constraint node count equals the answer.
@@ -191,19 +216,40 @@ function solveForwardAtGrowthFactor(
 
   if (!resourceFeasible) {
     const reasons: string[] = []
-    if (nodesIfCpuOnly > max) reasons.push(`CPU alone needs ${nodesIfCpuOnly} nodes`)
-    if (nodesIfMemoryOnly > max) reasons.push(`memory alone needs ${nodesIfMemoryOnly} nodes`)
+    const options: string[] = []
+    if (coresPerHost <= 0) {
+      reasons.push('each node has 0 usable CPU cores, so no node count can carry the workload')
+      options.push('correct Sockets, Cores / socket, or CPU reserve %')
+    } else if (nodesIfCpuOnly > max) {
+      reasons.push(`CPU alone needs ${nodesIfCpuOnly} nodes`)
+    }
+    if (ramPerHost <= 0) {
+      reasons.push('each node has 0 usable GiB of RAM, so no node count can carry the workload')
+      options.push('correct RAM per node or the RAM reserve')
+    } else if (nodesIfMemoryOnly > max) {
+      reasons.push(`memory alone needs ${nodesIfMemoryOnly} nodes`)
+    }
+    if ((coresPerHost > 0 && nodesIfCpuOnly > max) || (ramPerHost > 0 && nodesIfMemoryOnly > max)) {
+      options.push(usesS2d ? 'use a larger server, use SAN-only storage (limit 64 nodes), or split into multiple clusters' : 'use a larger server or split into multiple clusters')
+    }
     if (usesS2d && !Number.isFinite(nodesIfS2dStorageOnly)) {
       const capacityPassesAtCeiling = s2dCapacity(cfg, max).usableTiB >= needS2dTiB
       reasons.push(capacityPassesAtCeiling
         ? `measured S2D IOPS or throughput exceeds the entered sustainable capability within ${max} nodes`
         : `S2D capacity cannot be satisfied within ${max} nodes at ${cap ? (cap.efficiency * 100).toFixed(1) : '?'}% efficiency`)
+      options.push(capacityPassesAtCeiling
+        ? 'revalidate the entered S2D performance figures or split into multiple clusters'
+        : 'add or enlarge capacity drives, choose a more capacity-efficient resiliency, or split into multiple clusters')
     }
     if (!sanCapacityOk && sanAvailable !== null) {
       reasons.push(`SAN capacity provides ${sanAvailable.toFixed(1)} TiB effective but ${needSanTiB.toFixed(1)} TiB is required`)
     }
-    if (!sanPerformanceOk) reasons.push('measured SAN IOPS or throughput demand exceeds the entered sustainable array capability')
-    bindingExplanation = `Not feasible in a single cluster: ${reasons.join('; ')}. Ceiling is ${max} nodes${usesS2d ? ' because S2D is enabled' : ''}. Split into multiple clusters, use denser nodes, or choose a more capacity-efficient resiliency.`
+    if (!sanCapacityOk) options.push('increase the array size or data reduction ratio')
+    if (!sanPerformanceOk) {
+      reasons.push('measured SAN IOPS or throughput demand exceeds the entered sustainable array capability')
+      options.push('revalidate the entered array performance figures')
+    }
+    bindingExplanation = `Not feasible in a single cluster: ${reasons.join('; ')}. Ceiling is ${max} nodes${usesS2d ? ' because S2D is enabled' : ''}. To resolve this: ${[...new Set(options)].join('; ')}.`
   } else {
     switch (binding) {
       case 'cpu':
@@ -249,6 +295,9 @@ function solveForwardAtGrowthFactor(
     feasible,
     nodes: finalNodes,
     workloadNodes,
+    nodesNeeded,
+    clusterNodeLimit: max,
+    sanSizing,
     binding,
     bindingExplanation,
     nodesIfCpuOnly,
@@ -470,19 +519,60 @@ export interface ArchitectureOption {
   result: SizingResult
 }
 
+/**
+ * Reference server sizes to compare. These are planning building blocks, not a bill of materials,
+ * and the engine never switches to one on its own. [TOOL]
+ */
+export const REFERENCE_SERVER_PROFILES = [
+  { key: 'small', label: 'Small', sockets: 2, coresPerSocket: 16, ramGiB: 512 },
+  { key: 'medium', label: 'Medium', sockets: 2, coresPerSocket: 32, ramGiB: 1024 },
+  { key: 'large', label: 'Large', sockets: 2, coresPerSocket: 48, ramGiB: 1536 },
+  { key: 'xlarge', label: 'Extra large', sockets: 2, coresPerSocket: 64, ramGiB: 2048 },
+] as const
+
+export interface ReferenceServerOption {
+  key: string
+  label: string
+  sockets: number
+  coresPerSocket: number
+  ramGiB: number
+  selected: boolean
+  result: SizingResult
+}
+
+/** Size one storage option on each reference server, keeping every other assumption unchanged. */
+export function compareReferenceServers(
+  cfg: ClusterConfig,
+  vms: Vm[],
+  tiers: Record<TierId, TierPolicy>,
+): ReferenceServerOption[] {
+  const isCurrent = (p: { sockets: number; coresPerSocket: number; ramGiB: number }) =>
+    p.sockets === cfg.node.sockets && p.coresPerSocket === cfg.node.coresPerSocket && p.ramGiB === cfg.node.ramGiB
+  const profiles: Array<{ key: string; label: string; sockets: number; coresPerSocket: number; ramGiB: number }> = [...REFERENCE_SERVER_PROFILES]
+  if (!profiles.some(isCurrent)) {
+    profiles.push({ key: 'current', label: 'Your entry', sockets: cfg.node.sockets, coresPerSocket: cfg.node.coresPerSocket, ramGiB: cfg.node.ramGiB })
+  }
+  return profiles.map((profile) => ({
+    ...profile,
+    selected: isCurrent(profile),
+    result: solveForward({ ...cfg, node: { ...cfg.node, sockets: profile.sockets, coresPerSocket: profile.coresPerSocket, ramGiB: profile.ramGiB } }, vms, tiers),
+  }))
+}
+
+export const ARCHITECTURE_VARIANTS: ReadonlyArray<{ key: string; label: string; patch: Partial<ClusterConfig> }> = [
+  { key: 'san', label: 'SAN', patch: { architecture: 'san' } },
+  { key: 's2d-3wm', label: 'S2D — three-way mirror', patch: { architecture: 's2d', resiliency: 'three-way-mirror' } },
+  { key: 's2d-map', label: 'S2D — mirror-accelerated parity', patch: { architecture: 's2d', resiliency: 'mirror-accelerated-parity' } },
+  { key: 's2d-dp', label: 'S2D — dual parity', patch: { architecture: 's2d', resiliency: 'dual-parity' } },
+  { key: 'hybrid', label: 'Hybrid — S2D + SAN', patch: { architecture: 'hybrid', resiliency: 'three-way-mirror' } },
+]
+
 export function compareArchitectures(
   base: ClusterConfig,
   vms: Vm[],
   tiers: Record<TierId, TierPolicy>,
 ): ArchitectureOption[] {
-  const variants: Array<{ key: string; label: string; patch: Partial<ClusterConfig> }> = [
-    { key: 'san', label: 'SAN (Pure / Everpure)', patch: { architecture: 'san' } },
-    { key: 's2d-3wm', label: 'S2D — three-way mirror', patch: { architecture: 's2d', resiliency: 'three-way-mirror' } },
-    { key: 's2d-map', label: 'S2D — mirror-accelerated parity', patch: { architecture: 's2d', resiliency: 'mirror-accelerated-parity' } },
-    { key: 's2d-dp', label: 'S2D — dual parity', patch: { architecture: 's2d', resiliency: 'dual-parity' } },
-    { key: 'hybrid', label: 'Hybrid — S2D + SAN', patch: { architecture: 'hybrid', resiliency: 'three-way-mirror' } },
-  ]
-  return variants.map(v => {
+  return ARCHITECTURE_VARIANTS.map(v => {
     const cfg = { ...base, ...v.patch } as ClusterConfig
     return { key: v.key, label: v.label, cfg, result: solveForward(cfg, vms, tiers) }
   })

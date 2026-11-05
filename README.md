@@ -42,8 +42,8 @@ that can be opened directly for offline and disconnected use.
 - Transparent logical-volume planning that shows count-by-size and count-by-VM-grouping math, maps SAN LUNs 1:1 to CSVs, and applies S2D ownership targets once across the storage domain
 - Multi-cluster workload placement, source-cluster grouping, database isolation, and migration-readiness findings
 - Host network intent, RDMA/DCB validation, switch-port planning, and backup/disaster-recovery bandwidth estimates
-- Management Plane Advisor with 16 fact-checked qualifying questions, source links, a workload-aware deployment BOM, SCOM monitoring topology and retention sizing, Arc connectivity and guest-service scope, HA and capacity impact, the complete 85-row capability matrix, VMware translation, field guidance, sourced caveats, 36-SKU reference, and editable cost model
-- Workbook-generated platform limits for Hyper-V VMs, hosts, failover clusters, S2D, SCVMM, Windows Admin Center, and Arc-enabled SCVMM
+- Management Plane Advisor with 18 fact-checked qualifying questions, source links, a workload-aware deployment BOM, SCOM monitoring topology and retention sizing, Arc-enabled servers connectivity and guest-service scope, HA and capacity impact, the complete 85-row capability matrix, VMware translation, field guidance, sourced caveats, 36-SKU reference, and editable cost model
+- Workbook-generated platform limits for Hyper-V VMs, hosts, failover clusters, S2D, SCVMM, Windows Admin Center, and Azure Arc-enabled servers
 - CSP customer and MSP hosted-platform economics with discounts, markups, RDS SAL/CAL access, delivery cost, tenant/VM pricing, target-margin gap, Lighthouse guidance, and dynamic recommendations
 - Selectable full-solution report with document control and native Markdown, JSON, Microsoft Word, PDF, and interactive offline HTML exports
 - Versioned reopenable project files, IndexedDB autosave, named scenario comparison, XLSX design export, and shareable scenarios that block results when a large inventory was omitted

@@ -1,11 +1,13 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { DEFAULT_CONFIG, defaultTiers, demoFleet } from './defaults'
+import { DEFAULT_CONFIG, DEFAULT_PROPOSED_CONFIG, defaultTiers, demoFleet } from './defaults'
 import type { ClusterConfig, TierId, TierPolicy, Vm } from '../engine/types'
 import type { ManagementDeploymentInputs } from '../engine/managementDeployment'
-import { DEFAULT_REPORT_METADATA, normalizeConfig, normalizeProjectPayload, normalizeTiers, type ProjectDataSource, type ProjectPayload, type ReportMetadata, type ScenarioSnapshot } from './project'
+import type { ImportSummary } from '../io/rvtools'
+import type { StorageDecisionAnswers } from '../engine/storageDecision'
+import { DEFAULT_REPORT_METADATA, normalizeConfig, normalizeProjectPayload, normalizeProposedConfig, normalizeStorageDecisionAnswers, normalizeTiers, type ProjectDataSource, type ProjectPayload, type ReportMetadata, type ScenarioSnapshot } from './project'
 import { surveyorStorage } from './persistence'
-import { DEFAULT_PLACEMENT_INPUTS, type PlacementInputs } from '../engine/deploymentPlanning'
+import { DEFAULT_PLACEMENT_INPUTS, normalizePlacementInputs, type PlacementInputs } from '../engine/deploymentPlanning'
 import { DEFAULT_NETWORK_INPUTS, type NetworkDesignInputs } from '../engine/networkDesign'
 import { DEFAULT_DR_INPUTS, type DrDesignInputs } from '../engine/drDesign'
 import { normalizeEngagementMode, normalizeManagementDecision, type EngagementMode, type ManagementDecision } from './journey'
@@ -30,6 +32,11 @@ export interface SurveyorState {
   drDesignInputs: DrDesignInputs
   reportMetadata: ReportMetadata
   dataSources: ProjectDataSource[]
+  /** The last RVTools import's counts and warnings, kept so they survive leaving the page. */
+  lastImport: ImportSummary | null
+  setLastImport: (summary: ImportSummary | null) => void
+  storageDecisionAnswers: StorageDecisionAnswers
+  setStorageDecisionAnswers: (answers: StorageDecisionAnswers) => void
   setEngagementMode: (mode: EngagementMode | null) => void
   setManagementDecision: (decision: ManagementDecision) => void
   setCustomerName: (name: string) => void
@@ -73,7 +80,7 @@ const defaults = () => ({
   managementDecision: 'unassessed' as ManagementDecision,
   customerName: '',
   vms: [] as Vm[],
-  cfg: structuredClone(DEFAULT_CONFIG),
+  cfg: structuredClone(DEFAULT_PROPOSED_CONFIG),
   tiers: defaultTiers(),
   chosenKey: 'san',
   existingCapacityCfg: structuredClone(DEFAULT_CONFIG),
@@ -88,6 +95,8 @@ const defaults = () => ({
   drDesignInputs: structuredClone(DEFAULT_DR_INPUTS),
   reportMetadata: structuredClone(DEFAULT_REPORT_METADATA),
   dataSources: [] as ProjectDataSource[],
+  lastImport: null as ImportSummary | null,
+  storageDecisionAnswers: {} as StorageDecisionAnswers,
 })
 
 function payloadFromState(state: SurveyorState): ProjectPayload {
@@ -109,6 +118,7 @@ function payloadFromState(state: SurveyorState): ProjectPayload {
     drDesignInputs: structuredClone(state.drDesignInputs),
     reportMetadata: structuredClone(state.reportMetadata),
     dataSources: structuredClone(state.dataSources),
+    storageDecisionAnswers: structuredClone(state.storageDecisionAnswers),
   }
 }
 
@@ -116,6 +126,8 @@ export const useSurveyorStore = create<SurveyorState>()(
   persist(
     (set) => ({
       ...defaults(),
+      setLastImport: (lastImport) => set({ lastImport }),
+      setStorageDecisionAnswers: (storageDecisionAnswers) => set({ storageDecisionAnswers }),
       setEngagementMode: (engagementMode) => set({ engagementMode }),
       setManagementDecision: (managementDecision) => set({ managementDecision }),
       setCustomerName: (customerName) => set({ customerName }),
@@ -142,7 +154,7 @@ export const useSurveyorStore = create<SurveyorState>()(
         return snapshot ? { ...normalizeProjectPayload(snapshot), sharedInventoryOmitted: null } : {}
       }),
       deleteNamedScenario: (id) => set((state) => ({ savedScenarios: state.savedScenarios.filter((item) => item.id !== id) })),
-      loadProject: (payload) => set({ ...normalizeProjectPayload(payload), sharedInventoryOmitted: null }),
+      loadProject: (payload) => set({ ...normalizeProjectPayload(payload), sharedInventoryOmitted: null, lastImport: null }),
       setPlacementInputs: (placementInputs) => set({ placementInputs }),
       setNetworkDesignInputs: (networkDesignInputs) => set({ networkDesignInputs }),
       setDrDesignInputs: (drDesignInputs) => set({ drDesignInputs }),
@@ -158,7 +170,7 @@ export const useSurveyorStore = create<SurveyorState>()(
         managementDecision: normalizeManagementDecision(scenario.managementDecision),
         customerName: scenario.customerName ?? '',
         vms: scenario.vms ?? [],
-        cfg: normalizeConfig(scenario.cfg),
+        cfg: normalizeProposedConfig(scenario.cfg),
         tiers: normalizeTiers(scenario.tiers),
         sharedInventoryOmitted: scenario.inventoryOmitted ?? null,
         existingCapacityCfg: scenario.existingCapacityCfg ? normalizeConfig(scenario.existingCapacityCfg) : state.existingCapacityCfg,
@@ -170,7 +182,7 @@ export const useSurveyorStore = create<SurveyorState>()(
     }),
     {
       name: 'hyperv-surveyor-state',
-      version: 4,
+      version: 5,
       storage: createJSONStorage(() => surveyorStorage),
       migrate: (persisted) => {
         const value = persisted as Partial<SurveyorState>
@@ -179,11 +191,15 @@ export const useSurveyorStore = create<SurveyorState>()(
           ...value,
           engagementMode: normalizeEngagementMode(value.engagementMode, Array.isArray(value.vms) && value.vms.length > 0 ? 'new-platform' : null),
           managementDecision: value.managementDecision === undefined && value.managementDeploymentInputs ? 'design' : normalizeManagementDecision(value.managementDecision),
-          cfg: normalizeConfig(value.cfg),
+          cfg: normalizeProposedConfig(value.cfg),
           tiers: normalizeTiers(value.tiers),
+          placementInputs: normalizePlacementInputs(value.placementInputs),
+          storageDecisionAnswers: normalizeStorageDecisionAnswers(value.storageDecisionAnswers),
           existingCapacityCfg: normalizeConfig(value.existingCapacityCfg),
           existingCapacityTiers: normalizeTiers(value.existingCapacityTiers),
-          savedScenarios: Array.isArray(value.savedScenarios) ? value.savedScenarios : [],
+          savedScenarios: Array.isArray(value.savedScenarios)
+            ? value.savedScenarios.map((scenario) => ({ ...scenario, cfg: normalizeProposedConfig(scenario.cfg), placementInputs: normalizePlacementInputs(scenario.placementInputs) }))
+            : [],
         } as SurveyorState
       },
       partialize: (state) => ({
@@ -203,6 +219,8 @@ export const useSurveyorStore = create<SurveyorState>()(
         drDesignInputs: state.drDesignInputs,
         reportMetadata: state.reportMetadata,
         dataSources: state.dataSources,
+        lastImport: state.lastImport,
+        storageDecisionAnswers: state.storageDecisionAnswers,
         savedScenarios: state.savedScenarios,
         vms: state.vms,
       }),
