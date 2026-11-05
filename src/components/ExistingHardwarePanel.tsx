@@ -46,6 +46,11 @@ function SanFields({ san, onChange }: { san: SanSpec; onChange: (san: SanSpec) =
   )
 }
 
+/** Upper bound for spare hosts. With no hosts entered yet, the default is not shown as an error. */
+export function spareHostsMax(hosts: number, spareNodes: number): number {
+  return hosts > 0 ? hosts : Math.max(0, spareNodes)
+}
+
 export function ExistingHardwarePanel({ hardware, setHardware, confirm, importedHosts, fillFromImport, policy, setPolicy, tiers, setTiers, reset, includedVms }: Props) {
   const entered = hardwareEntered(hardware)
   const multi = hardware.clusters.length > 1
@@ -129,7 +134,7 @@ export function ExistingHardwarePanel({ hardware, setHardware, confirm, imported
                   <input value={cluster.name} onChange={(event) => setCluster(cluster.id, { name: event.target.value })} />
                 </Field>
                 <Field label="Spare hosts" hint={SPARE_RULE}>
-                  <NumberInput value={cluster.spareNodes} min={0} max={Math.max(0, hosts)} onChange={(n) => setCluster(cluster.id, { spareNodes: Math.max(0, Math.round(n)) })} />
+                  <NumberInput value={cluster.spareNodes} min={0} max={spareHostsMax(hosts, cluster.spareNodes)} onChange={(n) => setCluster(cluster.id, { spareNodes: Math.max(0, Math.round(n)) })} />
                 </Field>
                 <Field label="Storage">
                   <select value={cluster.architecture} onChange={(event) => setCluster(cluster.id, { architecture: event.target.value as ExistingCluster['architecture'] })}>
