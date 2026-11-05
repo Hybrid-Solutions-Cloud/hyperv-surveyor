@@ -5,6 +5,7 @@
  * not run.
  */
 import { LIMITS } from './rules'
+import { totalCores, usableRamPerHost } from './compute'
 import type { ClusterConfig, Vm } from './types'
 
 export type ReadinessStatus = 'ready' | 'review' | 'blocked'
@@ -85,7 +86,26 @@ export function guestOsSupport(guestOs: string | undefined): { support: GuestSup
 
 type Status = ReadinessFinding['status']
 
-export function assessMigrationReadiness(vms: Vm[], cfg: ClusterConfig): MigrationReadiness {
+/** A VM that cannot run on any one target host, with why. */
+export interface OversizedVm {
+  id: string
+  detail: string
+}
+
+/** VMs larger than one host of the target server: a VM runs on one host, so more hosts do not help. */
+export function oversizedForHost(vms: Vm[], cfg: ClusterConfig): OversizedVm[] {
+  const logicalProcessors = totalCores(cfg.node) * cfg.smtFactor
+  const hostRamGiB = usableRamPerHost(cfg.node, cfg)
+  return vms
+    .filter((vm) => vm.include && (vm.vCpu > logicalProcessors || vm.ramGiB > hostRamGiB))
+    .map((vm) => ({ id: vm.id, detail: `${vm.vCpu} vCPU and ${Math.round(vm.ramGiB).toLocaleString('en-US')} GiB is larger than one target host (${logicalProcessors.toLocaleString('en-US')} logical processors, ${Math.round(hostRamGiB).toLocaleString('en-US')} GiB usable memory).` }))
+}
+
+/**
+ * oversized lists VMs no target host can run. When absent it is worked out from the target server in
+ * cfg; the existing-hardware paths pass the VMs larger than every host you entered.
+ */
+export function assessMigrationReadiness(vms: Vm[], cfg: ClusterConfig, oversized: OversizedVm[] = oversizedForHost(vms, cfg)): MigrationReadiness {
   const included = vms.filter((vm) => vm.include)
   const findings: ReadinessFinding[] = []
   const gaps = new Map<string, ReadinessGap>()
@@ -96,7 +116,10 @@ export function assessMigrationReadiness(vms: Vm[], cfg: ClusterConfig): Migrati
   }
   const add = (vm: Vm, status: Status, category: ReadinessFinding['category'], finding: string, action: string, source?: string) => findings.push({ vmId: vm.id, vmName: vm.name, status, category, finding, action, source })
   const targetVendor = cfg.node.cpuVendor
+  const oversizedById = new Map(oversized.map((item) => [item.id, item.detail]))
   included.forEach((vm) => {
+    const tooLarge = oversizedById.get(vm.id)
+    if (tooLarge) add(vm, 'blocked', 'configuration', tooLarge, 'Use a larger host, or resize the VM before migration. Adding hosts does not help: a VM runs on one host.', READINESS_SOURCES.scaleLimits)
     if (vm.vCpu > LIMITS.MAX_VCPU_PER_VM) add(vm, 'blocked', 'configuration', `${vm.vCpu} vCPUs exceed the Hyper-V per-VM maximum.`, 'Reduce the VM topology or split the workload before migration.', READINESS_SOURCES.scaleLimits)
 
     // Guest OS.

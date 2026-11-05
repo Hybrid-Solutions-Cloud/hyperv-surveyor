@@ -861,7 +861,12 @@ export function withImplementation(
   const clusterNodes = design.clusters.map((cluster) => cluster.nodes).filter((value): value is number => value !== null && value > 0)
   const nodes = design.network.nodes
   const implementation: DesignImplementation = {
-    readiness: design.path === 'management-only' ? null : assessMigrationReadiness(platformVms, design.cfg),
+    readiness: design.path === 'management-only'
+      ? null
+      : design.existing
+        // Existing hosts can differ: a VM is oversized only when it fits none of the hosts you entered.
+        ? assessMigrationReadiness(platformVms, design.cfg, design.existing.unplaced.filter((vm) => vm.reason !== 'no-room').map((vm) => ({ id: vm.id, detail: vm.detail })))
+        : assessMigrationReadiness(platformVms, design.cfg),
     networkInputs,
     network: nodes === null ? null : designNetwork(design.cfg, nodes, networkInputs, {
       workloadNodes: design.workloadNodes ?? nodes,

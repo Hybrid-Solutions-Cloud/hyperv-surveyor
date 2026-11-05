@@ -420,3 +420,26 @@ describe('RDMA recommendation beside the selector', () => {
     expect(RDMA_RECOMMENDATION_NOTE.source).toMatch(/^https:\/\/learn\.microsoft\.com\//)
   })
 })
+
+describe('readiness flags a VM larger than one target host', () => {
+  it('new platform: blocks the VM against the target server', () => {
+    const big = ready({ name: 'big', vCpu: 8, ramGiB: 4000 })
+    const result = assessMigrationReadiness([big, ready({ name: 'small' })], amd)
+    const finding = result.findings.find((item) => item.vmName === 'big' && item.category === 'configuration')!
+    expect(finding.status).toBe('blocked')
+    expect(finding.finding).toMatch(/larger than one target host/)
+    expect(result.findings.some((item) => item.vmName === 'small' && item.category === 'configuration')).toBe(false)
+  })
+
+  it('existing hardware: uses the hosts you entered, so a VM that fits the largest host is not flagged', () => {
+    const hw = hardware([cluster('A', [[3, 2, 16, 512]]), cluster('B', [[3, 2, 32, 2048]])])
+    const vms = [...fleet(4, { sourceCluster: 'B' }, 'B'), newVm({ name: 'mid', vCpu: 8, ramGiB: 1200, storageGiB: 100, sourceCluster: 'B' }), newVm({ name: 'huge', vCpu: 8, ramGiB: 6000, storageGiB: 100, sourceCluster: 'B' })]
+    const design = resolvePlatformDesign(platformDesignInputs({
+      engagementMode: 'fit-gap', cfg: structuredClone(DEFAULT_PROPOSED_CONFIG), tiers: defaultTiers(), vms, chosenKey: 'san',
+      existingCapacityCfg: policy(), existingCapacityTiers: defaultTiers(), existingCapacityNodes: 8, existingHardware: hw,
+      placementInputs: structuredClone(DEFAULT_PLACEMENT_INPUTS), managementDecision: 'unassessed', managementDeploymentInputs: null, includeManagementInSizing: true,
+    }))
+    const findings = design.implementation.readiness!.findings.filter((item) => item.category === 'configuration' && item.status === 'blocked')
+    expect(findings.map((item) => item.vmName)).toEqual(['huge'])
+  })
+})
