@@ -224,8 +224,8 @@ export function WorkloadPanel({ vms, setVms, tiers, report, onImport, onClearAll
         {report && (
           <div style={{ marginTop: 12 }}>
             <div className="note ok">
-              <strong>Imported {report.importedVms} VMs from {report.totalRows} rows in {report.fileName}</strong>
-              {report.importedVms - report.poweredOff - report.suspended} powered on · {report.poweredOff} powered off · {report.suspended} suspended.{' '}
+              <strong>Imported {fmt0(report.importedVms)} VMs from {fmt0(report.totalRows)} rows in {report.fileName}</strong>
+              {fmt0(report.importedVms - report.poweredOff - report.suspended)} powered on · {fmt0(report.poweredOff)} powered off · {fmt0(report.suspended)} suspended.{' '}
               {report.format !== 'inventory-template' && <>Not imported: {report.excludedTemplates} templates · {report.excludedSrmPlaceholders} SRM placeholders · {report.excludedVcls} vCLS.{' '}</>}
               {describeStorageSources(report)}
             </div>
